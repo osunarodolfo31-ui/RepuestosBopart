@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>BoParts · Cargar Fotos</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --brand:#F5A800;--brand-soft:rgba(245,168,0,0.15);
+    --bg:#111;--bg2:#1A1A1A;--card:#1E1E1E;--border:#2E2E2E;
+    --ink:#F0F0F0;--ink-soft:#AAA;--ink-muted:#666;
+    --radius:14px;--radius-sm:8px;--green:#22C55E;--red:#EF4444;
+  }
+  html,body{min-height:100%;background:var(--bg);font-family:'Inter',sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased}
+  header{background:var(--bg2);border-bottom:2px solid var(--brand);padding:14px 16px;display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:50}
+  header img{height:38px;border-radius:4px}
+  header h1{font-size:15px;font-weight:700;color:var(--ink);line-height:1.2}
+  header p{font-size:11px;color:var(--ink-muted)}
+
+  .container{padding:16px;max-width:500px;margin:0 auto}
+
+  /* SEARCH */
+  .search-wrap{position:relative;margin-bottom:16px}
+  .search-wrap input{width:100%;height:46px;border:1.5px solid var(--border);border-radius:var(--radius-sm);padding:0 14px;font-size:15px;font-family:inherit;background:var(--card);color:var(--ink);outline:none;transition:border-color .15s}
+  .search-wrap input:focus{border-color:var(--brand)}
+  .search-wrap input::placeholder{color:var(--ink-muted)}
+
+  /* DROPDOWN */
+  .dropdown{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-sm);max-height:220px;overflow-y:auto;margin-top:4px;display:none}
+  .dropdown.show{display:block}
+  .drop-item{padding:10px 14px;font-size:13px;cursor:pointer;border-bottom:1px solid var(--border);color:var(--ink)}
+  .drop-item:last-child{border-bottom:none}
+  .drop-item:active{background:var(--brand-soft)}
+  .drop-item .cat{font-size:10px;color:var(--brand);font-weight:600;margin-left:6px}
+
+  /* SELECTED PRODUCT */
+  .selected-product{background:var(--card);border:1.5px solid var(--brand);border-radius:var(--radius);padding:14px;margin-bottom:16px;display:none}
+  .selected-product.show{display:block}
+  .sp-name{font-size:15px;font-weight:700;margin-bottom:4px}
+  .sp-meta{font-size:12px;color:var(--ink-muted)}
+  .sp-clear{float:right;background:none;border:none;color:var(--ink-muted);cursor:pointer;font-size:18px;line-height:1;margin-top:-2px}
+
+  /* UPLOAD ZONES */
+  .photos-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:20px}
+  .photo-slot{aspect-ratio:1;border:1.5px dashed var(--border);border-radius:var(--radius-sm);display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;position:relative;overflow:hidden;background:var(--card);transition:border-color .15s}
+  .photo-slot:active{border-color:var(--brand)}
+  .photo-slot .slot-label{font-size:10px;color:var(--ink-muted);margin-top:6px;font-weight:600}
+  .photo-slot .slot-icon{font-size:28px}
+  .photo-slot img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+  .photo-slot .remove-btn{position:absolute;top:4px;right:4px;background:rgba(0,0,0,.7);border:none;color:#fff;border-radius:50%;width:22px;height:22px;font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1}
+  .photo-slot input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer;font-size:0}
+  .photo-slot.uploading{border-color:var(--brand)}
+  .photo-slot .progress{position:absolute;bottom:0;left:0;height:3px;background:var(--brand);transition:width .3s}
+
+  /* STATUS */
+  .slot-status{position:absolute;top:4px;left:4px;font-size:10px;font-weight:700;padding:2px 5px;border-radius:4px}
+  .slot-status.ok{background:var(--green);color:#fff}
+  .slot-status.err{background:var(--red);color:#fff}
+
+  /* SAVE BTN */
+  .save-btn{width:100%;padding:14px;background:var(--brand);color:#111;border:none;border-radius:var(--radius);font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;transition:opacity .15s;display:none}
+  .save-btn.show{display:block}
+  .save-btn:disabled{opacity:.5;cursor:not-allowed}
+
+  /* TOAST */
+  .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(80px);background:#222;color:#fff;padding:12px 20px;border-radius:30px;font-size:13px;font-weight:600;transition:transform .3s;z-index:200;white-space:nowrap;border:1px solid var(--border)}
+  .toast.show{transform:translateX(-50%) translateY(0)}
+  .toast.success{border-color:var(--green);color:var(--green)}
+  .toast.error{border-color:var(--red);color:var(--red)}
+
+  /* INFO */
+  .info-box{background:var(--brand-soft);border:1px solid rgba(245,168,0,.3);border-radius:var(--radius-sm);padding:12px 14px;font-size:12px;color:var(--ink-soft);line-height:1.5;margin-bottom:16px}
+  .info-box strong{color:var(--brand)}
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>BoParts · Cargar Fotos</h1>
+    <p>Selecciona un producto y sube hasta 3 fotos</p>
+  </div>
+</header>
+
+<div class="container">
+  <div class="info-box">
+    <strong>Cómo usar:</strong> Busca el producto → toca las zonas de foto → la app sube a Cloudinary y guarda el link en tu Google Sheet automáticamente.
+  </div>
+
+  <div class="search-wrap">
+    <input type="search" id="searchInput" placeholder="Buscar producto por nombre o código…" autocomplete="off">
+    <div class="dropdown" id="dropdown"></div>
+  </div>
+
+  <div class="selected-product" id="selectedProduct">
+    <button class="sp-clear" onclick="clearSelection()">×</button>
+    <div class="sp-name" id="spName"></div>
+    <div class="sp-meta" id="spMeta"></div>
+  </div>
+
+  <div class="photos-grid" id="photosGrid" style="display:none">
+    <div class="photo-slot" id="slot0">
+      <span class="slot-icon">📷</span>
+      <span class="slot-label">Foto 1</span>
+      <input type="file" accept="image/*" capture="environment" onchange="handleFile(this,0)">
+    </div>
+    <div class="photo-slot" id="slot1">
+      <span class="slot-icon">📷</span>
+      <span class="slot-label">Foto 2</span>
+      <input type="file" accept="image/*" capture="environment" onchange="handleFile(this,1)">
+    </div>
+    <div class="photo-slot" id="slot2">
+      <span class="slot-icon">📷</span>
+      <span class="slot-label">Foto 3</span>
+      <input type="file" accept="image/*" capture="environment" onchange="handleFile(this,2)">
+    </div>
+  </div>
+
+  <button class="save-btn" id="saveBtn" onclick="saveToSheet()">💾 Guardar en catálogo</button>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ── CONFIGURACIÓN ──────────────────────────────────────────────
+const CLOUDINARY_CLOUD = 'c7jufi9v';
+const CLOUDINARY_UPLOAD_PRESET = 'boparts_productos'; // crear en Cloudinary (unsigned)
+const CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRaAnGd-Bfaxo3LjUiGeV8p0F2weaKqHGwJ0hWibSMj02-h7dRAQPDMmGL5B8-XQg66Yjd3zgOAaz8X/pub?gid=2100998338&single=true&output=csv';
+const APPS_SCRIPT_URL = ''; // se llena después con el Google Apps Script URL
+
+// ── ESTADO ────────────────────────────────────────────────────
+let PRODUCTS = [];
+let selectedProduct = null;
+let uploadedUrls = [null, null, null];
+
+// ── CARGAR PRODUCTOS ──────────────────────────────────────────
+async function loadProducts() {
+  try {
+    const res = await fetch(CSV_URL + '&t=' + Date.now());
+    const text = await res.text();
+    const rows = parseCSV(text);
+    PRODUCTS = [];
+    for (let i = 2; i < rows.length; i++) {
+      const r = rows[i];
+      if (!(r[2] || '').trim()) continue;
+      PRODUCTS.push({
+        row: i + 1, // fila real en Sheet (1-based, fila 1 = tasa, fila 2 = headers)
+        codigo: (r[0] || '').trim(),
+        marca: (r[1] || '').trim(),
+        producto: (r[2] || '').trim(),
+        categoria: (r[3] || '').trim(),
+        imagen: (r[11] || '').trim(),
+        imagen2: (r[12] || '').trim(),
+        imagen3: (r[13] || '').trim(),
+      });
+    }
+    showToast(`${PRODUCTS.length} productos cargados`, 'success');
+  } catch(e) {
+    showToast('Error cargando productos', 'error');
+  }
+}
+
+function parseCSV(text) {
+  const lines = text.split(/\r?\n/);
+  return lines.map(line => {
+    const row = []; let cur = '', inQ = false;
+    for (const ch of line) {
+      if (ch === '"') { inQ = !inQ; }
+      else if (ch === ',' && !inQ) { row.push(cur.trim()); cur = ''; }
+      else { cur += ch; }
+    }
+    row.push(cur.trim());
+    return row;
+  });
+}
+
+// ── BÚSQUEDA ──────────────────────────────────────────────────
+function normalize(s) {
+  return (s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+}
+
+const searchInput = document.getElementById('searchInput');
+const dropdown = document.getElementById('dropdown');
+
+searchInput.addEventListener('input', () => {
+  const q = normalize(searchInput.value).trim();
+  if (!q || q.length < 2) { dropdown.classList.remove('show'); return; }
+  const results = PRODUCTS.filter(p => {
+    const hay = normalize(`${p.producto} ${p.codigo} ${p.marca}`);
+    return q.split(/\s+/).every(t => hay.includes(t));
+  }).slice(0, 20);
+  if (!results.length) { dropdown.classList.remove('show'); return; }
+  dropdown.innerHTML = results.map((p,i) => `
+    <div class="drop-item" onclick="selectProduct(${PRODUCTS.indexOf(p)})">
+      ${p.producto} <span class="cat">${p.categoria}</span>
+      ${p.codigo ? `<br><small style="color:var(--ink-muted)">#${p.codigo}</small>` : ''}
+    </div>
+  `).join('');
+  dropdown.classList.add('show');
+});
+
+document.addEventListener('click', e => {
+  if (!e.target.closest('.search-wrap')) dropdown.classList.remove('show');
+});
+
+function selectProduct(idx) {
+  selectedProduct = PRODUCTS[idx];
+  uploadedUrls = [
+    selectedProduct.imagen || null,
+    selectedProduct.imagen2 || null,
+    selectedProduct.imagen3 || null
+  ];
+  searchInput.value = '';
+  dropdown.classList.remove('show');
+  document.getElementById('spName').textContent = selectedProduct.producto;
+  document.getElementById('spMeta').textContent =
+    `${selectedProduct.categoria}${selectedProduct.marca ? ' · ' + selectedProduct.marca : ''}${selectedProduct.codigo ? ' · #' + selectedProduct.codigo : ''}`;
+  document.getElementById('selectedProduct').classList.add('show');
+  document.getElementById('photosGrid').style.display = 'grid';
+  document.getElementById('saveBtn').classList.add('show');
+  // Show existing images
+  [0,1,2].forEach(i => renderSlot(i));
+}
+
+function clearSelection() {
+  selectedProduct = null;
+  uploadedUrls = [null,null,null];
+  document.getElementById('selectedProduct').classList.remove('show');
+  document.getElementById('photosGrid').style.display = 'none';
+  document.getElementById('saveBtn').classList.remove('show');
+  [0,1,2].forEach(i => {
+    const slot = document.getElementById('slot'+i);
+    slot.innerHTML = `<span class="slot-icon">📷</span><span class="slot-label">Foto ${i+1}</span><input type="file" accept="image/*" capture="environment" onchange="handleFile(this,${i})">`;
+  });
+}
+
+function renderSlot(i) {
+  const slot = document.getElementById('slot'+i);
+  const url = uploadedUrls[i];
+  if (url) {
+    slot.innerHTML = `
+      <img src="${url}" alt="foto ${i+1}">
+      <button class="remove-btn" onclick="removePhoto(${i})">×</button>
+      <span class="slot-status ok">✓</span>
+      <input type="file" accept="image/*" capture="environment" onchange="handleFile(this,${i})">
+    `;
+  } else {
+    slot.innerHTML = `<span class="slot-icon">📷</span><span class="slot-label">Foto ${i+1}</span><input type="file" accept="image/*" capture="environment" onchange="handleFile(this,${i})">`;
+  }
+}
+
+function removePhoto(i) {
+  uploadedUrls[i] = null;
+  renderSlot(i);
+}
+
+// ── UPLOAD A CLOUDINARY ───────────────────────────────────────
+async function handleFile(input, slotIdx) {
+  const file = input.files[0];
+  if (!file) return;
+  const slot = document.getElementById('slot'+slotIdx);
+
+  // Show progress
+  slot.innerHTML = `<span class="slot-icon">⏳</span><span class="slot-label">Subiendo…</span><div class="progress" id="prog${slotIdx}" style="width:0%"></div>`;
+
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET);
+  formData.append('folder', 'boparts');
+
+  try {
+    const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD}/image/upload`, {
+      method: 'POST',
+      body: formData
+    });
+    const data = await res.json();
+    if (data.secure_url) {
+      uploadedUrls[slotIdx] = data.secure_url;
+      renderSlot(slotIdx);
+      showToast('Foto subida ✓', 'success');
+    } else {
+      throw new Error(data.error?.message || 'Error');
+    }
+  } catch(e) {
+    slot.innerHTML = `<span class="slot-icon">⚠️</span><span class="slot-label" style="color:var(--red)">Error</span><input type="file" accept="image/*" onchange="handleFile(this,${slotIdx})">`;
+    showToast('Error subiendo foto: ' + e.message, 'error');
+  }
+}
+
+// ── GUARDAR EN SHEET ──────────────────────────────────────────
+async function saveToSheet() {
+  if (!selectedProduct) return;
+  if (!uploadedUrls.some(Boolean)) {
+    showToast('Sube al menos una foto primero', 'error');
+    return;
+  }
+  if (!APPS_SCRIPT_URL) {
+    // Fallback: show URLs to copy manually
+    const urls = uploadedUrls.filter(Boolean);
+    const text = `Fila ${selectedProduct.row} en la Sheet:\nL: ${uploadedUrls[0]||''}\nM: ${uploadedUrls[1]||''}\nN: ${uploadedUrls[2]||''}`;
+    if (navigator.clipboard) {
+      await navigator.clipboard.writeText(urls.join('\n'));
+      showToast('URLs copiadas al portapapeles ✓', 'success');
+    }
+    alert('URLs de las fotos:\n\n' + text);
+    return;
+  }
+  const btn = document.getElementById('saveBtn');
+  btn.disabled = true;
+  btn.textContent = 'Guardando…';
+  try {
+    await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      mode: 'no-cors',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({
+        row: selectedProduct.row,
+        imagen: uploadedUrls[0] || '',
+        imagen2: uploadedUrls[1] || '',
+        imagen3: uploadedUrls[2] || ''
+      })
+    });
+    showToast('¡Guardado en catálogo! ✓', 'success');
+    // Update local data
+    selectedProduct.imagen = uploadedUrls[0] || selectedProduct.imagen;
+    selectedProduct.imagen2 = uploadedUrls[1] || selectedProduct.imagen2;
+    selectedProduct.imagen3 = uploadedUrls[2] || selectedProduct.imagen3;
+    setTimeout(clearSelection, 1500);
+  } catch(e) {
+    showToast('Error guardando', 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '💾 Guardar en catálogo';
+  }
+}
+
+// ── TOAST ─────────────────────────────────────────────────────
+function showToast(msg, type='') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show ' + type;
+  setTimeout(() => t.className = 'toast', 3000);
+}
+
+// ── INIT ──────────────────────────────────────────────────────
+loadProducts();
+</script>
+</body>
+</html>
