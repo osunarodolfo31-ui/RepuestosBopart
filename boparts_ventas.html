@@ -96,6 +96,23 @@
   .success-screen h2{font-size:22px;font-weight:700;margin-bottom:8px}
   .success-screen p{font-size:14px;color:var(--ink-muted);margin-bottom:24px;line-height:1.6}
   .success-btn{padding:14px 32px;background:var(--brand);color:#111;border:none;border-radius:var(--radius);font-size:15px;font-weight:700;cursor:pointer;font-family:inherit}
+
+  .fab{position:fixed;bottom:20px;right:16px;z-index:90;width:52px;height:52px;background:#F5A800;border:none;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 16px rgba(245,168,0,.4);-webkit-tap-highlight-color:transparent}
+  .fab svg{width:24px;height:24px;transition:transform .2s}
+  .fab.open svg{transform:rotate(45deg)}
+  .nav-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:91;opacity:0;pointer-events:none;transition:opacity .2s}
+  .nav-overlay.show{opacity:1;pointer-events:auto}
+  .nav-panel{position:fixed;bottom:0;left:0;right:0;z-index:92;background:#1A1A1A;border-radius:20px 20px 0 0;border-top:2px solid #F5A800;padding:20px 16px 40px;transform:translateY(100%);transition:transform .3s cubic-bezier(.4,0,.2,1)}
+  .nav-panel.show{transform:translateY(0)}
+  .nav-panel-title{font-size:12px;font-weight:700;color:#F5A800;text-transform:uppercase;letter-spacing:.5px;margin-bottom:16px;text-align:center}
+  .nav-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .nav-card{background:#1E1E1E;border:1px solid #2E2E2E;border-radius:14px;padding:16px 12px;display:flex;flex-direction:column;align-items:center;gap:8px;cursor:pointer;text-decoration:none;-webkit-tap-highlight-color:transparent;transition:border-color .15s}
+  .nav-card:active{border-color:#F5A800}
+  .nav-card .nav-icon{font-size:28px}
+  .nav-card .nav-label{font-size:12px;font-weight:700;color:#F0F0F0;text-align:center;line-height:1.3}
+  .nav-card .nav-desc{font-size:10px;color:#666;text-align:center}
+  .nav-card.active-module{border-color:#F5A800;background:rgba(245,168,0,0.1)}
+
 </style>
 </head>
 <body>
@@ -606,5 +623,50 @@ function showToast(msg, type='') {
 // ── START ─────────────────────────────────────────────────────
 init();
 </script>
+
+<button class="fab" id="fabBtn" onclick="toggleNav()">
+  <svg viewBox="0 0 24 24" fill="none" stroke="#111" stroke-width="2.5" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+</button>
+<div class="nav-overlay" id="navOverlay" onclick="closeNav()"></div>
+<div class="nav-panel" id="navPanel">
+  <div class="nav-panel-title">Repuesto BoParts</div>
+  <div class="nav-grid">
+    <a class="nav-card" href="index.html">
+      <span class="nav-icon">📋</span>
+      <span class="nav-label">Lista de Precios</span>
+      <span class="nav-desc">Consulta y busqueda</span>
+    </a>
+    <a class="nav-card active-module" href="boparts_ventas.html">
+      <span class="nav-icon">💰</span>
+      <span class="nav-label">Registrar Venta</span>
+      <span class="nav-desc">Nueva venta</span>
+    </a>
+    <a class="nav-card " href="boparts_fotos.html">
+      <span class="nav-icon">📷</span>
+      <span class="nav-label">Cargar Fotos</span>
+      <span class="nav-desc">Catalogo de imagenes</span>
+    </a>
+    <a class="nav-card" href="#" onclick="closeNav(); return false;" style="opacity:.4;cursor:not-allowed">
+      <span class="nav-icon">📊</span>
+      <span class="nav-label">Reportes</span>
+      <span class="nav-desc">Proximamente</span>
+    </a>
+  </div>
+</div>
+
+<script>
+function toggleNav(){
+  var open = document.getElementById('navPanel').classList.toggle('show');
+  document.getElementById('navOverlay').classList.toggle('show', open);
+  document.getElementById('fabBtn').classList.toggle('open', open);
+}
+function closeNav(){
+  document.getElementById('navPanel').classList.remove('show');
+  document.getElementById('navOverlay').classList.remove('show');
+  document.getElementById('fabBtn').classList.remove('open');
+}
+</script>
+
+
 </body>
 </html>
