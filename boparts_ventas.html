@@ -133,6 +133,19 @@
   .comision-preview.show{display:block}
   .comision-preview strong{color:var(--brand)}
 
+
+  /* NOTA DE ENTREGA MODAL */
+  .nota-modal{position:fixed;inset:0;z-index:300;background:rgba(0,0,0,.7);display:flex;align-items:flex-end;opacity:0;pointer-events:none;transition:opacity .2s}
+  .nota-modal.show{opacity:1;pointer-events:auto}
+  .nota-sheet{background:var(--bg2);border-radius:20px 20px 0 0;border-top:2px solid var(--brand);padding:20px 16px 40px;width:100%;max-height:85vh;overflow-y:auto;transform:translateY(100%);transition:transform .3s cubic-bezier(.4,0,.2,1)}
+  .nota-modal.show .nota-sheet{transform:translateY(0)}
+  .nota-title{font-size:15px;font-weight:700;margin-bottom:4px}
+  .nota-sub{font-size:12px;color:var(--ink-muted);margin-bottom:16px}
+  .nota-btn{width:100%;padding:13px;border-radius:var(--radius);font-size:14px;font-weight:700;border:none;cursor:pointer;font-family:inherit;margin-bottom:8px}
+  .nota-btn-primary{background:var(--brand);color:#111}
+  .nota-btn-wa{background:#25D366;color:#fff}
+  .nota-btn-skip{background:var(--card2);color:var(--ink-soft);border:1px solid var(--border)}
+
 </style>
 </head>
 <body>
@@ -667,6 +680,8 @@ function showSuccess(vendedor, usd, bs) {
   document.getElementById('successMsg').textContent =
     `${vendedor} · $${usd.toFixed(2)} / Bs ${bs.toLocaleString('es-VE')}`;
   document.getElementById('successScreen').classList.add('show');
+  // Store cart for nota
+  abrirNota({ cartItems: cart.map(c => ({...c})) });
 }
 
 function resetForm() {
@@ -782,8 +797,200 @@ function closeNav(){
   document.getElementById('navOverlay').classList.remove('show');
   document.getElementById('fabBtn').classList.remove('open');
 }
+
+// ── NOTA DE ENTREGA ───────────────────────────────────────────
+let lastVentaData = null;
+let notaNumero = parseInt(localStorage.getItem('boparts_nota_num') || '0') + 1;
+
+function abrirNota(ventaData) {
+  lastVentaData = ventaData;
+  document.getElementById('notaModal').classList.add('show');
+  document.getElementById('notaWaWrap').style.display = 'none';
+  document.getElementById('notaCliente').value = '';
+  document.getElementById('notaRif').value = '';
+  document.getElementById('notaDireccion').value = '';
+}
+
+function cerrarNota() {
+  document.getElementById('notaModal').classList.remove('show');
+  resetForm();
+}
+
+function generarNota() {
+  const cliente = document.getElementById('notaCliente').value.trim();
+  const rif = document.getElementById('notaRif').value.trim();
+  const dir = document.getElementById('notaDireccion').value.trim();
+  if (!cliente) { showToast('Ingresa el nombre del cliente', 'error'); return; }
+
+  const num = `NE-${String(notaNumero).padStart(4,'0')}`;
+  localStorage.setItem('boparts_nota_num', notaNumero);
+  notaNumero++;
+
+  // Build HTML nota as printable page
+  const tasa = currentTasa || TASA;
+  const fecha = new Date().toLocaleDateString('es-VE', {day:'2-digit',month:'2-digit',year:'numeric'});
+
+  // Parse products from lastVentaData
+  const productos = lastVentaData?.cartItems || [];
+  let rowsHtml = '';
+  let totalBs = 0;
+  productos.forEach(p => {
+    const precBs = Math.round(p.precio * tasa);
+    const totBs  = Math.round(p.precio * p.cantidad * tasa);
+    totalBs += totBs;
+    rowsHtml += `<tr>
+      <td>${p.producto}</td>
+      <td style="text-align:center">${p.cantidad}</td>
+      <td>Bs ${precBs.toLocaleString('es-VE')}</td>
+      <td style="text-align:right;font-weight:700">Bs ${totBs.toLocaleString('es-VE')}</td>
+    </tr>`;
+  });
+
+  const notaHtml = `<!DOCTYPE html><html><head><meta charset="UTF-8">
+  <title>Nota ${num}</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{font-family:Arial,sans-serif;font-size:12px;color:#111;background:#fff;padding:20px}
+    .header{background:#111;color:#fff;padding:16px 20px;border-radius:8px 8px 0 0;display:flex;justify-content:space-between;align-items:center}
+    .header h1{font-size:18px;font-weight:900}
+    .header .rif{color:#F5A800;font-size:11px;margin-top:2px}
+    .header .contact{color:#ccc;font-size:10px;margin-top:2px}
+    .doc-badge{background:#F5A800;color:#111;border-radius:8px;padding:10px 16px;text-align:center;min-width:140px}
+    .doc-badge h2{font-size:14px;font-weight:900}
+    .doc-badge p{font-size:11px;font-weight:700}
+    .accent{background:#F5A800;height:3px}
+    .info-row{display:flex;gap:32px;padding:12px 0;border-bottom:1px solid #eee;font-size:11px}
+    .info-row .lbl{color:#888;margin-bottom:2px}
+    .info-row .val{font-weight:700}
+    .section-title{background:#F5A800;color:#111;font-weight:700;padding:6px 12px;font-size:11px;margin:12px 0 0}
+    .client-box{padding:10px 12px;background:#f9f9f9;border:1px solid #eee;font-size:11px}
+    .client-name{font-size:14px;font-weight:900;margin:4px 0}
+    table{width:100%;border-collapse:collapse;margin-top:12px;font-size:11px}
+    thead tr{background:#111;color:#fff}
+    thead th{padding:7px 10px;text-align:left}
+    thead th:last-child{text-align:right}
+    tbody tr:nth-child(even){background:#f6f6f6}
+    tbody td{padding:7px 10px;border-bottom:1px solid #eee}
+    .total-row{display:flex;justify-content:flex-end;margin-top:12px}
+    .total-box{background:#F5A800;padding:10px 16px;border-radius:6px;text-align:right;min-width:180px}
+    .total-box .lbl{font-size:10px;font-weight:700;color:#111}
+    .total-box .amt{font-size:20px;font-weight:900;color:#111}
+    .firmas{display:flex;justify-content:space-between;margin-top:32px;padding-top:16px}
+    .firma{width:42%;border-top:1px dashed #999;padding-top:6px;font-size:10px;color:#666}
+    .footer{background:#111;color:#ccc;text-align:center;padding:8px;font-size:10px;margin-top:20px;border-radius:0 0 8px 8px}
+    .footer span{color:#F5A800}
+    .aviso{text-align:center;font-size:9px;color:#999;margin-top:4px}
+    @media print{body{padding:0}button{display:none}}
+  </style></head><body>
+  <div class="header">
+    <div>
+      <h1>BOSC SUPPLY, C.A.</h1>
+      <div class="rif">RIF: J-50828177-2</div>
+      <div class="contact">Calle Principal, Edif Torre C, Piso 2, Apt 24, Conj. Res. 408, Los Rastrojos, Lara</div>
+      <div class="contact">0424-5575850 | boscsupply@gmail.com</div>
+    </div>
+    <div class="doc-badge">
+      <h2>NOTA DE ENTREGA</h2>
+      <p>N° ${num}</p>
+    </div>
+  </div>
+  <div class="accent"></div>
+  <div class="info-row">
+    <div><div class="lbl">FECHA EMISIÓN</div><div class="val">${fecha}</div></div>
+    <div><div class="lbl">CONDICIÓN</div><div class="val">CONTADO</div></div>
+    <div><div class="lbl">TASA BCV</div><div class="val">Bs ${tasa.toLocaleString('es-VE')}</div></div>
+  </div>
+  <div class="section-title">INFORMACIÓN DEL CLIENTE</div>
+  <div class="client-box">
+    <div class="lbl">NOMBRE / RAZÓN SOCIAL</div>
+    <div class="client-name">${cliente.toUpperCase()}</div>
+    <div style="display:flex;gap:32px;margin-top:6px">
+      <div><div class="lbl">CÉDULA / RIF</div><div style="font-weight:700">${rif||'—'}</div></div>
+      ${dir ? `<div><div class="lbl">DIRECCIÓN</div><div>${dir}</div></div>` : ''}
+    </div>
+  </div>
+  <table>
+    <thead><tr>
+      <th>DESCRIPCIÓN</th><th style="text-align:center">CANT.</th>
+      <th>PRECIO Bs</th><th style="text-align:right">TOTAL Bs</th>
+    </tr></thead>
+    <tbody>${rowsHtml}</tbody>
+  </table>
+  <div class="total-row">
+    <div class="total-box">
+      <div class="lbl">TOTAL</div>
+      <div class="amt">Bs ${totalBs.toLocaleString('es-VE')}</div>
+    </div>
+  </div>
+  <div class="firmas">
+    <div class="firma">Firma y sello del receptor</div>
+    <div class="firma" style="text-align:right">Firma del representante BOSC SUPPLY</div>
+  </div>
+  <div class="footer">BOSC SUPPLY, C.A. | RIF: J-50828177-2 | 0424-5575850 | boscsupply@gmail.com</div>
+  <div class="aviso">Este documento no tiene valor fiscal. Solo sirve como comprobante de entrega.</div>
+  </body></html>`;
+
+  // Open in new window and trigger print/save
+  const win = window.open('', '_blank');
+  win.document.write(notaHtml);
+  win.document.close();
+  setTimeout(() => win.print(), 500);
+
+  // Show WhatsApp button
+  document.getElementById('notaWaWrap').style.display = 'block';
+  showToast('Nota generada ✓', 'success');
+}
+
+function compartirWhatsApp() {
+  const cliente = document.getElementById('notaCliente').value.trim();
+  const num = `NE-${String(notaNumero-1).padStart(4,'0')}`;
+  const tasa = currentTasa || TASA;
+  const productos = lastVentaData?.cartItems || [];
+  const totalBs = productos.reduce((s,p) => s + Math.round(p.precio * p.cantidad * tasa), 0);
+
+  const msg = `🔧 *BOSC SUPPLY, C.A.*
+📄 Nota de Entrega *${num}*
+👤 Cliente: ${cliente}
+
+${productos.map(p => `• ${p.producto} x${p.cantidad} — Bs ${Math.round(p.precio*p.cantidad*tasa).toLocaleString('es-VE')}`).join('\n')}
+
+💰 *TOTAL: Bs ${totalBs.toLocaleString('es-VE')}*
+
+_Adjuntamos la nota de entrega en PDF._
+📞 0424-5575850`;
+
+  window.open('https://wa.me/?text=' + encodeURIComponent(msg), '_blank');
+}
+
 </script>
 
+
+
+<div class="nota-modal" id="notaModal">
+  <div class="nota-sheet">
+    <div class="nota-title">📄 Nota de Entrega</div>
+    <div class="nota-sub">¿Deseas generar una nota de entrega para esta venta?</div>
+
+    <div class="field">
+      <label>Nombre del cliente</label>
+      <input type="text" id="notaCliente" placeholder="Empresa o persona">
+    </div>
+    <div class="field">
+      <label>Cédula / RIF</label>
+      <input type="text" id="notaRif" placeholder="V-12345678 o J-12345678-9">
+    </div>
+    <div class="field">
+      <label>Dirección (opcional)</label>
+      <input type="text" id="notaDireccion" placeholder="Av. Principal...">
+    </div>
+
+    <button class="nota-btn nota-btn-primary" id="notaGenerarBtn" onclick="generarNota()">📥 Generar y Descargar PDF</button>
+    <div id="notaWaWrap" style="display:none">
+      <button class="nota-btn nota-btn-wa" onclick="compartirWhatsApp()">💬 Abrir WhatsApp con mensaje</button>
+    </div>
+    <button class="nota-btn nota-btn-skip" onclick="cerrarNota()">Omitir · Nueva Venta</button>
+  </div>
+</div>
 
 </body>
 </html>
