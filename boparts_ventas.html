@@ -1,0 +1,610 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>BoParts · Registrar Venta</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --brand:#F5A800;--brand-soft:rgba(245,168,0,0.15);--brand-dark:#D48E00;
+    --bg:#111;--bg2:#1A1A1A;--card:#1E1E1E;--card2:#252525;--border:#2E2E2E;
+    --ink:#F0F0F0;--ink-soft:#AAA;--ink-muted:#666;
+    --green:#22C55E;--red:#EF4444;--blue:#60A5FA;
+    --radius:14px;--radius-sm:8px;
+  }
+  html,body{min-height:100%;background:var(--bg);font-family:'Inter',sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased}
+
+  header{background:var(--bg2);border-bottom:2px solid var(--brand);padding:12px 16px;display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:50}
+  .logo{height:38px;border-radius:4px}
+  .header-title{flex:1}
+  .header-title h1{font-size:15px;font-weight:700}
+  .header-title p{font-size:11px;color:var(--ink-muted)}
+
+  .container{padding:16px;max-width:520px;margin:0 auto;padding-bottom:100px}
+
+  /* SECTION */
+  .section{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:12px}
+  .section-title{font-size:12px;font-weight:700;color:var(--brand);text-transform:uppercase;letter-spacing:.5px;margin-bottom:12px;display:flex;align-items:center;gap:6px}
+
+  /* INPUTS */
+  label{font-size:12px;color:var(--ink-soft);font-weight:600;display:block;margin-bottom:4px}
+  input,select,textarea{width:100%;background:var(--card2);border:1.5px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;font-size:14px;font-family:inherit;color:var(--ink);outline:none;transition:border-color .15s}
+  input:focus,select:focus,textarea:focus{border-color:var(--brand)}
+  input::placeholder,textarea::placeholder{color:var(--ink-muted)}
+  select option{background:var(--card2);color:var(--ink)}
+  .field{margin-bottom:12px}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+
+  /* PRODUCT SEARCH */
+  .prod-search-wrap{position:relative}
+  .prod-dropdown{background:var(--card2);border:1px solid var(--border);border-radius:var(--radius-sm);max-height:200px;overflow-y:auto;margin-top:4px;display:none;position:absolute;width:100%;z-index:30}
+  .prod-dropdown.show{display:block}
+  .prod-item{padding:10px 12px;font-size:13px;cursor:pointer;border-bottom:1px solid var(--border);color:var(--ink)}
+  .prod-item:last-child{border-bottom:none}
+  .prod-item:active{background:var(--brand-soft)}
+  .prod-item .prod-price{font-size:11px;color:var(--brand);font-weight:600;float:right}
+  .prod-item .prod-cat{font-size:10px;color:var(--ink-muted)}
+
+  /* CART */
+  .cart-empty{text-align:center;padding:20px;color:var(--ink-muted);font-size:13px}
+  .cart-item{background:var(--card2);border-radius:var(--radius-sm);padding:12px;margin-bottom:8px;border:1px solid var(--border)}
+  .cart-item-top{display:flex;align-items:flex-start;gap:8px}
+  .cart-item-name{font-size:13px;font-weight:600;flex:1;line-height:1.3}
+  .cart-item-remove{background:none;border:none;color:var(--red);cursor:pointer;font-size:18px;line-height:1;padding:0;flex-shrink:0}
+  .cart-item-bottom{display:grid;grid-template-columns:80px 1fr 1fr;gap:8px;margin-top:8px;align-items:center}
+  .cart-item-bottom label{font-size:10px;color:var(--ink-muted);margin-bottom:2px}
+  .qty-wrap{display:flex;align-items:center;gap:6px}
+  .qty-btn{background:var(--card);border:1px solid var(--border);border-radius:6px;width:28px;height:28px;color:var(--ink);font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+  .qty-input{width:40px;text-align:center;padding:4px;font-size:14px;font-weight:700;background:var(--card);border:1px solid var(--border);border-radius:6px}
+  .subtotal{text-align:right;font-size:14px;font-weight:700;color:var(--brand)}
+
+  /* TOTAL BAR */
+  .total-bar{background:var(--card2);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;margin-bottom:12px}
+  .total-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
+  .total-row:last-child{margin-bottom:0}
+  .total-label{font-size:12px;color:var(--ink-soft)}
+  .total-value{font-size:14px;font-weight:700;color:var(--ink)}
+  .total-value.big{font-size:18px;color:var(--brand)}
+  .total-value.red{color:var(--red)}
+
+  /* PAYMENT METHODS */
+  .pago-block{background:var(--card2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;margin-bottom:8px;position:relative}
+  .pago-remove{position:absolute;top:10px;right:10px;background:none;border:none;color:var(--red);cursor:pointer;font-size:16px}
+  .add-pago-btn{width:100%;padding:10px;background:none;border:1.5px dashed var(--border);border-radius:var(--radius-sm);color:var(--ink-muted);font-size:13px;cursor:pointer;font-family:inherit;transition:border-color .15s}
+  .add-pago-btn:active{border-color:var(--brand);color:var(--brand)}
+
+  /* COMISION INFO */
+  .comision-info{font-size:11px;color:var(--ink-muted);margin-top:4px;padding:6px 8px;background:rgba(245,168,0,0.08);border-radius:6px;border-left:2px solid var(--brand)}
+
+  /* SUBMIT */
+  .submit-btn{width:100%;padding:16px;background:var(--brand);color:#111;border:none;border-radius:var(--radius);font-size:16px;font-weight:700;cursor:pointer;font-family:inherit;position:fixed;bottom:0;left:0;right:0;max-width:520px;margin:0 auto}
+  .submit-btn:disabled{opacity:.5;cursor:not-allowed}
+
+  /* TOAST */
+  .toast{position:fixed;bottom:70px;left:50%;transform:translateX(-50%) translateY(80px);background:#222;color:#fff;padding:12px 20px;border-radius:30px;font-size:13px;font-weight:600;transition:transform .3s;z-index:200;white-space:nowrap;border:1px solid var(--border)}
+  .toast.show{transform:translateX(-50%) translateY(0)}
+  .toast.success{border-color:var(--green);color:var(--green)}
+  .toast.error{border-color:var(--red);color:var(--red)}
+
+  /* SUCCESS SCREEN */
+  .success-screen{display:none;position:fixed;inset:0;background:var(--bg);z-index:300;flex-direction:column;align-items:center;justify-content:center;padding:24px;text-align:center}
+  .success-screen.show{display:flex}
+  .success-icon{font-size:64px;margin-bottom:16px}
+  .success-screen h2{font-size:22px;font-weight:700;margin-bottom:8px}
+  .success-screen p{font-size:14px;color:var(--ink-muted);margin-bottom:24px;line-height:1.6}
+  .success-btn{padding:14px 32px;background:var(--brand);color:#111;border:none;border-radius:var(--radius);font-size:15px;font-weight:700;cursor:pointer;font-family:inherit}
+</style>
+</head>
+<body>
+
+<header>
+  <img src="icon-192.png" alt="BoParts" class="logo">
+  <div class="header-title">
+    <h1>Registrar Venta</h1>
+    <p id="fechaHeader"></p>
+  </div>
+</header>
+
+<div class="container">
+
+  <!-- VENDEDOR Y CANAL -->
+  <div class="section">
+    <div class="section-title">👤 Vendedor & Canal</div>
+    <div class="row2">
+      <div class="field">
+        <label>Vendedor</label>
+        <select id="vendedor">
+          <option value="">Seleccionar…</option>
+          <option value="Rodolfo Osuna">Rodolfo Osuna</option>
+          <option value="Javier Boves">Javier Boves</option>
+          <option value="Reinaldo Cuicas">Reinaldo Cuicas</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Canal de venta</label>
+        <select id="canal">
+          <option value="">Seleccionar…</option>
+          <option value="Presencial">Presencial</option>
+          <option value="WhatsApp">WhatsApp</option>
+          <option value="Mercado Libre">Mercado Libre</option>
+          <option value="Marketplace">Marketplace</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <!-- PRODUCTOS -->
+  <div class="section">
+    <div class="section-title">🔧 Productos</div>
+    <div class="field prod-search-wrap">
+      <label>Buscar producto</label>
+      <input type="search" id="prodSearch" placeholder="Nombre, código o marca…" autocomplete="off">
+      <div class="prod-dropdown" id="prodDropdown"></div>
+    </div>
+    <div id="cart"><div class="cart-empty">Sin productos aún</div></div>
+  </div>
+
+  <!-- TOTALES -->
+  <div class="total-bar" id="totalBar" style="display:none">
+    <div class="total-row">
+      <span class="total-label">Subtotal USD</span>
+      <span class="total-value" id="totalUSD">$0.00</span>
+    </div>
+    <div class="total-row">
+      <span class="total-label">Total Bs</span>
+      <span class="total-value big" id="totalBS">Bs 0</span>
+    </div>
+    <div class="total-row" id="comisionRow" style="display:none">
+      <span class="total-label">Comisión punto</span>
+      <span class="total-value red" id="totalComision">Bs 0</span>
+    </div>
+    <div class="total-row" id="netoRow" style="display:none">
+      <span class="total-label">Neto recibido</span>
+      <span class="total-value" id="totalNeto">Bs 0</span>
+    </div>
+  </div>
+
+  <!-- METODOS DE PAGO -->
+  <div class="section">
+    <div class="section-title">💳 Forma de Pago</div>
+    <div id="pagosContainer"></div>
+    <button class="add-pago-btn" id="addPagoBtn" onclick="addPago()">+ Agregar forma de pago</button>
+  </div>
+
+  <!-- NOTAS -->
+  <div class="section">
+    <div class="section-title">📝 Notas</div>
+    <div class="field">
+      <textarea id="notas" rows="2" placeholder="Observaciones opcionales…"></textarea>
+    </div>
+  </div>
+
+</div>
+
+<button class="submit-btn" id="submitBtn" onclick="guardarVenta()">💾 Registrar Venta</button>
+
+<div class="toast" id="toast"></div>
+
+<div class="success-screen" id="successScreen">
+  <div class="success-icon">✅</div>
+  <h2>¡Venta Registrada!</h2>
+  <p id="successMsg"></p>
+  <button class="success-btn" onclick="resetForm()">Nueva Venta</button>
+</div>
+
+<script>
+// ── CONFIG ────────────────────────────────────────────────────
+const CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRaAnGd-Bfaxo3LjUiGeV8p0F2weaKqHGwJ0hWibSMj02-h7dRAQPDMmGL5B8-XQg66Yjd3zgOAaz8X/pub?gid=2100998338&single=true&output=csv';
+const METODOS_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRaAnGd-Bfaxo3LjUiGeV8p0F2weaKqHGwJ0hWibSMj02-h7dRAQPDMmGL5B8-XQg66Yjd3zgOAaz8X/pub?gid=1722352135&single=true&output=csv';
+const APPS_SCRIPT_VENTAS_URL = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
+const TASA = parseFloat(localStorage.getItem('motoauto_tasa') || '1000');
+
+// ── STATE ─────────────────────────────────────────────────────
+let PRODUCTS = [];
+let METODOS = [];
+let cart = []; // {producto, codigo, precio, cantidad}
+let pagos = []; // {metodo, banco, moneda, monto, costoFijo, porcentaje}
+let pagoCount = 0;
+
+// ── INIT ──────────────────────────────────────────────────────
+document.getElementById('fechaHeader').textContent = new Date().toLocaleDateString('es-VE', {weekday:'long', day:'numeric', month:'long'});
+
+async function init() {
+  await Promise.all([loadProducts(), loadMetodos()]);
+  addPago(); // Add first payment method by default
+}
+
+// ── CSV PARSER ────────────────────────────────────────────────
+function parseCSV(text) {
+  const lines = text.split(/\r?\n/);
+  return lines.map(line => {
+    const row = []; let cur = '', inQ = false;
+    for (const ch of line) {
+      if (ch === '"') { inQ = !inQ; }
+      else if (ch === ',' && !inQ) { row.push(cur.trim()); cur = ''; }
+      else { cur += ch; }
+    }
+    row.push(cur.trim());
+    return row;
+  });
+}
+
+// ── LOAD PRODUCTS ─────────────────────────────────────────────
+async function loadProducts() {
+  try {
+    const res = await fetch(CSV_URL + '&t=' + Date.now());
+    const text = await res.text();
+    const rows = parseCSV(text);
+    PRODUCTS = [];
+    for (let i = 2; i < rows.length; i++) {
+      const r = rows[i];
+      if (!(r[2]||'').trim()) continue;
+      PRODUCTS.push({
+        codigo: (r[0]||'').trim(),
+        marca: (r[1]||'').trim(),
+        producto: (r[2]||'').trim(),
+        categoria: (r[3]||'').trim(),
+        precio: parseFloat(r[8]) || 0,
+        bs: parseFloat(r[8]) ? Math.round(parseFloat(r[8]) * TASA) : 0
+      });
+    }
+  } catch(e) { showToast('Error cargando productos', 'error'); }
+}
+
+// ── LOAD METODOS ──────────────────────────────────────────────
+async function loadMetodos() {
+  // Default methods if URL not configured
+  METODOS = [
+    {metodo:'Efectivo', banco:'—', moneda:'USD', costoFijo:0, porcentaje:0},
+    {metodo:'Efectivo', banco:'—', moneda:'BS', costoFijo:0, porcentaje:0},
+    {metodo:'Pago Móvil', banco:'Banesco', moneda:'BS', costoFijo:0, porcentaje:0},
+    {metodo:'Pago Móvil', banco:'Bancrecer', moneda:'BS', costoFijo:0, porcentaje:0},
+    {metodo:'Punto de Venta', banco:'Bancamiga', moneda:'BS', costoFijo:1000, porcentaje:1.5},
+    {metodo:'Punto de Venta', banco:'Bancrecer Empresarial', moneda:'BS', costoFijo:0, porcentaje:0},
+    {metodo:'Cashea', banco:'Bancrecer Empresarial', moneda:'BS', costoFijo:0, porcentaje:0},
+  ];
+
+  if (!METODOS_URL) return;
+  try {
+    const res = await fetch(METODOS_URL + '&t=' + Date.now());
+    const text = await res.text();
+    const rows = parseCSV(text);
+    METODOS = [];
+    for (let i = 1; i < rows.length; i++) {
+      const r = rows[i];
+      if (!r[0] || r[5] === 'NO') continue;
+      METODOS.push({
+        metodo: r[0].trim(),
+        banco: r[1].trim(),
+        moneda: r[2].trim(),
+        costoFijo: parseFloat(r[3]) || 0,
+        porcentaje: parseFloat(r[4]) || 0
+      });
+    }
+  } catch(e) {}
+}
+
+// ── PRODUCT SEARCH ────────────────────────────────────────────
+function normalize(s) {
+  return (s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+}
+
+const prodSearch = document.getElementById('prodSearch');
+const prodDropdown = document.getElementById('prodDropdown');
+
+prodSearch.addEventListener('input', () => {
+  const q = normalize(prodSearch.value).trim();
+  if (!q || q.length < 2) { prodDropdown.classList.remove('show'); return; }
+  const results = PRODUCTS.filter(p => {
+    const hay = normalize(`${p.producto} ${p.codigo} ${p.marca}`);
+    return q.split(/\s+/).every(t => hay.includes(t));
+  }).slice(0, 15);
+  if (!results.length) { prodDropdown.classList.remove('show'); return; }
+  prodDropdown.innerHTML = results.map((p,i) => `
+    <div class="prod-item" onclick="addToCart(${PRODUCTS.indexOf(p)})">
+      <span class="prod-price">$${p.precio.toFixed(2)}</span>
+      ${p.producto}
+      <br><span class="prod-cat">${p.categoria}${p.codigo ? ' · #'+p.codigo : ''}</span>
+    </div>
+  `).join('');
+  prodDropdown.classList.add('show');
+});
+
+document.addEventListener('click', e => {
+  if (!e.target.closest('.prod-search-wrap')) prodDropdown.classList.remove('show');
+});
+
+function addToCart(idx) {
+  const p = PRODUCTS[idx];
+  // Check if already in cart
+  const existing = cart.find(c => c.codigo === p.codigo && c.producto === p.producto);
+  if (existing) { existing.cantidad++; }
+  else { cart.push({producto: p.producto, codigo: p.codigo, precio: p.precio, cantidad: 1}); }
+  prodSearch.value = '';
+  prodDropdown.classList.remove('show');
+  renderCart();
+  updateTotals();
+}
+
+function removeFromCart(i) {
+  cart.splice(i, 1);
+  renderCart();
+  updateTotals();
+}
+
+function updateQty(i, delta) {
+  cart[i].cantidad = Math.max(1, cart[i].cantidad + delta);
+  renderCart();
+  updateTotals();
+}
+
+function updatePrice(i, val) {
+  cart[i].precio = parseFloat(val) || 0;
+  updateTotals();
+}
+
+function renderCart() {
+  const el = document.getElementById('cart');
+  if (!cart.length) {
+    el.innerHTML = '<div class="cart-empty">Sin productos aún</div>';
+    document.getElementById('totalBar').style.display = 'none';
+    return;
+  }
+  document.getElementById('totalBar').style.display = 'block';
+  el.innerHTML = cart.map((item, i) => `
+    <div class="cart-item">
+      <div class="cart-item-top">
+        <div class="cart-item-name">${item.producto}</div>
+        <button class="cart-item-remove" onclick="removeFromCart(${i})">×</button>
+      </div>
+      <div class="cart-item-bottom">
+        <div>
+          <label>Cantidad</label>
+          <div class="qty-wrap">
+            <button class="qty-btn" onclick="updateQty(${i},-1)">−</button>
+            <input class="qty-input" type="number" value="${item.cantidad}" min="1" onchange="cart[${i}].cantidad=parseInt(this.value)||1;updateTotals()">
+            <button class="qty-btn" onclick="updateQty(${i},1)">+</button>
+          </div>
+        </div>
+        <div>
+          <label>Precio USD</label>
+          <input type="number" value="${item.precio.toFixed(2)}" step="0.01" onchange="updatePrice(${i}, this.value)" style="text-align:center">
+        </div>
+        <div>
+          <label>Subtotal</label>
+          <div class="subtotal">$${(item.precio * item.cantidad).toFixed(2)}</div>
+        </div>
+      </div>
+    </div>
+  `).join('');
+}
+
+function updateTotals() {
+  const totalUSD = cart.reduce((s, c) => s + c.precio * c.cantidad, 0);
+  const totalBS = Math.round(totalUSD * TASA);
+  document.getElementById('totalUSD').textContent = '$' + totalUSD.toFixed(2);
+  document.getElementById('totalBS').textContent = 'Bs ' + totalBS.toLocaleString('es-VE');
+
+  // Calculate commissions
+  let totalComision = 0;
+  pagos.forEach(p => {
+    const monto = parseFloat(document.getElementById('monto_'+p.id)?.value) || 0;
+    if (p.metodoData && monto > 0) {
+      const {costoFijo, porcentaje} = p.metodoData;
+      totalComision += costoFijo + (monto * porcentaje / 100);
+    }
+  });
+
+  if (totalComision > 0) {
+    document.getElementById('comisionRow').style.display = 'flex';
+    document.getElementById('netoRow').style.display = 'flex';
+    document.getElementById('totalComision').textContent = 'Bs ' + Math.round(totalComision).toLocaleString('es-VE');
+    document.getElementById('totalNeto').textContent = 'Bs ' + Math.round(totalBS - totalComision).toLocaleString('es-VE');
+  } else {
+    document.getElementById('comisionRow').style.display = 'none';
+    document.getElementById('netoRow').style.display = 'none';
+  }
+}
+
+// ── PAYMENT METHODS ───────────────────────────────────────────
+function addPago() {
+  const id = ++pagoCount;
+  pagos.push({id, metodoData: null});
+  renderPagos();
+}
+
+function removePago(id) {
+  pagos = pagos.filter(p => p.id !== id);
+  renderPagos();
+  updateTotals();
+}
+
+function renderPagos() {
+  const container = document.getElementById('pagosContainer');
+  if (!pagos.length) { container.innerHTML = ''; return; }
+  container.innerHTML = pagos.map(p => `
+    <div class="pago-block">
+      ${pagos.length > 1 ? `<button class="pago-remove" onclick="removePago(${p.id})">×</button>` : ''}
+      <div class="row2" style="margin-bottom:8px">
+        <div class="field">
+          <label>Método</label>
+          <select id="metodo_${p.id}" onchange="onMetodoChange(${p.id})">
+            <option value="">Seleccionar…</option>
+            ${[...new Set(METODOS.map(m => m.metodo))].map(m => `<option value="${m}">${m}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field" id="bancoWrap_${p.id}" style="display:none">
+          <label>Banco</label>
+          <select id="banco_${p.id}" onchange="onBancoChange(${p.id})">
+            <option value="">Seleccionar…</option>
+          </select>
+        </div>
+      </div>
+      <div class="row2">
+        <div class="field">
+          <label>Monto</label>
+          <input type="number" id="monto_${p.id}" placeholder="0.00" step="0.01" onchange="updateTotals()">
+        </div>
+        <div class="field" id="monedaWrap_${p.id}">
+          <label>Moneda</label>
+          <select id="moneda_${p.id}">
+            <option value="BS">Bs</option>
+            <option value="USD">USD</option>
+          </select>
+        </div>
+      </div>
+      <div id="comisionInfo_${p.id}"></div>
+    </div>
+  `).join('');
+}
+
+function onMetodoChange(id) {
+  const metodo = document.getElementById('metodo_'+id).value;
+  const bancoWrap = document.getElementById('bancoWrap_'+id);
+  const bancoSel = document.getElementById('banco_'+id);
+  const options = METODOS.filter(m => m.metodo === metodo);
+
+  if (options.length > 1 || (options.length === 1 && options[0].banco !== '—')) {
+    bancoWrap.style.display = 'block';
+    bancoSel.innerHTML = '<option value="">Seleccionar…</option>' +
+      options.map(m => `<option value="${m.banco}">${m.banco}</option>`).join('');
+  } else {
+    bancoWrap.style.display = 'none';
+    if (options.length === 1) {
+      const p = pagos.find(x => x.id === id);
+      p.metodoData = options[0];
+      // Set moneda
+      document.getElementById('moneda_'+id).value = options[0].moneda;
+    }
+  }
+  onBancoChange(id);
+}
+
+function onBancoChange(id) {
+  const metodo = document.getElementById('metodo_'+id).value;
+  const banco = document.getElementById('banco_'+id)?.value || '';
+  const found = METODOS.find(m => m.metodo === metodo && (m.banco === banco || banco === ''));
+  const p = pagos.find(x => x.id === id);
+  p.metodoData = found || null;
+
+  const infoEl = document.getElementById('comisionInfo_'+id);
+  if (found && (found.costoFijo > 0 || found.porcentaje > 0)) {
+    if (found.moneda) document.getElementById('moneda_'+id).value = found.moneda;
+    infoEl.innerHTML = `<div class="comision-info">💡 Comisión: Bs ${found.costoFijo.toLocaleString('es-VE')} fijo + ${found.porcentaje}% sobre el monto</div>`;
+  } else {
+    infoEl.innerHTML = '';
+  }
+  updateTotals();
+}
+
+// ── GUARDAR VENTA ─────────────────────────────────────────────
+async function guardarVenta() {
+  // Validations
+  if (!document.getElementById('vendedor').value) { showToast('Selecciona el vendedor', 'error'); return; }
+  if (!document.getElementById('canal').value) { showToast('Selecciona el canal de venta', 'error'); return; }
+  if (!cart.length) { showToast('Agrega al menos un producto', 'error'); return; }
+
+  const btn = document.getElementById('submitBtn');
+  btn.disabled = true;
+  btn.textContent = 'Guardando…';
+
+  const now = new Date();
+  const fecha = now.toLocaleDateString('es-VE');
+  const hora = now.toLocaleTimeString('es-VE', {hour:'2-digit', minute:'2-digit'});
+  const vendedor = document.getElementById('vendedor').value;
+  const canal = document.getElementById('canal').value;
+  const totalUSD = cart.reduce((s, c) => s + c.precio * c.cantidad, 0);
+  const totalBS = Math.round(totalUSD * TASA);
+  const productosStr = cart.map(c => `${c.producto} x${c.cantidad} ($${c.precio.toFixed(2)})`).join(' | ');
+  const notas = document.getElementById('notas').value;
+
+  // Build payment data
+  const pagoData = pagos.map(p => ({
+    metodo: document.getElementById('metodo_'+p.id)?.value || '',
+    banco: document.getElementById('banco_'+p.id)?.value || '—',
+    monto: document.getElementById('monto_'+p.id)?.value || '',
+    moneda: document.getElementById('moneda_'+p.id)?.value || 'BS',
+  }));
+
+  let totalComision = 0;
+  pagos.forEach(p => {
+    const monto = parseFloat(document.getElementById('monto_'+p.id)?.value) || 0;
+    if (p.metodoData && monto > 0) {
+      totalComision += p.metodoData.costoFijo + (monto * p.metodoData.porcentaje / 100);
+    }
+  });
+
+  const payload = {
+    fecha, hora, vendedor, canal,
+    productos: productosStr,
+    totalUSD: totalUSD.toFixed(2),
+    totalBS,
+    pago1: pagoData[0] || {},
+    pago2: pagoData[1] || {},
+    pago3: pagoData[2] || {},
+    comision: Math.round(totalComision),
+    neto: Math.round(totalBS - totalComision),
+    notas
+  };
+
+  if (!APPS_SCRIPT_VENTAS_URL) {
+    // Save locally for now
+    const ventas = JSON.parse(localStorage.getItem('boparts_ventas') || '[]');
+    ventas.push(payload);
+    localStorage.setItem('boparts_ventas', JSON.stringify(ventas));
+    showSuccess(vendedor, totalUSD, totalBS);
+    btn.disabled = false;
+    btn.textContent = '💾 Registrar Venta';
+    return;
+  }
+
+  try {
+    await fetch(APPS_SCRIPT_VENTAS_URL, {
+      method: 'POST',
+      mode: 'no-cors',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(payload)
+    });
+    showSuccess(vendedor, totalUSD, totalBS);
+  } catch(e) {
+    showToast('Error guardando la venta', 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '💾 Registrar Venta';
+  }
+}
+
+function showSuccess(vendedor, usd, bs) {
+  document.getElementById('successMsg').textContent =
+    `${vendedor} · $${usd.toFixed(2)} / Bs ${bs.toLocaleString('es-VE')}`;
+  document.getElementById('successScreen').classList.add('show');
+}
+
+function resetForm() {
+  cart = []; pagos = []; pagoCount = 0;
+  document.getElementById('vendedor').value = '';
+  document.getElementById('canal').value = '';
+  document.getElementById('notas').value = '';
+  document.getElementById('successScreen').classList.remove('show');
+  renderCart();
+  renderPagos();
+  addPago();
+  updateTotals();
+}
+
+// ── TOAST ─────────────────────────────────────────────────────
+function showToast(msg, type='') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show ' + type;
+  setTimeout(() => t.className = 'toast', 3000);
+}
+
+// ── START ─────────────────────────────────────────────────────
+init();
+</script>
+</body>
+</html>
