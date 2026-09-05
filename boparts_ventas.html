@@ -448,32 +448,27 @@ function renderCart() {
     return;
   }
   document.getElementById('totalBar').style.display = 'block';
-  el.innerHTML = cart.map((item, i) => `
-    <div class="cart-item">
-      <div class="cart-item-top">
-        <div class="cart-item-name">${item.producto}</div>
-        <button class="cart-item-remove" onclick="removeFromCart(${i})">×</button>
-      </div>
-      <div class="cart-item-bottom">
-        <div>
-          <label>Cantidad</label>
-          <div class="qty-wrap">
-            <button class="qty-btn" onclick="updateQty(${i},-1)">−</button>
-            <input class="qty-input" type="number" value="${item.cantidad}" min="1" onchange="cart[${i}].cantidad=parseInt(this.value)||1;updateTotals()">
-            <button class="qty-btn" onclick="updateQty(${i},1)">+</button>
-          </div>
-        </div>
-        <div>
-          <label>Precio USD</label>
-          <input type="number" value="${item.precio.toFixed(2)}" step="0.01" onchange="updatePrice(${i}, this.value)" style="text-align:center">
-        </div>
-        <div>
-          <label>Subtotal</label>
-          <div class="subtotal">$${(item.precio * item.cantidad).toFixed(2)}</div>
-        </div>
-      </div>
-    </div>
-  `).join('');
+  el.innerHTML = cart.map(function(item, i) {
+    return '<div class="cart-item">' +
+      '<div class="cart-item-top">' +
+        '<div class="cart-item-name">' + item.producto + '</div>' +
+        '<button class="cart-item-remove" onclick="removeFromCart(' + i + ')">×</button>' +
+      '</div>' +
+      '<div class="cart-item-bottom">' +
+        '<div><label>Cantidad</label>' +
+          '<div class="qty-wrap">' +
+            '<button class="qty-btn" onclick="updateQty(' + i + ',-1)">−</button>' +
+            '<input class="qty-input" type="number" value="' + item.cantidad + '" min="1" onchange="cart[' + i + '].cantidad=parseInt(this.value)||1;updateTotals()">' +
+            '<button class="qty-btn" onclick="updateQty(' + i + ',1)">+</button>' +
+          '</div></div>' +
+        '<div><label>Precio USD</label>' +
+          '<input type="number" value="' + item.precio.toFixed(2) + '" step="0.01" onchange="updatePrice(' + i + ', this.value)" style="text-align:center">' +
+        '</div>' +
+        '<div><label>Subtotal</label>' +
+          '<div class="subtotal">$' + (item.precio * item.cantidad).toFixed(2) + '</div>' +
+        '</div>' +
+      '</div></div>';
+  }).join('');
 }
 
 function updateTotals() {
@@ -520,40 +515,45 @@ function removePago(id) {
 function renderPagos() {
   const container = document.getElementById('pagosContainer');
   if (!pagos.length) { container.innerHTML = ''; return; }
-  container.innerHTML = pagos.map(p => `
-    <div class="pago-block">
-      ${pagos.length > 1 ? `<button class="pago-remove" onclick="removePago(${p.id})">×</button>` : ''}
-      <div class="row2" style="margin-bottom:8px">
-        <div class="field">
-          <label>Método</label>
-          <select id="metodo_${p.id}" onchange="onMetodoChange(${p.id})">
-            <option value="">Seleccionar…</option>
-            ${[...new Set(METODOS.map(m => m.metodo))].map(m => `<option value="${m}">${m}</option>`).join('')}
-          </select>
-        </div>
-        <div class="field" id="bancoWrap_${p.id}" style="display:none">
-          <label>Banco</label>
-          <select id="banco_${p.id}" onchange="onBancoChange(${p.id})">
-            <option value="">Seleccionar…</option>
-          </select>
-        </div>
-      </div>
-      <div class="row2">
-        <div class="field">
-          <label>Monto</label>
-          <input type="number" id="monto_${p.id}" placeholder="0.00" step="0.01" onchange="updateTotals()">
-        </div>
-        <div class="field" id="monedaWrap_${p.id}">
-          <label>Moneda</label>
-          <select id="moneda_${p.id}">
-            <option value="BS">Bs</option>
-            <option value="USD">USD</option>
-          </select>
-        </div>
-      </div>
-      <div id="comisionInfo_${p.id}"></div>
-    </div>
-  `).join('');
+  const metodoOptions = [...new Set(METODOS.map(function(m){ return m.metodo; }))].map(function(m){
+    return '<option value="' + m + '">' + m + '</option>';
+  }).join('');
+
+  container.innerHTML = pagos.map(function(p) {
+    const removeBtn = pagos.length > 1 ? '<button class="pago-remove" onclick="removePago(' + p.id + ')">×</button>' : '';
+    return '<div class="pago-block">' +
+      removeBtn +
+      '<div class="row2" style="margin-bottom:8px">' +
+        '<div class="field">' +
+          '<label>Método</label>' +
+          '<select id="metodo_' + p.id + '" onchange="onMetodoChange(' + p.id + ')">' +
+            '<option value="">Seleccionar...</option>' +
+            metodoOptions +
+          '</select>' +
+        '</div>' +
+        '<div class="field" id="bancoWrap_' + p.id + '" style="display:none">' +
+          '<label>Banco</label>' +
+          '<select id="banco_' + p.id + '" onchange="onBancoChange(' + p.id + ')">' +
+            '<option value="">Seleccionar...</option>' +
+          '</select>' +
+        '</div>' +
+      '</div>' +
+      '<div class="row2">' +
+        '<div class="field">' +
+          '<label>Monto</label>' +
+          '<input type="number" id="monto_' + p.id + '" placeholder="0.00" step="0.01" onchange="updateTotals()">' +
+        '</div>' +
+        '<div class="field">' +
+          '<label>Moneda</label>' +
+          '<select id="moneda_' + p.id + '">' +
+            '<option value="BS">Bs</option>' +
+            '<option value="USD">USD</option>' +
+          '</select>' +
+        '</div>' +
+      '</div>' +
+      '<div id="comisionInfo_' + p.id + '"></div>' +
+    '</div>';
+  }).join('');
 }
 
 function onMetodoChange(id) {
