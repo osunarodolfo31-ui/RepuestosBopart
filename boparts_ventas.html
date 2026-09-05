@@ -254,7 +254,7 @@
 const CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRaAnGd-Bfaxo3LjUiGeV8p0F2weaKqHGwJ0hWibSMj02-h7dRAQPDMmGL5B8-XQg66Yjd3zgOAaz8X/pub?gid=2100998338&single=true&output=csv';
 const METODOS_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRaAnGd-Bfaxo3LjUiGeV8p0F2weaKqHGwJ0hWibSMj02-h7dRAQPDMmGL5B8-XQg66Yjd3zgOAaz8X/pub?gid=1722352135&single=true&output=csv';
 const APPS_SCRIPT_VENTAS_URL = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
-const ALIADOS_URL = ''; // Se llenará con la URL de ALIADOS
+const ALIADOS_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRaAnGd-Bfaxo3LjUiGeV8p0F2weaKqHGwJ0hWibSMj02-h7dRAQPDMmGL5B8-XQg66Yjd3zgOAaz8X/pub?gid=1774376295&single=true&output=csv';
 const TASA = parseFloat(localStorage.getItem('motoauto_tasa') || '1000');
 
 // ── STATE ─────────────────────────────────────────────────────
@@ -272,8 +272,29 @@ let ALIADOS = [
 document.getElementById('fechaHeader').textContent = new Date().toLocaleDateString('es-VE', {weekday:'long', day:'numeric', month:'long'});
 
 async function init() {
-  await Promise.all([loadProducts(), loadMetodos()]);
-  addPago(); // Add first payment method by default
+  await Promise.all([loadProducts(), loadMetodos(), loadAliados()]);
+  addPago();
+}
+
+async function loadAliados() {
+  if (!ALIADOS_URL) return;
+  try {
+    const res = await fetch(ALIADOS_URL + '&t=' + Date.now());
+    const text = await res.text();
+    const rows = parseCSV(text);
+    const loaded = [];
+    for (let i = 1; i < rows.length; i++) {
+      const r = rows[i];
+      if (!r[0] || r[6] === 'NO') continue;
+      loaded.push({
+        id: r[0].trim(),
+        nombre: r[1].trim(),
+        negocio: r[2].trim(),
+        comision: parseFloat(r[4]) || 5
+      });
+    }
+    if (loaded.length) ALIADOS = loaded;
+  } catch(e) {}
 }
 
 // ── CSV PARSER ────────────────────────────────────────────────
