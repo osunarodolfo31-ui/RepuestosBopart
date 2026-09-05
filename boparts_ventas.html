@@ -113,6 +113,26 @@
   .nav-card .nav-desc{font-size:10px;color:#666;text-align:center}
   .nav-card.active-module{border-color:#F5A800;background:rgba(245,168,0,0.1)}
 
+
+  /* ALIADO TOGGLE */
+  .toggle-wrap{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border);margin-bottom:10px}
+  .toggle-label{font-size:13px;font-weight:600;color:var(--ink)}
+  .toggle-sub{font-size:11px;color:var(--ink-muted);margin-top:2px}
+  .toggle{width:44px;height:24px;background:var(--border);border-radius:12px;cursor:pointer;position:relative;transition:background .2s;border:none;flex-shrink:0}
+  .toggle.on{background:var(--brand)}
+  .toggle::after{content:'';position:absolute;width:18px;height:18px;background:#fff;border-radius:50%;top:3px;left:3px;transition:left .2s}
+  .toggle.on::after{left:23px}
+  .aliado-select{display:none;margin-top:10px}
+  .aliado-select.show{display:block}
+  .aliado-card{background:var(--card2);border:1.5px solid var(--border);border-radius:var(--radius-sm);padding:12px;cursor:pointer;margin-bottom:8px;transition:border-color .15s}
+  .aliado-card.selected{border-color:var(--brand);background:var(--brand-soft)}
+  .aliado-card-name{font-size:13px;font-weight:700;color:var(--ink)}
+  .aliado-card-neg{font-size:11px;color:var(--ink-muted)}
+  .aliado-card-com{font-size:11px;color:var(--brand);font-weight:600;float:right}
+  .comision-preview{background:rgba(245,168,0,0.1);border:1px solid rgba(245,168,0,0.3);border-radius:var(--radius-sm);padding:10px 12px;margin-top:10px;font-size:12px;color:var(--ink-soft);display:none}
+  .comision-preview.show{display:block}
+  .comision-preview strong{color:var(--brand)}
+
 </style>
 </head>
 <body>
@@ -191,6 +211,23 @@
     <button class="add-pago-btn" id="addPagoBtn" onclick="addPago()">+ Agregar forma de pago</button>
   </div>
 
+  <!-- ALIADO -->
+  <div class="section">
+    <div class="section-title">🤝 Aliado / Referido</div>
+    <div class="toggle-wrap">
+      <div>
+        <div class="toggle-label">¿Venta referida por aliado?</div>
+        <div class="toggle-sub">Luis (Taller Diesel) · David (Taller Motos)</div>
+      </div>
+      <button class="toggle" id="aliadoToggle" onclick="toggleAliado()"></button>
+    </div>
+    <div class="aliado-select" id="aliadoSelect">
+      <label>Selecciona el aliado</label>
+      <div id="aliadoCards"></div>
+      <div class="comision-preview" id="comisionPreview"></div>
+    </div>
+  </div>
+
   <!-- NOTAS -->
   <div class="section">
     <div class="section-title">📝 Notas</div>
@@ -217,6 +254,7 @@
 const CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRaAnGd-Bfaxo3LjUiGeV8p0F2weaKqHGwJ0hWibSMj02-h7dRAQPDMmGL5B8-XQg66Yjd3zgOAaz8X/pub?gid=2100998338&single=true&output=csv';
 const METODOS_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRaAnGd-Bfaxo3LjUiGeV8p0F2weaKqHGwJ0hWibSMj02-h7dRAQPDMmGL5B8-XQg66Yjd3zgOAaz8X/pub?gid=1722352135&single=true&output=csv';
 const APPS_SCRIPT_VENTAS_URL = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
+const ALIADOS_URL = ''; // Se llenará con la URL de ALIADOS
 const TASA = parseFloat(localStorage.getItem('motoauto_tasa') || '1000');
 
 // ── STATE ─────────────────────────────────────────────────────
@@ -225,6 +263,10 @@ let METODOS = [];
 let cart = []; // {producto, codigo, precio, cantidad}
 let pagos = []; // {metodo, banco, moneda, monto, costoFijo, porcentaje}
 let pagoCount = 0;
+let ALIADOS = [
+  {id:'AL-001', nombre:'Luis', negocio:'Taller Diesel', comision:5},
+  {id:'AL-002', nombre:'David', negocio:'Taller Motos', comision:5},
+];
 
 // ── INIT ──────────────────────────────────────────────────────
 document.getElementById('fechaHeader').textContent = new Date().toLocaleDateString('es-VE', {weekday:'long', day:'numeric', month:'long'});
@@ -424,6 +466,7 @@ function updateTotals() {
     document.getElementById('comisionRow').style.display = 'none';
     document.getElementById('netoRow').style.display = 'none';
   }
+  if (aliadoSeleccionado) updateComisionPreview();
 }
 
 // ── PAYMENT METHODS ───────────────────────────────────────────
@@ -554,6 +597,7 @@ async function guardarVenta() {
     }
   });
 
+  const aliadoComBS = aliadoSeleccionado ? Math.round(totalBS * aliadoSeleccionado.comision / 100) : 0;
   const payload = {
     fecha, hora, vendedor, canal,
     productos: productosStr,
@@ -564,6 +608,10 @@ async function guardarVenta() {
     pago3: pagoData[2] || {},
     comision: Math.round(totalComision),
     neto: Math.round(totalBS - totalComision),
+    aliado: aliadoSeleccionado ? aliadoSeleccionado.nombre : '',
+    aliadoNegocio: aliadoSeleccionado ? aliadoSeleccionado.negocio : '',
+    aliadoPct: aliadoSeleccionado ? aliadoSeleccionado.comision : 0,
+    aliadoComision: aliadoComBS,
     notas
   };
 
@@ -605,6 +653,11 @@ function resetForm() {
   document.getElementById('vendedor').value = '';
   document.getElementById('canal').value = '';
   document.getElementById('notas').value = '';
+  aliadoSeleccionado = null;
+  aliadoOn = false;
+  document.getElementById('aliadoToggle').classList.remove('on');
+  document.getElementById('aliadoSelect').classList.remove('show');
+  document.getElementById('comisionPreview').classList.remove('show');
   document.getElementById('successScreen').classList.remove('show');
   renderCart();
   renderPagos();
@@ -618,6 +671,49 @@ function showToast(msg, type='') {
   t.textContent = msg;
   t.className = 'toast show ' + type;
   setTimeout(() => t.className = 'toast', 3000);
+}
+
+// ── ALIADOS ───────────────────────────────────────────────────
+let aliadoSeleccionado = null;
+let aliadoOn = false;
+
+function toggleAliado() {
+  aliadoOn = !aliadoOn;
+  const btn = document.getElementById('aliadoToggle');
+  const sel = document.getElementById('aliadoSelect');
+  btn.classList.toggle('on', aliadoOn);
+  sel.classList.toggle('show', aliadoOn);
+  if (aliadoOn) renderAliadoCards();
+  else { aliadoSeleccionado = null; document.getElementById('comisionPreview').classList.remove('show'); }
+  updateTotals();
+}
+
+function renderAliadoCards() {
+  document.getElementById('aliadoCards').innerHTML = ALIADOS.map(a => `
+    <div class="aliado-card ${aliadoSeleccionado?.id === a.id ? 'selected' : ''}" onclick="selectAliado('${a.id}')">
+      <span class="aliado-card-com">${a.comision}%</span>
+      <div class="aliado-card-name">${a.nombre}</div>
+      <div class="aliado-card-neg">${a.negocio}</div>
+    </div>
+  `).join('');
+}
+
+function selectAliado(id) {
+  aliadoSeleccionado = ALIADOS.find(a => a.id === id);
+  renderAliadoCards();
+  updateComisionPreview();
+  updateTotals();
+}
+
+function updateComisionPreview() {
+  const preview = document.getElementById('comisionPreview');
+  if (!aliadoSeleccionado) { preview.classList.remove('show'); return; }
+  const totalUSD = cart.reduce((s, c) => s + c.precio * c.cantidad, 0);
+  const totalBS = Math.round(totalUSD * TASA);
+  const comBS = Math.round(totalBS * aliadoSeleccionado.comision / 100);
+  const comUSD = (totalUSD * aliadoSeleccionado.comision / 100).toFixed(2);
+  preview.innerHTML = `Comisión para <strong>${aliadoSeleccionado.nombre}</strong>: <strong>Bs ${comBS.toLocaleString('es-VE')}</strong> / $${comUSD} (${aliadoSeleccionado.comision}% del total)`;
+  preview.classList.add('show');
 }
 
 // ── START ─────────────────────────────────────────────────────
