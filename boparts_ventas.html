@@ -259,7 +259,8 @@
   <div class="success-icon">✅</div>
   <h2>¡Venta Registrada!</h2>
   <p id="successMsg"></p>
-  <button class="success-btn" onclick="resetForm()">Nueva Venta</button>
+  <button class="success-btn" onclick="abrirNotaDesdeSuccess()" style="margin-bottom:10px">📄 Generar Nota de Entrega</button>
+  <button class="success-btn" onclick="cerrarSuccess()" style="background:var(--card2);color:var(--ink-soft);border:1px solid var(--border)">Nueva Venta</button>
 </div>
 
 <script>
@@ -680,9 +681,8 @@ function showSuccess(vendedor, usd, bs) {
   document.getElementById('successMsg').textContent =
     `${vendedor} · $${usd.toFixed(2)} / Bs ${bs.toLocaleString('es-VE')}`;
   document.getElementById('successScreen').classList.add('show');
-  // Show nota modal after brief delay so success screen renders first
-  const cartSnapshot = cart.map(c => ({...c}));
-  setTimeout(() => abrirNota({ cartItems: cartSnapshot }), 800);
+  // Store cart for nota
+  window._lastCartSnapshot = cart.map(c => ({...c}));
 }
 
 function resetForm() {
@@ -814,6 +814,13 @@ function abrirNota(ventaData) {
 
 function cerrarNota() {
   document.getElementById('notaModal').classList.remove('show');
+  document.getElementById('successScreen').classList.remove('show');
+  resetForm();
+}
+function abrirNotaDesdeSuccess() {
+  abrirNota({ cartItems: window._lastCartSnapshot || [] });
+}
+function cerrarSuccess() {
   document.getElementById('successScreen').classList.remove('show');
   resetForm();
 }
