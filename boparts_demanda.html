@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>BoParts · Demanda No Atendida</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --brand:#F5A800;--brand-soft:rgba(245,168,0,.15);
+  --bg:#111;--bg2:#1A1A1A;--card:#1E1E1E;--card2:#252525;--border:#2E2E2E;
+  --ink:#F0F0F0;--ink-soft:#AAA;--ink-muted:#666;
+  --green:#22C55E;--red:#EF4444;--purple:#A78BFA;
+  --radius:14px;--radius-sm:8px;
+}
+html,body{min-height:100%;background:var(--bg);font-family:'Inter',sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased}
+header{background:var(--bg2);border-bottom:2px solid var(--brand);padding:12px 16px;display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:50}
+.logo{height:38px;border-radius:4px}
+.hdr h1{font-size:15px;font-weight:700}
+.hdr p{font-size:11px;color:var(--ink-muted)}
+.container{padding:16px;max-width:520px;margin:0 auto;padding-bottom:100px}
+.section{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:12px}
+.stitle{font-size:12px;font-weight:700;color:var(--brand);text-transform:uppercase;letter-spacing:.5px;margin-bottom:12px}
+label{font-size:12px;color:var(--ink-soft);font-weight:600;display:block;margin-bottom:4px}
+input,select,textarea{width:100%;background:var(--card2);border:1.5px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;font-size:14px;font-family:inherit;color:var(--ink);outline:none;transition:border-color .15s}
+input:focus,select:focus,textarea:focus{border-color:var(--brand)}
+input::placeholder,textarea::placeholder{color:var(--ink-muted)}
+select option{background:#1E1E1E;color:var(--ink)}
+.field{margin-bottom:12px}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+
+/* SEARCH */
+.wrap{position:relative}
+.drop{background:var(--card2);border:1px solid var(--border);border-radius:var(--radius-sm);max-height:220px;overflow-y:auto;position:absolute;width:100%;z-index:80;display:none;margin-top:4px;box-shadow:0 8px 24px rgba(0,0,0,.4)}
+.drop.open{display:block}
+.ditem{padding:10px 12px;font-size:13px;cursor:pointer;border-bottom:1px solid var(--border);color:var(--ink)}
+.ditem:last-child{border-bottom:none}
+.ditem:active,.ditem:hover{background:var(--brand-soft)}
+.ditem-meta{font-size:10px;color:var(--ink-muted);margin-top:2px}
+.ditem-price{font-size:11px;color:var(--brand);font-weight:600;float:right}
+
+/* PRODUCTO SELECCIONADO */
+.prod-sel{background:var(--brand-soft);border:1.5px solid var(--brand);border-radius:var(--radius-sm);padding:12px;margin-bottom:12px;display:none}
+.prod-sel.open{display:block}
+.prod-sel-name{font-size:14px;font-weight:700}
+.prod-sel-meta{font-size:11px;color:var(--ink-muted);margin-top:3px}
+.prod-clear{float:right;background:none;border:none;color:var(--ink-muted);cursor:pointer;font-size:18px;margin-top:-2px}
+
+/* PROVEEDORES */
+.prov-cards{display:flex;flex-direction:column;gap:8px;margin-top:8px}
+.prov-card{background:var(--card2);border-radius:var(--radius-sm);padding:10px 12px;border:1px solid var(--border);display:flex;justify-content:space-between;align-items:center}
+.prov-name{font-size:12px;font-weight:700;color:var(--ink)}
+.prov-price{font-size:14px;font-weight:700;color:var(--brand)}
+.prov-cat{font-size:10px;color:var(--ink-muted)}
+.no-prov{font-size:12px;color:var(--ink-muted);padding:8px;text-align:center}
+
+/* FOTOS */
+.foto-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px}
+.foto-slot{aspect-ratio:1;border:1.5px dashed var(--border);border-radius:var(--radius-sm);display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;position:relative;overflow:hidden;background:var(--card2);transition:border-color .15s}
+.foto-slot:active{border-color:var(--brand)}
+.foto-slot .ficon{font-size:28px}
+.foto-slot .flbl{font-size:10px;color:var(--ink-muted);margin-top:4px;font-weight:600}
+.foto-slot img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.foto-del{position:absolute;top:4px;right:4px;background:rgba(0,0,0,.7);border:none;color:#fff;border-radius:50%;width:22px;height:22px;font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.foto-slot input{position:absolute;inset:0;opacity:0;cursor:pointer;font-size:0}
+.foto-prog{position:absolute;bottom:0;left:0;height:3px;background:var(--brand);transition:width .3s}
+
+/* CLIENTE TOGGLE */
+.tog-wrap{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.tog-lbl{font-size:13px;font-weight:600}
+.tog{width:44px;height:24px;background:var(--border);border-radius:12px;cursor:pointer;position:relative;transition:background .2s;border:none;flex-shrink:0}
+.tog.on{background:var(--brand)}
+.tog::after{content:'';position:absolute;width:18px;height:18px;background:#fff;border-radius:50%;top:3px;left:3px;transition:left .2s}
+.tog.on::after{left:23px}
+.cli-form{display:none}
+.cli-form.open{display:block}
+
+/* SUBMIT */
+.subbtn{width:100%;padding:16px;background:var(--brand);color:#111;border:none;border-radius:var(--radius);font-size:16px;font-weight:700;cursor:pointer;font-family:inherit;position:fixed;bottom:0;left:0;right:0;max-width:520px;margin:0 auto}
+.subbtn:disabled{opacity:.5}
+
+/* SUCCESS */
+.success{display:none;position:fixed;inset:0;background:var(--bg);z-index:300;flex-direction:column;align-items:center;justify-content:center;padding:24px;text-align:center}
+.success.open{display:flex}
+.sicon{font-size:64px;margin-bottom:16px}
+.success h2{font-size:22px;font-weight:700;margin-bottom:8px}
+.success p{font-size:14px;color:var(--ink-muted);margin-bottom:24px;line-height:1.6}
+.sbtn{width:100%;padding:14px;border:none;border-radius:var(--radius);font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;margin-bottom:10px;background:var(--brand);color:#111}
+
+/* TOAST */
+.toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%) translateY(80px);background:#222;color:#fff;padding:12px 20px;border-radius:30px;font-size:13px;font-weight:600;transition:transform .3s;z-index:999;white-space:nowrap;border:1px solid var(--border);pointer-events:none}
+.toast.show{transform:translateX(-50%) translateY(0)}
+.toast.ok{border-color:var(--green);color:var(--green)}
+.toast.err{border-color:var(--red);color:var(--red)}
+
+/* NAV */
+.fab{position:fixed;bottom:70px;right:16px;z-index:90;width:48px;height:48px;background:var(--brand);border:none;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 16px rgba(245,168,0,.4)}
+.nav-ov{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:91;opacity:0;pointer-events:none;transition:opacity .2s}
+.nav-ov.open{opacity:1;pointer-events:auto}
+.nav-pan{position:fixed;bottom:0;left:0;right:0;z-index:92;background:var(--bg2);border-radius:20px 20px 0 0;border-top:2px solid var(--brand);padding:20px 16px 40px;transform:translateY(100%);transition:transform .3s}
+.nav-pan.open{transform:translateY(0)}
+.nav-t{font-size:12px;font-weight:700;color:var(--brand);text-transform:uppercase;letter-spacing:.5px;margin-bottom:16px;text-align:center}
+.nav-g{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.ncard{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px 12px;display:flex;flex-direction:column;align-items:center;gap:8px;text-decoration:none}
+.ncard.cur{border-color:var(--brand);background:var(--brand-soft)}
+.nicon{font-size:28px}
+.nlbl{font-size:12px;font-weight:700;color:var(--ink);text-align:center}
+.ndesc{font-size:10px;color:var(--ink-muted);text-align:center}
+</style>
+</head>
+<body>
+
+<header>
+  <img src="icon-192.png" alt="BoParts" class="logo">
+  <div class="hdr">
+    <h1>Demanda No Atendida</h1>
+    <p id="fechaHdr"></p>
+  </div>
+</header>
+
+<div class="container">
+
+  <!-- VENDEDOR -->
+  <div class="section">
+    <div class="stitle">Vendedor</div>
+    <div class="field">
+      <select id="selV">
+        <option value="">Seleccionar...</option>
+        <option>Rodolfo Osuna</option>
+        <option>Javier Boves</option>
+        <option>Reinaldo Cuicas</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- PRODUCTO -->
+  <div class="section">
+    <div class="stitle">Producto Solicitado</div>
+    <div class="field wrap">
+      <label>Buscar en catalogo de proveedores</label>
+      <input type="search" id="prodSearch" placeholder="Nombre o codigo..." autocomplete="off" autocorrect="off" spellcheck="false">
+      <div class="drop" id="prodDrop"></div>
+    </div>
+
+    <!-- Producto seleccionado -->
+    <div class="prod-sel" id="prodSel">
+      <button class="prod-clear" onclick="limpiarProd()">&#x2715;</button>
+      <div class="prod-sel-name" id="prodSelName"></div>
+      <div class="prod-sel-meta" id="prodSelMeta"></div>
+    </div>
+
+    <!-- Proveedores que lo tienen -->
+    <div id="provsWrap" style="display:none">
+      <label>Proveedores disponibles</label>
+      <div class="prov-cards" id="provCards"></div>
+    </div>
+
+    <!-- Si no está en catálogo -->
+    <div class="field" id="prodManualWrap" style="display:none">
+      <label>Nombre del producto</label>
+      <input type="text" id="prodManual" placeholder="Describe el producto solicitado">
+    </div>
+
+    <div class="row2">
+      <div class="field">
+        <label>Categoria</label>
+        <select id="selCat">
+          <option value="">Seleccionar...</option>
+          <option>MOTO</option>
+          <option>CARRO</option>
+          <option>CAMION</option>
+          <option>LUBRICANTES Y FLUIDOS</option>
+          <option>CONSUMIBLES</option>
+          <option>NEUMATICOS</option>
+          <option>OTRO</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Cantidad pedida</label>
+        <input type="number" id="cantidad" value="1" min="1">
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Notas adicionales</label>
+      <textarea id="notas" rows="2" placeholder="Detalles, referencias, observaciones..."></textarea>
+    </div>
+  </div>
+
+  <!-- FOTOS -->
+  <div class="section">
+    <div class="stitle">Fotos de muestra (opcional)</div>
+    <div class="foto-grid">
+      <div class="foto-slot" id="slot0">
+        <span class="ficon">📷</span>
+        <span class="flbl">Foto 1</span>
+        <input type="file" accept="image/*" capture="environment" onchange="subirFoto(this,0)">
+      </div>
+      <div class="foto-slot" id="slot1">
+        <span class="ficon">📷</span>
+        <span class="flbl">Foto 2</span>
+        <input type="file" accept="image/*" capture="environment" onchange="subirFoto(this,1)">
+      </div>
+    </div>
+  </div>
+
+  <!-- CLIENTE -->
+  <div class="section">
+    <div class="stitle">Cliente (opcional)</div>
+    <div class="tog-wrap">
+      <span class="tog-lbl">El cliente quiere ser notificado</span>
+      <button class="tog" id="cliTog" onclick="toggleCli()"></button>
+    </div>
+    <div class="cli-form" id="cliForm">
+      <div class="field"><label>Nombre</label><input type="text" id="cliNombre" placeholder="Nombre del cliente"></div>
+      <div class="field"><label>Telefono</label><input type="tel" id="cliTel" placeholder="0414-1234567"></div>
+    </div>
+  </div>
+
+</div>
+
+<button class="subbtn" onclick="guardar()">Registrar Demanda</button>
+
+<div class="success" id="success">
+  <div class="sicon">✅</div>
+  <h2>Demanda Registrada</h2>
+  <p id="successMsg"></p>
+  <button class="sbtn" onclick="nuevo()">Registrar otra</button>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- FAB NAV -->
+<button class="fab" onclick="toggleNav()">
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#111" stroke-width="2.5" stroke-linecap="round">
+    <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
+  </svg>
+</button>
+<div class="nav-ov" id="navOv" onclick="closeNav()"></div>
+<div class="nav-pan" id="navPan">
+  <div class="nav-t">Repuesto BoParts</div>
+  <div class="nav-g">
+    <a class="ncard" href="index.html"><span class="nicon">📋</span><span class="nlbl">Lista de Precios</span><span class="ndesc">Consulta y busqueda</span></a>
+    <a class="ncard" href="boparts_ventas.html"><span class="nicon">💰</span><span class="nlbl">Registrar Venta</span><span class="ndesc">Nueva venta</span></a>
+    <a class="ncard" href="boparts_fotos.html"><span class="nicon">📷</span><span class="nlbl">Cargar Fotos</span><span class="ndesc">Catalogo imagenes</span></a>
+    <a class="ncard cur" href="boparts_demanda.html"><span class="nicon">📝</span><span class="nlbl">Demanda</span><span class="ndesc">No atendida</span></a>
+  </div>
+</div>
+
+<script>
+var CATALOGO_URL  = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRaAnGd-Bfaxo3LjUiGeV8p0F2weaKqHGwJ0hWibSMj02-h7dRAQPDMmGL5B8-XQg66Yjd3zgOAaz8X/pub?gid=1075523188&single=true&output=csv';
+var SCRIPT_URL    = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
+var CLOUDINARY    = 'c7jufi9v';
+var UPLOAD_PRESET = 'boparts_productos';
+
+var CATALOGO = [];
+var prodSel  = null;
+var provsSel = [];
+var fotos    = [null, null];
+var cliOn    = false;
+
+document.getElementById('fechaHdr').textContent =
+  new Date().toLocaleDateString('es-VE', {weekday:'long', day:'numeric', month:'long'});
+
+// CSV PARSER
+function parseCSV(txt) {
+  var rows = [], lines = txt.split(/\r?\n/);
+  for (var i = 0; i < lines.length; i++) {
+    var row = [], cur = '', q = false;
+    for (var c = 0; c < lines[i].length; c++) {
+      var ch = lines[i][c];
+      if (ch === '"') { q = !q; }
+      else if (ch === ',' && !q) { row.push(cur.trim()); cur = ''; }
+      else { cur += ch; }
+    }
+    row.push(cur.trim());
+    rows.push(row);
+  }
+  return rows;
+}
+
+function isValid(txt) {
+  if (!txt) return false;
+  var t = txt.trim().substring(0,10).toLowerCase();
+  return !(t.indexOf('<!doc')===0||t.indexOf('<html')===0||t.indexOf('function')===0);
+}
+
+function escHtml(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+// LOAD CATALOGO
+function loadCatalogo() {
+  var cached = sessionStorage.getItem('boparts_catalogo');
+  if (cached && isValid(cached)) { parseCatalogo(cached); return; }
+  fetch(CATALOGO_URL + '&t=' + Date.now())
+    .then(function(r){ return r.text(); })
+    .then(function(txt){
+      if (!isValid(txt)) return;
+      sessionStorage.setItem('boparts_catalogo', txt);
+      parseCatalogo(txt);
+    }).catch(function(){});
+}
+
+function parseCatalogo(txt) {
+  var rows = parseCSV(txt);
+  CATALOGO = [];
+  for (var i = 1; i < rows.length; i++) {
+    var r = rows[i];
+    var desc = (r[0]||'').trim();
+    if (!desc || desc === 'DESCRIPCION') continue;
+    var precio = parseFloat(r[3]) || 0;
+    if (precio <= 0) continue;
+    CATALOGO.push({
+      descripcion: desc,
+      codigo:      (r[1]||'').trim(),
+      proveedor:   (r[2]||'').trim(),
+      precio:      precio,
+      categoria:   (r[4]||'').trim(),
+      marca:       (r[5]||'').trim()
+    });
+  }
+}
+
+// SEARCH
+function norm(s) {
+  return (s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+}
+
+var prodSearch = document.getElementById('prodSearch');
+var prodDrop   = document.getElementById('prodDrop');
+
+prodSearch.addEventListener('input', function() {
+  var q = norm(prodSearch.value).trim();
+  if (q.length < 3) { prodDrop.classList.remove('open'); return; }
+  var terms = q.split(/\s+/);
+
+  // Find matching unique products (same name, different providers)
+  var seen = {}, res = [];
+  for (var i = 0; i < CATALOGO.length && res.length < 20; i++) {
+    var p = CATALOGO[i];
+    var hay = norm(p.descripcion + ' ' + p.codigo);
+    var ok = true;
+    for (var t = 0; t < terms.length; t++) { if (hay.indexOf(terms[t]) < 0) { ok = false; break; } }
+    if (!ok) continue;
+    var key = norm(p.descripcion);
+    if (!seen[key]) {
+      seen[key] = true;
+      res.push(p);
+    }
+  }
+
+  if (!res.length) {
+    prodDrop.innerHTML = '<div class="ditem" onclick="prodNuevo()" style="color:var(--brand);font-weight:600">+ No encontrado - Registrar como nuevo</div>';
+    prodDrop.classList.add('open');
+    return;
+  }
+
+  var h = '';
+  for (var i = 0; i < res.length; i++) {
+    var p = res[i];
+    // Count how many providers have this
+    var provCount = CATALOGO.filter(function(x){ return norm(x.descripcion)===norm(p.descripcion); }).length;
+    h += '<div class="ditem" onclick="selProd(' + i + ',\'' + escHtml(norm(p.descripcion)).replace(/'/g,"\\'") + '\')">' +
+      escHtml(p.descripcion) +
+      '<div class="ditem-meta">' + escHtml(p.categoria) + (p.codigo ? ' · #'+escHtml(p.codigo) : '') + ' · ' + provCount + ' proveedor(es)</div>' +
+    '</div>';
+  }
+  h += '<div class="ditem" onclick="prodNuevo()" style="color:var(--brand);font-weight:600">+ No esta en el catalogo - Registrar como nuevo</div>';
+  prodDrop.innerHTML = h;
+  prodDrop.classList.add('open');
+});
+
+document.addEventListener('click', function(e) {
+  if (!e.target.closest('.wrap')) prodDrop.classList.remove('open');
+});
+
+// SELECT PRODUCT FROM CATALOG
+function selProd(idx, normDesc) {
+  var p = null;
+  // Find first match
+  for (var i = 0; i < CATALOGO.length; i++) {
+    if (norm(CATALOGO[i].descripcion) === normDesc) { p = CATALOGO[i]; break; }
+  }
+  if (!p) return;
+
+  prodSel = p;
+  prodSearch.value = '';
+  prodDrop.classList.remove('open');
+
+  // Show selected
+  document.getElementById('prodSelName').textContent = p.descripcion;
+  document.getElementById('prodSelMeta').textContent = p.categoria + (p.codigo ? ' · #' + p.codigo : '');
+  document.getElementById('prodSel').classList.add('open');
+  document.getElementById('prodManualWrap').style.display = 'none';
+
+  // Set category
+  document.getElementById('selCat').value = p.categoria;
+
+  // Find all providers
+  provsSel = CATALOGO.filter(function(x){ return norm(x.descripcion) === normDesc; });
+  mostrarProveedores();
+}
+
+function mostrarProveedores() {
+  var wrap = document.getElementById('provsWrap');
+  var cards = document.getElementById('provCards');
+  if (!provsSel.length) { wrap.style.display = 'none'; return; }
+  wrap.style.display = 'block';
+  var h = '';
+  for (var i = 0; i < provsSel.length; i++) {
+    var pv = provsSel[i];
+    h += '<div class="prov-card">' +
+      '<div><div class="prov-name">' + escHtml(pv.proveedor) + '</div>' +
+      '<div class="prov-cat">' + escHtml(pv.marca || pv.categoria) + '</div></div>' +
+      '<div class="prov-price">$' + pv.precio.toFixed(2) + '</div>' +
+    '</div>';
+  }
+  cards.innerHTML = h;
+}
+
+function limpiarProd() {
+  prodSel = null; provsSel = [];
+  document.getElementById('prodSel').classList.remove('open');
+  document.getElementById('provsWrap').style.display = 'none';
+  document.getElementById('prodManualWrap').style.display = 'none';
+  document.getElementById('prodSearch').value = '';
+}
+
+// NEW PRODUCT (not in catalog)
+function prodNuevo() {
+  prodSel = null; provsSel = [];
+  prodDrop.classList.remove('open');
+  document.getElementById('prodSel').classList.remove('open');
+  document.getElementById('provsWrap').style.display = 'none';
+  document.getElementById('prodManualWrap').style.display = 'block';
+  document.getElementById('provCards').innerHTML = '<div class="no-prov">Ningún proveedor registrado tiene este producto</div>';
+  document.getElementById('provsWrap').style.display = 'block';
+  document.getElementById('prodManual').focus();
+}
+
+// FOTOS
+function subirFoto(input, slotIdx) {
+  var file = input.files[0];
+  if (!file) return;
+  var slot = document.getElementById('slot' + slotIdx);
+  slot.innerHTML = '<span class="ficon">⏳</span><span class="flbl">Subiendo...</span><div class="foto-prog" id="prog' + slotIdx + '" style="width:0%"></div>';
+
+  var fd = new FormData();
+  fd.append('file', file);
+  fd.append('upload_preset', UPLOAD_PRESET);
+  fd.append('folder', 'boparts/demanda');
+
+  fetch('https://api.cloudinary.com/v1_1/' + CLOUDINARY + '/image/upload', {method:'POST', body:fd})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (d.secure_url) {
+        fotos[slotIdx] = d.secure_url;
+        renderSlot(slotIdx);
+        toast('Foto subida ✓', 'ok');
+      } else { throw new Error(d.error && d.error.message || 'Error'); }
+    }).catch(function(e){
+      slot.innerHTML = '<span class="ficon">⚠️</span><span class="flbl" style="color:var(--red)">Error</span><input type="file" accept="image/*" capture="environment" onchange="subirFoto(this,' + slotIdx + ')">';
+      toast('Error subiendo foto', 'err');
+    });
+}
+
+function renderSlot(i) {
+  var slot = document.getElementById('slot' + i);
+  if (fotos[i]) {
+    slot.innerHTML = '<img src="' + fotos[i] + '" alt="foto"><button class="foto-del" onclick="borrarFoto(' + i + ')">&#x2715;</button><input type="file" accept="image/*" capture="environment" onchange="subirFoto(this,' + i + ')">';
+  } else {
+    slot.innerHTML = '<span class="ficon">📷</span><span class="flbl">Foto ' + (i+1) + '</span><input type="file" accept="image/*" capture="environment" onchange="subirFoto(this,' + i + ')">';
+  }
+}
+
+function borrarFoto(i) { fotos[i] = null; renderSlot(i); }
+
+// CLIENTE TOGGLE
+function toggleCli() {
+  cliOn = !cliOn;
+  document.getElementById('cliTog').classList.toggle('on', cliOn);
+  document.getElementById('cliForm').classList.toggle('open', cliOn);
+}
+
+// GUARDAR
+function guardar() {
+  var vendedor = document.getElementById('selV').value;
+  if (!vendedor) { toast('Selecciona el vendedor', 'err'); return; }
+
+  var prodNombre = prodSel ? prodSel.descripcion : document.getElementById('prodManual').value.trim();
+  if (!prodNombre) { toast('Indica el producto solicitado', 'err'); return; }
+
+  var cat = document.getElementById('selCat').value;
+  var cant = parseInt(document.getElementById('cantidad').value) || 1;
+  var notas = document.getElementById('notas').value;
+  var now = new Date();
+  var fecha = now.toLocaleDateString('es-VE');
+  var hora = now.toLocaleTimeString('es-VE', {hour:'2-digit', minute:'2-digit'});
+
+  var prov1 = '', precio1 = '', prov2 = '', precio2 = '';
+  if (provsSel.length > 0) { prov1 = provsSel[0].proveedor; precio1 = provsSel[0].precio; }
+  if (provsSel.length > 1) { prov2 = provsSel[1].proveedor; precio2 = provsSel[1].precio; }
+
+  var payload = {
+    tipo: 'demanda',
+    fecha: fecha, hora: hora, vendedor: vendedor,
+    producto: prodNombre, categoria: cat, cantidad: cant,
+    cliNombre: cliOn ? document.getElementById('cliNombre').value.trim() : '',
+    cliTel:    cliOn ? document.getElementById('cliTel').value.trim() : '',
+    notificar: cliOn ? 'SI' : 'NO',
+    foto1: fotos[0] || '', foto2: fotos[1] || '',
+    notas: notas,
+    proveedor1: prov1, precio1: precio1,
+    proveedor2: prov2, precio2: precio2,
+    estado: 'PENDIENTE'
+  };
+
+  fetch(SCRIPT_URL, {method:'POST', mode:'no-cors', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)})
+    .catch(function(){});
+
+  var provText = prov1 ? ' · Proveedor: ' + prov1 + ' ($' + precio1 + ')' : ' · Sin proveedor registrado';
+  document.getElementById('successMsg').textContent = prodNombre + provText;
+  document.getElementById('success').classList.add('open');
+}
+
+function nuevo() {
+  document.getElementById('success').classList.remove('open');
+  limpiarProd();
+  fotos = [null, null];
+  renderSlot(0); renderSlot(1);
+  cliOn = false;
+  document.getElementById('cliTog').classList.remove('on');
+  document.getElementById('cliForm').classList.remove('open');
+  document.getElementById('selV').value = '';
+  document.getElementById('selCat').value = '';
+  document.getElementById('cantidad').value = '1';
+  document.getElementById('notas').value = '';
+  document.getElementById('cliNombre').value = '';
+  document.getElementById('cliTel').value = '';
+  document.getElementById('prodManual').value = '';
+  document.getElementById('prodManualWrap').style.display = 'none';
+}
+
+function toast(msg, type) {
+  var el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'toast show ' + (type||'');
+  clearTimeout(el._t);
+  el._t = setTimeout(function(){ el.className = 'toast'; }, 3000);
+}
+function toggleNav() {
+  document.getElementById('navPan').classList.toggle('open');
+  document.getElementById('navOv').classList.toggle('open');
+}
+function closeNav() {
+  document.getElementById('navPan').classList.remove('open');
+  document.getElementById('navOv').classList.remove('open');
+}
+
+loadCatalogo();
+</script>
+</body>
+</html>
