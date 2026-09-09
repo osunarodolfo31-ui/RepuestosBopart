@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>BoParts · Reportes</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --brand:#F5A800;--brand-soft:rgba(245,168,0,.15);
+  --bg:#111;--bg2:#1A1A1A;--card:#1E1E1E;--card2:#252525;--border:#2E2E2E;
+  --ink:#F0F0F0;--ink-soft:#AAA;--ink-muted:#666;
+  --green:#22C55E;--red:#EF4444;--blue:#60A5FA;--purple:#A78BFA;
+  --radius:14px;--radius-sm:8px;
+}
+html,body{min-height:100%;background:var(--bg);font-family:'Inter',sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased}
+header{background:var(--bg2);border-bottom:2px solid var(--brand);padding:12px 16px;display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:50}
+.logo{height:38px;border-radius:4px}
+.hdr{flex:1}
+.hdr h1{font-size:15px;font-weight:700}
+.hdr p{font-size:11px;color:var(--ink-muted)}
+.refresh-btn{background:none;border:none;cursor:pointer;color:var(--ink-muted);padding:4px;display:flex;align-items:center}
+.refresh-btn svg{width:18px;height:18px}
+.spinning{animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+.container{padding:16px;max-width:520px;margin:0 auto;padding-bottom:100px}
+
+/* PERIOD SELECTOR */
+.period-tabs{display:flex;gap:6px;margin-bottom:16px;background:var(--card);border-radius:var(--radius);padding:4px}
+.ptab{flex:1;padding:8px;border:none;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;background:transparent;color:var(--ink-soft);transition:all .15s}
+.ptab.active{background:var(--brand);color:#111}
+
+/* CARDS */
+.card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:12px}
+.card-title{font-size:11px;font-weight:700;color:var(--brand);text-transform:uppercase;letter-spacing:.5px;margin-bottom:14px;display:flex;align-items:center;gap:6px}
+
+/* STAT GRID */
+.stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
+.stat-box{background:var(--card2);border-radius:var(--radius-sm);padding:12px;border:1px solid var(--border)}
+.stat-label{font-size:10px;color:var(--ink-muted);font-weight:600;text-transform:uppercase;letter-spacing:.3px;margin-bottom:4px}
+.stat-value{font-size:20px;font-weight:700;color:var(--ink);line-height:1}
+.stat-value.brand{color:var(--brand)}
+.stat-value.green{color:var(--green)}
+.stat-sub{font-size:11px;color:var(--ink-muted);margin-top:3px}
+
+/* BAR CHART */
+.bar-item{margin-bottom:10px}
+.bar-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
+.bar-label{font-size:12px;font-weight:600;color:var(--ink)}
+.bar-values{font-size:11px;color:var(--ink-muted);text-align:right}
+.bar-track{background:var(--card2);border-radius:4px;height:8px;overflow:hidden}
+.bar-fill{height:100%;border-radius:4px;transition:width .5s ease}
+
+/* TOP PRODUCTS */
+.top-item{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)}
+.top-item:last-child{border-bottom:none}
+.top-rank{width:24px;height:24px;border-radius:50%;background:var(--brand-soft);color:var(--brand);font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.top-rank.gold{background:rgba(245,168,0,.3);color:var(--brand)}
+.top-info{flex:1;min-width:0}
+.top-name{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.top-meta{font-size:11px;color:var(--ink-muted);margin-top:2px}
+.top-amt{font-size:13px;font-weight:700;color:var(--brand);flex-shrink:0}
+
+/* VENDEDOR */
+.vend-item{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border)}
+.vend-item:last-child{border-bottom:none}
+.vend-name{font-size:13px;font-weight:600}
+.vend-stats{text-align:right}
+.vend-bs{font-size:13px;font-weight:700;color:var(--brand)}
+.vend-cnt{font-size:11px;color:var(--ink-muted)}
+
+/* EMPTY / LOADING */
+.state-box{text-align:center;padding:40px 24px;color:var(--ink-muted)}
+.state-box .icon{font-size:36px;margin-bottom:10px}
+.state-box p{font-size:13px;line-height:1.5}
+
+/* TOAST */
+.toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%) translateY(80px);background:#222;color:#fff;padding:12px 20px;border-radius:30px;font-size:13px;font-weight:600;transition:transform .3s;z-index:999;white-space:nowrap;border:1px solid var(--border);pointer-events:none}
+.toast.show{transform:translateX(-50%) translateY(0)}
+.toast.err{border-color:var(--red);color:var(--red)}
+
+/* NAV */
+.fab{position:fixed;bottom:20px;right:16px;z-index:90;width:48px;height:48px;background:var(--brand);border:none;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 16px rgba(245,168,0,.4)}
+.nav-ov{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:91;opacity:0;pointer-events:none;transition:opacity .2s}
+.nav-ov.open{opacity:1;pointer-events:auto}
+.nav-pan{position:fixed;bottom:0;left:0;right:0;z-index:92;background:var(--bg2);border-radius:20px 20px 0 0;border-top:2px solid var(--brand);padding:20px 16px 40px;transform:translateY(100%);transition:transform .3s}
+.nav-pan.open{transform:translateY(0)}
+.nav-t{font-size:12px;font-weight:700;color:var(--brand);text-transform:uppercase;letter-spacing:.5px;margin-bottom:16px;text-align:center}
+.nav-g{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.ncard{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px 12px;display:flex;flex-direction:column;align-items:center;gap:8px;text-decoration:none}
+.ncard.cur{border-color:var(--brand);background:var(--brand-soft)}
+.nicon{font-size:28px}
+.nlbl{font-size:12px;font-weight:700;color:var(--ink);text-align:center}
+.ndesc{font-size:10px;color:var(--ink-muted);text-align:center}
+</style>
+</head>
+<body>
+
+<header>
+  <img src="icon-192.png" alt="BoParts" class="logo">
+  <div class="hdr">
+    <h1>Reportes de Ventas</h1>
+    <p id="periodoLabel"></p>
+  </div>
+  <button class="refresh-btn" onclick="cargarDatos(true)">
+    <svg id="refreshIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
+      <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
+    </svg>
+  </button>
+</header>
+
+<div class="container">
+
+  <!-- PERIOD TABS -->
+  <div class="period-tabs" id="periodTabs">
+    <button class="ptab active" onclick="setPeriodo(this,'dia')">Hoy</button>
+    <button class="ptab" onclick="setPeriodo(this,'semana')">Semana</button>
+    <button class="ptab" onclick="setPeriodo(this,'mes')">Mes</button>
+  </div>
+
+  <!-- CONTENT -->
+  <div id="content">
+    <div class="state-box"><div class="icon">⏳</div><p>Cargando datos...</p></div>
+  </div>
+
+</div>
+
+<!-- FAB NAV -->
+<button class="fab" onclick="toggleNav()">
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#111" stroke-width="2.5" stroke-linecap="round">
+    <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
+  </svg>
+</button>
+<div class="nav-ov" id="navOv" onclick="closeNav()"></div>
+<div class="nav-pan" id="navPan">
+  <div class="nav-t">Repuesto BoParts</div>
+  <div class="nav-g">
+    <a class="ncard" href="index.html">
+      <span class="nicon">📋</span>
+      <span class="nlbl">Lista de Precios</span>
+      <span class="ndesc">Consulta y busqueda</span>
+    </a>
+    <a class="ncard" href="boparts_ventas.html">
+      <span class="nicon">💰</span>
+      <span class="nlbl">Registrar Venta</span>
+      <span class="ndesc">Nueva venta</span>
+    </a>
+    <a class="ncard" href="boparts_fotos.html">
+      <span class="nicon">📷</span>
+      <span class="nlbl">Cargar Fotos</span>
+      <span class="ndesc">Catalogo imagenes</span>
+    </a>
+    <a class="ncard cur" href="boparts_reportes.html">
+      <span class="nicon">📊</span>
+      <span class="nlbl">Reportes</span>
+      <span class="ndesc">Analisis de ventas</span>
+    </a>
+    <a class="ncard" href="boparts_demanda.html">
+      <span class="nicon">📝</span>
+      <span class="nlbl">Demanda</span>
+      <span class="ndesc">No atendida</span>
+    </a>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+var VENTAS_URL   = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRaAnGd-Bfaxo3LjUiGeV8p0F2weaKqHGwJ0hWibSMj02-h7dRAQPDMmGL5B8-XQg66Yjd3zgOAaz8X/pub?gid=574342645&single=true&output=csv';
+var PRODUCTS_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRaAnGd-Bfaxo3LjUiGeV8p0F2weaKqHGwJ0hWibSMj02-h7dRAQPDMmGL5B8-XQg66Yjd3zgOAaz8X/pub?gid=2100998338&single=true&output=csv';
+
+var VENTAS   = [];
+var PRODUCTS = [];
+var periodo  = 'dia';
+
+var CAT_COLORS = {
+  'MOTO':                '#F5A800',
+  'CARRO':               '#60A5FA',
+  'CAMION':              '#A78BFA',
+  'LUBRICANTES Y FLUIDOS':'#22C55E',
+  'CONSUMIBLES':         '#F87171',
+  'OTRO':                '#6B7280'
+};
+
+var CANAL_COLORS = {
+  'Presencial':    '#F5A800',
+  'WhatsApp':      '#22C55E',
+  'Mercado Libre': '#60A5FA',
+  'Marketplace':   '#A78BFA',
+  'Otro':          '#6B7280'
+};
+
+// CSV PARSER
+function parseCSV(txt) {
+  var rows = [], lines = txt.split(/\r?\n/);
+  for (var i = 0; i < lines.length; i++) {
+    var row = [], cur = '', q = false;
+    for (var c = 0; c < lines[i].length; c++) {
+      var ch = lines[i][c];
+      if (ch === '"') { q = !q; }
+      else if (ch === ',' && !q) { row.push(cur.trim()); cur = ''; }
+      else { cur += ch; }
+    }
+    row.push(cur.trim());
+    rows.push(row);
+  }
+  return rows;
+}
+
+function isValidCSV(txt) {
+  if (!txt) return false;
+  var t = txt.trim().substring(0, 10).toLowerCase();
+  return !(t.indexOf('<!doc') === 0 || t.indexOf('<html') === 0 || t.indexOf('function') === 0);
+}
+
+// PARSE DATE dd/mm/yyyy
+function parseDate(str) {
+  if (!str) return null;
+  var p = str.split('/');
+  if (p.length !== 3) return null;
+  return new Date(parseInt(p[2]), parseInt(p[1]) - 1, parseInt(p[0]));
+}
+
+function sameDay(a, b)   { return a.getFullYear()===b.getFullYear() && a.getMonth()===b.getMonth() && a.getDate()===b.getDate(); }
+function sameWeek(a, b)  {
+  var ma = new Date(a); ma.setHours(0,0,0,0);
+  var mb = new Date(b); mb.setHours(0,0,0,0);
+  var day = ma.getDay() || 7;
+  var mon = new Date(ma); mon.setDate(ma.getDate() - day + 1);
+  var sun = new Date(mon); sun.setDate(mon.getDate() + 6);
+  return mb >= mon && mb <= sun;
+}
+function sameMonth(a, b) { return a.getFullYear()===b.getFullYear() && a.getMonth()===b.getMonth(); }
+
+function escHtml(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function fmtBS(n)   { return 'Bs ' + Math.round(n).toLocaleString('es-VE'); }
+function fmtUSD(n)  { return '$' + Number(n).toFixed(2); }
+function pct(a, t)  { return t > 0 ? Math.round(a / t * 100) : 0; }
+
+// LOAD
+function cargarDatos(force) {
+  var icon = document.getElementById('refreshIcon');
+  icon.classList.add('spinning');
+
+  var cached = sessionStorage.getItem('boparts_ventas_csv');
+  var prodCached = sessionStorage.getItem('motoauto_csv');
+
+  // Load products for category lookup
+  if (prodCached && isValidCSV(prodCached)) parseProducts(prodCached);
+
+  var loaded = 0;
+  function check() { loaded++; if (loaded >= 2) { icon.classList.remove('spinning'); render(); } }
+
+  // Load ventas
+  var ventasTxt = force ? null : cached;
+  if (ventasTxt && isValidCSV(ventasTxt)) {
+    parseVentas(ventasTxt); check();
+  } else {
+    fetch(VENTAS_URL + '&t=' + Date.now())
+      .then(function(r){ return r.text(); })
+      .then(function(txt){
+        if (!isValidCSV(txt)) { toast('Error cargando ventas', 'err'); check(); return; }
+        sessionStorage.setItem('boparts_ventas_csv', txt);
+        parseVentas(txt); check();
+      }).catch(function(){ toast('Sin conexion', 'err'); check(); });
+  }
+
+  // Load products
+  if (prodCached && isValidCSV(prodCached)) { check(); }
+  else {
+    fetch(PRODUCTS_URL + '&t=' + Date.now())
+      .then(function(r){ return r.text(); })
+      .then(function(txt){
+        if (isValidCSV(txt)) { sessionStorage.setItem('motoauto_csv', txt); parseProducts(txt); }
+        check();
+      }).catch(function(){ check(); });
+  }
+}
+
+function parseProducts(txt) {
+  var rows = parseCSV(txt);
+  PRODUCTS = [];
+  for (var i = 2; i < rows.length; i++) {
+    var r = rows[i];
+    if (!(r[2]||'').trim()) continue;
+    PRODUCTS.push({producto:(r[2]||'').trim().toUpperCase(), categoria:(r[3]||'').trim().toUpperCase()});
+  }
+}
+
+function parseVentas(txt) {
+  var rows = parseCSV(txt);
+  VENTAS = [];
+  for (var i = 1; i < rows.length; i++) {
+    var r = rows[i];
+    if (!r[0] || !r[0].trim()) continue;
+    var fecha = parseDate(r[0]);
+    if (!fecha) continue;
+    VENTAS.push({
+      fecha:   fecha,
+      vendedor:(r[2]||'').trim(),
+      canal:   (r[3]||'').trim(),
+      productos:(r[4]||'').trim(),
+      totalUSD: parseFloat(r[5]) || 0,
+      totalBS:  parseFloat(r[6]) || 0,
+      comision: parseFloat(r[16]) || 0,
+      neto:     parseFloat(r[17]) || 0
+    });
+  }
+}
+
+function getCat(prodName) {
+  var n = prodName.toUpperCase();
+  for (var i = 0; i < PRODUCTS.length; i++) {
+    if (PRODUCTS[i].producto === n) return PRODUCTS[i].categoria;
+  }
+  // Fuzzy: check if product name starts with any known product
+  for (var i = 0; i < PRODUCTS.length; i++) {
+    if (n.indexOf(PRODUCTS[i].producto.substring(0,10)) >= 0) return PRODUCTS[i].categoria;
+  }
+  return 'OTRO';
+}
+
+// Parse productos string: "PROD A x2 ($8.50) | PROD B x1 ($6.00)"
+function parseProdStr(str) {
+  if (!str) return [];
+  var items = str.split('|');
+  var result = [];
+  for (var i = 0; i < items.length; i++) {
+    var item = items[i].trim();
+    // Extract: NAME xQTY ($PRICE)
+    var mQty   = item.match(/\sx(\d+)\s/);
+    var mPrice = item.match(/\(\$([0-9.]+)\)/);
+    if (!mQty || !mPrice) continue;
+    var qty   = parseInt(mQty[1]) || 1;
+    var price = parseFloat(mPrice[1]) || 0;
+    var name  = item.substring(0, item.lastIndexOf(' x' + mQty[1])).trim();
+    result.push({name:name, qty:qty, price:price, subtotal:qty * price});
+  }
+  return result;
+}
+
+// FILTER
+function filtrar() {
+  var now = new Date();
+  return VENTAS.filter(function(v) {
+    if (periodo === 'dia')    return sameDay(now, v.fecha);
+    if (periodo === 'semana') return sameWeek(now, v.fecha);
+    if (periodo === 'mes')    return sameMonth(now, v.fecha);
+    return true;
+  });
+}
+
+// SET PERIOD
+function setPeriodo(el, p) {
+  periodo = p;
+  document.querySelectorAll('.ptab').forEach(function(t) { t.classList.remove('active'); });
+  el.classList.add('active');
+  var labels = {dia:'Hoy', semana:'Esta semana', mes:'Este mes'};
+  document.getElementById('periodoLabel').textContent = labels[p];
+  render();
+}
+
+// RENDER
+function render() {
+  var ventas = filtrar();
+  var content = document.getElementById('content');
+
+  if (!ventas.length) {
+    content.innerHTML = '<div class="state-box"><div class="icon">📊</div><p>Sin ventas en este periodo.<br>Registra una venta para verla aqui.</p></div>';
+    return;
+  }
+
+  // TOTALS
+  var totalBS  = 0, totalUSD = 0, totalCom = 0, numVentas = ventas.length;
+  for (var i = 0; i < ventas.length; i++) {
+    totalBS  += ventas[i].totalBS;
+    totalUSD += ventas[i].totalUSD;
+    totalCom += ventas[i].comision;
+  }
+  var neto = totalBS - totalCom;
+  var tasa = totalUSD > 0 ? totalBS / totalUSD : 1000;
+
+  // CATEGORIAS
+  var catMap = {};
+  for (var i = 0; i < ventas.length; i++) {
+    var prods = parseProdStr(ventas[i].productos);
+    var TASA  = ventas[i].totalBS / (ventas[i].totalUSD || 1);
+    for (var j = 0; j < prods.length; j++) {
+      var cat = getCat(prods[j].name);
+      if (!catMap[cat]) catMap[cat] = 0;
+      catMap[cat] += Math.round(prods[j].subtotal * TASA);
+    }
+  }
+
+  // CANALES
+  var canalMap = {};
+  for (var i = 0; i < ventas.length; i++) {
+    var c = ventas[i].canal || 'Otro';
+    if (!canalMap[c]) canalMap[c] = {bs:0, cnt:0};
+    canalMap[c].bs  += ventas[i].totalBS;
+    canalMap[c].cnt++;
+  }
+
+  // VENDEDORES
+  var vendMap = {};
+  for (var i = 0; i < ventas.length; i++) {
+    var v = ventas[i].vendedor || 'Desconocido';
+    if (!vendMap[v]) vendMap[v] = {bs:0, cnt:0};
+    vendMap[v].bs  += ventas[i].totalBS;
+    vendMap[v].cnt++;
+  }
+
+  // TOP PRODUCTS (semana/mes only)
+  var prodMap = {};
+  if (periodo !== 'dia') {
+    for (var i = 0; i < ventas.length; i++) {
+      var prods = parseProdStr(ventas[i].productos);
+      var TASA  = ventas[i].totalBS / (ventas[i].totalUSD || 1);
+      for (var j = 0; j < prods.length; j++) {
+        var n = prods[j].name;
+        if (!prodMap[n]) prodMap[n] = {qty:0, bs:0};
+        prodMap[n].qty += prods[j].qty;
+        prodMap[n].bs  += Math.round(prods[j].subtotal * TASA);
+      }
+    }
+  }
+
+  // Build HTML
+  var h = '';
+
+  // RESUMEN
+  h += '<div class="card">' +
+    '<div class="card-title">💰 Resumen</div>' +
+    '<div class="stat-grid">' +
+      '<div class="stat-box"><div class="stat-label">Total USD</div><div class="stat-value brand">' + fmtUSD(totalUSD) + '</div><div class="stat-sub">' + numVentas + ' ventas</div></div>' +
+      '<div class="stat-box"><div class="stat-label">Total Bs</div><div class="stat-value">' + fmtBS(totalBS) + '</div><div class="stat-sub">Tasa Bs ' + Math.round(totalBS/(totalUSD||1)).toLocaleString() + '</div></div>' +
+      '<div class="stat-box"><div class="stat-label">Neto USD</div><div class="stat-value green">' + fmtUSD(neto/Math.round(totalBS/(totalUSD||1))) + '</div><div class="stat-sub">' + fmtBS(neto) + '</div></div>' +
+      '<div class="stat-box"><div class="stat-label">Comisiones</div><div class="stat-value">' + fmtBS(totalCom) + '</div><div class="stat-sub">Punto de venta</div></div>' +
+    '</div>' +
+  '</div>';
+
+  // CATEGORIAS
+  var catEntries = [];
+  for (var k in catMap) catEntries.push({cat:k, bs:catMap[k]});
+  catEntries.sort(function(a,b){ return b.bs - a.bs; });
+  if (catEntries.length) {
+    h += '<div class="card"><div class="card-title">🏷️ Por Categoria</div>';
+    for (var i = 0; i < catEntries.length; i++) {
+      var e = catEntries[i];
+      var p = pct(e.bs, totalBS);
+      var color = CAT_COLORS[e.cat] || CAT_COLORS['OTRO'];
+      h += '<div class="bar-item">' +
+        '<div class="bar-header">' +
+          '<span class="bar-label">' + escHtml(e.cat) + '</span>' +
+          '<span class="bar-values">' + fmtUSD(e.bs/tasa) + ' · ' + p + '%</span>' +
+        '</div>' +
+        '<div class="bar-track"><div class="bar-fill" style="width:' + p + '%;background:' + color + '"></div></div>' +
+      '</div>';
+    }
+    h += '</div>';
+  }
+
+  // CANALES
+  var canalEntries = [];
+  for (var k in canalMap) canalEntries.push({canal:k, bs:canalMap[k].bs, cnt:canalMap[k].cnt});
+  canalEntries.sort(function(a,b){ return b.bs - a.bs; });
+  if (canalEntries.length) {
+    h += '<div class="card"><div class="card-title">📡 Canales de Venta</div>';
+    for (var i = 0; i < canalEntries.length; i++) {
+      var e = canalEntries[i];
+      var p = pct(e.bs, totalBS);
+      var color = CANAL_COLORS[e.canal] || CANAL_COLORS['Otro'];
+      h += '<div class="bar-item">' +
+        '<div class="bar-header">' +
+          '<span class="bar-label">' + escHtml(e.canal) + ' <span style="font-size:10px;color:var(--ink-muted)">(' + e.cnt + ' ventas)</span></span>' +
+          '<span class="bar-values">' + fmtUSD(e.bs/tasa) + ' · ' + p + '%</span>' +
+        '</div>' +
+        '<div class="bar-track"><div class="bar-fill" style="width:' + p + '%;background:' + color + '"></div></div>' +
+      '</div>';
+    }
+    h += '</div>';
+  }
+
+  // TOP 5 PRODUCTOS (solo semana/mes)
+  if (periodo !== 'dia') {
+    var topProds = [];
+    for (var k in prodMap) topProds.push({name:k, qty:prodMap[k].qty, bs:prodMap[k].bs});
+    topProds.sort(function(a,b){ return b.bs - a.bs; });
+    topProds = topProds.slice(0, 5);
+    if (topProds.length) {
+      h += '<div class="card"><div class="card-title">🏆 Top 5 Productos</div>';
+      for (var i = 0; i < topProds.length; i++) {
+        var e = topProds[i];
+        var rankClass = i === 0 ? ' gold' : '';
+        h += '<div class="top-item">' +
+          '<div class="top-rank' + rankClass + '">' + (i+1) + '</div>' +
+          '<div class="top-info">' +
+            '<div class="top-name">' + escHtml(e.name) + '</div>' +
+            '<div class="top-meta">' + e.qty + ' unidades vendidas</div>' +
+          '</div>' +
+          '<div class="top-amt">' + fmtUSD(e.bs/tasa) + '<div style="font-size:10px;color:var(--ink-muted)">' + fmtBS(e.bs) + '</div></div>' +
+        '</div>';
+      }
+      h += '</div>';
+    }
+  }
+
+  // VENDEDORES
+  var vendEntries = [];
+  for (var k in vendMap) vendEntries.push({v:k, bs:vendMap[k].bs, cnt:vendMap[k].cnt});
+  vendEntries.sort(function(a,b){ return b.bs - a.bs; });
+  if (vendEntries.length > 1) {
+    h += '<div class="card"><div class="card-title">👤 Por Vendedor</div>';
+    for (var i = 0; i < vendEntries.length; i++) {
+      var e = vendEntries[i];
+      h += '<div class="vend-item">' +
+        '<div class="vend-name">' + escHtml(e.v) + '</div>' +
+        '<div class="vend-stats">' +
+          '<div class="vend-bs">' + fmtUSD(e.bs/tasa) + '</div><div style="font-size:11px;color:var(--ink-muted)">' + fmtBS(e.bs) + '</div>' +
+          '<div class="vend-cnt">' + e.cnt + ' ventas · ' + pct(e.bs, totalBS) + '%</div>' +
+        '</div>' +
+      '</div>';
+    }
+    h += '</div>';
+  }
+
+  content.innerHTML = h;
+}
+
+// INIT
+document.getElementById('periodoLabel').textContent = 'Hoy';
+cargarDatos(false);
+
+function toast(msg, type) {
+  var el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'toast show ' + (type||'');
+  clearTimeout(el._t);
+  el._t = setTimeout(function(){ el.className = 'toast'; }, 3000);
+}
+function toggleNav() {
+  document.getElementById('navPan').classList.toggle('open');
+  document.getElementById('navOv').classList.toggle('open');
+}
+function closeNav() {
+  document.getElementById('navPan').classList.remove('open');
+  document.getElementById('navOv').classList.remove('open');
+}
+</script>
+</body>
+</html>
