@@ -433,7 +433,7 @@ function render() {
       h += '<div class="bar-item">' +
         '<div class="bar-header">' +
           '<span class="bar-label">' + escHtml(e.cat) + '</span>' +
-          '<span class="bar-values">' + fmtBS(e.bs) + ' · ' + p + '%</span>' +
+          '<span class="bar-values">' + fmtUSD(e.bs/tasa) + ' · ' + p + '%</span>' +
         '</div>' +
         '<div class="bar-track"><div class="bar-fill" style="width:' + p + '%;background:' + color + '"></div></div>' +
       '</div>';
@@ -454,7 +454,7 @@ function render() {
       h += '<div class="bar-item">' +
         '<div class="bar-header">' +
           '<span class="bar-label">' + escHtml(e.canal) + ' <span style="font-size:10px;color:var(--ink-muted)">(' + e.cnt + ' ventas)</span></span>' +
-          '<span class="bar-values">' + fmtBS(e.bs) + ' · ' + p + '%</span>' +
+          '<span class="bar-values">' + fmtUSD(e.bs/tasa) + ' · ' + p + '%</span>' +
         '</div>' +
         '<div class="bar-track"><div class="bar-fill" style="width:' + p + '%;background:' + color + '"></div></div>' +
       '</div>';
