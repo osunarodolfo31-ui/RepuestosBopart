@@ -1,7 +1,8 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_ventas.html
-  VERSION: v8 (2026-09-09) | requiere Apps Script v8
+  VERSION: v8.1 (2026-09-09) | requiere Apps Script v8
+  v8.1: el costo de la hoja llega como texto con formato moneda ('$ 6.04'); ahora se limpia antes de convertir
   Cambios v8: costo por linea (col H), idVenta, hoja Ventas_Detalle, POST con respuesta, tasa desde hoja si el dispositivo no la tiene
   Anterior: v7 = commit 4269b17 en GitHub (History > Browse files > descargar)
 -->
@@ -440,7 +441,7 @@ function parseProducts(txt) {
       producto: prod,
       categoria:(r[3] || '').trim(),
       precio:   precio,
-      costo:    parseFloat(r[7]) || 0   // Costo Final (col H). No se muestra al vendedor.
+      costo:    parseNum(r[7])         // Costo Final (col H), viene como texto '$ 6.04'. No se muestra al vendedor.
     });
   }
   if (loaded.length > 10) PRODUCTS = loaded;
@@ -803,6 +804,16 @@ function postScript(payload) {
     .then(function(r) { return r.json(); });
 }
 function pad2(n) { return (n < 10 ? '0' : '') + n; }
+// Convierte '$ 6.04', '$1,234.56', '6,04' o 6.04 en número. Devuelve 0 si no puede.
+function parseNum(v) {
+  if (typeof v === 'number') return v;
+  var t = String(v || '').replace(/[^0-9.,-]/g, '');
+  if (!t) return 0;
+  if (t.indexOf(',') >= 0 && t.indexOf('.') >= 0) t = t.replace(/,/g, '');       // 1,234.56
+  else if (t.indexOf(',') >= 0) t = t.replace(',', '.');                          // 6,04
+  var n = parseFloat(t);
+  return isNaN(n) ? 0 : n;
+}
 var lastIdVenta = '';
 
 function nuevaVenta() {
