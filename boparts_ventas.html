@@ -1,4 +1,11 @@
 <!DOCTYPE html>
+<!--
+  Repuesto BoParts — boparts_ventas.html
+  VERSION: v8 (2026-09-09) | requiere Apps Script v8
+  Cambios v8: costo por linea (col H), idVenta, hoja Ventas_Detalle, POST con respuesta, tasa desde hoja si el dispositivo no la tiene
+  Anterior: v7 = commit 4269b17 en GitHub (History > Browse files > descargar)
+-->
+
 <html lang="es">
 <head>
 <meta charset="UTF-8">
@@ -322,7 +329,8 @@ select option{background:#1E1E1E;color:var(--ink)}
 var CSV_URL     = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRaAnGd-Bfaxo3LjUiGeV8p0F2weaKqHGwJ0hWibSMj02-h7dRAQPDMmGL5B8-XQg66Yjd3zgOAaz8X/pub?gid=2100998338&single=true&output=csv';
 var CLIENTES_URL= 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRaAnGd-Bfaxo3LjUiGeV8p0F2weaKqHGwJ0hWibSMj02-h7dRAQPDMmGL5B8-XQg66Yjd3zgOAaz8X/pub?gid=647304383&single=true&output=csv';
 var SCRIPT_URL  = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
-var TASA        = parseFloat(localStorage.getItem('motoauto_tasa') || '1000');
+var TASA        = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
+var TASA_ORIGEN = TASA ? 'dispositivo' : 'ninguna';
 var NOTA_NUM    = parseInt(localStorage.getItem('boparts_nota_num') || '0');
 
 // ============================================================
@@ -416,6 +424,9 @@ function loadProducts() {
 function parseProducts(txt) {
   var rows = parseCSV(txt);
   var loaded = [];
+  // Tasa de respaldo: fila 1, columna E de la hoja (misma celda que usa index.html)
+  var tasaHoja = parseFloat(rows[0] && rows[0][4]);
+  if (!TASA && tasaHoja > 1) { TASA = tasaHoja; TASA_ORIGEN = 'hoja'; }
   for (var i = 2; i < rows.length; i++) {
     var r = rows[i];
     var prod = (r[2] || '').trim();
@@ -428,7 +439,8 @@ function parseProducts(txt) {
       marca:    (r[1] || '').trim(),
       producto: prod,
       categoria:(r[3] || '').trim(),
-      precio:   precio
+      precio:   precio,
+      costo:    parseFloat(r[7]) || 0   // Costo Final (col H). No se muestra al vendedor.
     });
   }
   if (loaded.length > 10) PRODUCTS = loaded;
@@ -524,7 +536,7 @@ function addToCart(idx) {
       renderCart(); updateTotals(); return;
     }
   }
-  cart.push({producto:p.producto, codigo:p.codigo, precio:p.precio, cantidad:1});
+  cart.push({producto:p.producto, codigo:p.codigo, precio:p.precio, costo:p.costo||0, cantidad:1});
   prodSearch.value = ''; prodDrop.classList.remove('open');
   renderCart(); updateTotals();
 }
@@ -714,6 +726,7 @@ function guardarVenta() {
   if (!vendedor) { toast('Selecciona el vendedor', 'err'); return; }
   if (!canal)    { toast('Selecciona el canal', 'err'); return; }
   if (!cart.length) { toast('Agrega al menos un producto', 'err'); return; }
+  if (!TASA || TASA < 1) { toast('No hay tasa BCV cargada. Abre Lista de Precios y fijala primero.', 'err'); return; }
 
   var now  = new Date();
   var fecha = now.toLocaleDateString('es-VE');
@@ -727,8 +740,14 @@ function guardarVenta() {
   // Deep copy cart
   lastCart = [];
   for (var i = 0; i < cart.length; i++) {
-    lastCart.push({producto:cart[i].producto, codigo:cart[i].codigo, precio:parseFloat(cart[i].precio)||0, cantidad:parseInt(cart[i].cantidad)||1});
+    lastCart.push({producto:cart[i].producto, codigo:cart[i].codigo, precio:parseFloat(cart[i].precio)||0, costo:parseFloat(cart[i].costo)||0, cantidad:parseInt(cart[i].cantidad)||1});
   }
+
+  // ID unico de la venta: enlaza la fila de VENTAS con sus lineas en VENTAS_DETALLE
+  var idVenta = 'V' + now.getFullYear() + pad2(now.getMonth()+1) + pad2(now.getDate()) + '-' + pad2(now.getHours()) + pad2(now.getMinutes()) + pad2(now.getSeconds()) + '-' + Math.random().toString(36).substr(2,4).toUpperCase();
+  var lineas = lastCart.map(function(c) {
+    return {codigo:c.codigo, producto:c.producto, cantidad:c.cantidad, precio:c.precio, costo:c.costo};
+  });
 
   var com = 0;
   var pagoData = [];
@@ -755,15 +774,36 @@ function guardarVenta() {
     comision:Math.round(com), neto:Math.round(bs - com),
     aliado:aliadoSel?aliadoSel.nombre:'', aliadoNegocio:aliadoSel?aliadoSel.negocio:'',
     aliadoPct:aliadoSel?aliadoSel.pct:0, aliadoComision:aComBs,
-    notas:notas
+    notas:notas,
+    idVenta:idVenta, tasa:TASA, lineas:lineas
   };
 
-  fetch(SCRIPT_URL, {method:'POST', mode:'no-cors', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)})
-    .catch(function() {});
+  var btn = document.querySelector('.subbtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Guardando...'; }
 
-  document.getElementById('successMsg').textContent = vendedor + ' - ' + fmtUSD(usd) + ' / ' + fmtBS(bs);
-  document.getElementById('success').classList.add('open');
+  postScript(payload)
+    .then(function(d) {
+      if (btn) { btn.disabled = false; btn.textContent = 'Registrar Venta'; }
+      if (!d || d.ok !== true) throw new Error(d && d.error ? d.error : 'Respuesta invalida');
+      lastIdVenta = idVenta;
+      document.getElementById('successMsg').textContent = vendedor + ' - ' + fmtUSD(usd) + ' / ' + fmtBS(bs);
+      document.getElementById('success').classList.add('open');
+    })
+    .catch(function(err) {
+      if (btn) { btn.disabled = false; btn.textContent = 'Registrar Venta'; }
+      // La venta NO se guardo: el carrito queda intacto para reintentar
+      toast('No se guardo la venta (' + (err && err.message ? err.message : 'sin conexion') + '). Reintenta.', 'err');
+    });
 }
+
+// POST a Apps Script con respuesta legible.
+// Content-Type text/plain evita el preflight CORS que Apps Script no soporta.
+function postScript(payload) {
+  return fetch(SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body:JSON.stringify(payload)})
+    .then(function(r) { return r.json(); });
+}
+function pad2(n) { return (n < 10 ? '0' : '') + n; }
+var lastIdVenta = '';
 
 function nuevaVenta() {
   document.getElementById('success').classList.remove('open');
@@ -870,12 +910,12 @@ function guardarCliente() {
   cliSel = c;
   // Save to sheet
   var payload = {tipo:'cliente', nombre:c.nombre, rif:c.rif, tel:c.tel, dir:c.dir, nota:c.nota, fecha:new Date().toLocaleDateString('es-VE')};
-  fetch(SCRIPT_URL, {method:'POST', mode:'no-cors', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)})
-    .catch(function(){});
   document.getElementById('formCliente').style.display = 'none';
   mostrarCliSelected(c);
   mostrarBotonesNota();
-  toast('Cliente guardado', 'ok');
+  postScript(payload)
+    .then(function(d) { toast(d && d.ok ? 'Cliente guardado' : 'Cliente NO guardado en la hoja', d && d.ok ? 'ok' : 'err'); })
+    .catch(function() { toast('Cliente NO guardado en la hoja (sin conexion)', 'err'); });
 }
 
 function mostrarBotonesNota() {
@@ -918,7 +958,7 @@ function generarNota() {
   var nbtn = document.querySelector('.nbtn-p');
   if (nbtn) { nbtn.disabled = true; nbtn.textContent = 'Generando...'; }
 
-  fetch(SCRIPT_URL + '?action=nextNota')
+  fetch(SCRIPT_URL + '?action=nextNota&idVenta=' + encodeURIComponent(lastIdVenta))
     .then(function(r){ return r.json(); })
     .then(function(d){ doGenerarNota(d.num || null); })
     .catch(function(){ doGenerarNota(null); });
