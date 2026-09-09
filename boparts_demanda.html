@@ -1,4 +1,11 @@
 <!DOCTYPE html>
+<!--
+  Repuesto BoParts — boparts_demanda.html
+  VERSION: v8 (2026-09-09) | requiere Apps Script v7 o superior
+  Cambios v8: el POST lee la respuesta del script; exito solo con {ok:true}; si falla, el formulario queda intacto y avisa
+  Anterior: v7 = commit 4269b17 en GitHub
+-->
+
 <html lang="es">
 <head>
 <meta charset="UTF-8">
@@ -531,12 +538,23 @@ function guardar() {
     estado: 'PENDIENTE'
   };
 
-  fetch(SCRIPT_URL, {method:'POST', mode:'no-cors', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)})
-    .catch(function(){});
+  var btn = document.querySelector('.subbtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Guardando...'; }
 
-  var provText = prov1 ? ' · Proveedor: ' + prov1 + ' ($' + precio1 + ')' : ' · Sin proveedor registrado';
-  document.getElementById('successMsg').textContent = prodNombre + provText;
-  document.getElementById('success').classList.add('open');
+  fetch(SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body:JSON.stringify(payload)})
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (btn) { btn.disabled = false; btn.textContent = 'Registrar Demanda'; }
+      if (!d || d.ok !== true) throw new Error(d && d.error ? d.error : 'Respuesta invalida');
+      var provText = prov1 ? ' · Proveedor: ' + prov1 + ' ($' + precio1 + ')' : ' · Sin proveedor registrado';
+      document.getElementById('successMsg').textContent = prodNombre + provText;
+      document.getElementById('success').classList.add('open');
+    })
+    .catch(function(err) {
+      if (btn) { btn.disabled = false; btn.textContent = 'Registrar Demanda'; }
+      // La demanda NO se guardo: el formulario queda intacto para reintentar
+      toast('No se guardo la demanda (' + (err && err.message ? err.message : 'sin conexion') + '). Reintenta.', 'err');
+    });
 }
 
 function nuevo() {
