@@ -1,4 +1,10 @@
 <!DOCTYPE html>
+<!--
+  Repuesto BoParts — index.html
+  VERSION: v8 (2026-09-10)
+  v8: lee precios y tasa con coma o punto decimal (la hoja exporta '0,6' si la region es Venezuela)
+  Anterior: v7 = commit 4269b17
+-->
 <html lang="es">
 <head>
 <meta charset="UTF-8">
@@ -287,7 +293,7 @@ async function loadData(force = false) {
     }
   }
   const rows = parseCSV(text);
-  const tasaFromSheet = parseFloat(rows[0]?.[4]);
+  const tasaFromSheet = parseNum(rows[0]?.[4]);
   if (tasaFromSheet && !localStorage.getItem('motoauto_tasa')) currentTasa = tasaFromSheet;
   updateTasaBadge();
   PRODUCTS = [];
@@ -295,7 +301,7 @@ async function loadData(force = false) {
     const r = rows[i];
     const prod = (r[2] || '').trim();
     if (!prod) continue;
-    const precio = parseFloat(r[8]) || 0;
+    const precio = parseNum(r[8]);
     PRODUCTS.push({
       codigo: (r[0] || '').trim(),
       marca:  (r[1] || '').trim(),
@@ -600,6 +606,21 @@ function closeNav(){
   document.getElementById('navPanel').classList.remove('show');
   document.getElementById('navOverlay').classList.remove('show');
   document.getElementById('fabBtn').classList.remove('open');
+}
+
+// Convierte '0,6', '7,5', '$ 6.04', '1,234.56' o 6.04 en numero. Devuelve 0 si no puede.
+function parseNum(v) {
+  if (typeof v === 'number') return v;
+  var t = String(v == null ? '' : v).replace(/[^0-9.,-]/g, '');
+  if (!t) return 0;
+  if (t.indexOf(',') >= 0 && t.indexOf('.') >= 0) {
+    // ambos: el ultimo separador es el decimal
+    if (t.lastIndexOf(',') > t.lastIndexOf('.')) t = t.replace(/\./g, '').replace(',', '.'); else t = t.replace(/,/g, '');
+  } else if (t.indexOf(',') >= 0) {
+    t = t.replace(',', '.');
+  }
+  var n = parseFloat(t);
+  return isNaN(n) ? 0 : n;
 }
 </script>
 

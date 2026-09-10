@@ -1,4 +1,10 @@
 <!DOCTYPE html>
+<!--
+  Repuesto BoParts — boparts_reportes.html
+  VERSION: v8 (2026-09-10)
+  v8: lee montos con coma o punto decimal
+  Anterior: v7 = commit 4269b17
+-->
 <html lang="es">
 <head>
 <meta charset="UTF-8">
@@ -302,10 +308,10 @@ function parseVentas(txt) {
       vendedor:(r[2]||'').trim(),
       canal:   (r[3]||'').trim(),
       productos:(r[4]||'').trim(),
-      totalUSD: parseFloat(r[5]) || 0,
-      totalBS:  parseFloat(r[6]) || 0,
-      comision: parseFloat(r[16]) || 0,
-      neto:     parseFloat(r[17]) || 0
+      totalUSD: parseNum(r[5]),
+      totalBS:  parseNum(r[6]),
+      comision: parseNum(r[16]),
+      neto:     parseNum(r[17])
     });
   }
 }
@@ -547,6 +553,21 @@ function toggleNav() {
 function closeNav() {
   document.getElementById('navPan').classList.remove('open');
   document.getElementById('navOv').classList.remove('open');
+}
+
+// Convierte '0,6', '7,5', '$ 6.04', '1,234.56' o 6.04 en numero. Devuelve 0 si no puede.
+function parseNum(v) {
+  if (typeof v === 'number') return v;
+  var t = String(v == null ? '' : v).replace(/[^0-9.,-]/g, '');
+  if (!t) return 0;
+  if (t.indexOf(',') >= 0 && t.indexOf('.') >= 0) {
+    // ambos: el ultimo separador es el decimal
+    if (t.lastIndexOf(',') > t.lastIndexOf('.')) t = t.replace(/\./g, '').replace(',', '.'); else t = t.replace(/,/g, '');
+  } else if (t.indexOf(',') >= 0) {
+    t = t.replace(',', '.');
+  }
+  var n = parseFloat(t);
+  return isNaN(n) ? 0 : n;
 }
 </script>
 </body>

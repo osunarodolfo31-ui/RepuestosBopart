@@ -9,13 +9,13 @@ en el comentario del encabezado de cada HTML y en la cabecera de `Code.gs`.
 
 | Archivo                 | Versión | Requiere Apps Script |
 |-------------------------|---------|----------------------|
-| index.html              | v7      | v7 o superior        |
-| boparts_ventas.html     | v10.7   | **v10.5**            |
+| index.html              | v8      | v7 o superior        |
+| boparts_ventas.html     | v10.8   | **v10.5**            |
 | boparts_cobros.html     | v1.1    | **v9**               |
 | boparts_compras.html    | v1      | **v11**              |
 | boparts_fotos.html      | v7      | v7 o superior        |
-| boparts_demanda.html    | v8      | v7 o superior        |
-| boparts_reportes.html   | v7      | ninguno (solo lee CSV) |
+| boparts_demanda.html    | v8.1    | v7 o superior        |
+| boparts_reportes.html   | v8      | ninguno (solo lee CSV) |
 | Code.gs (Apps Script)   | v11     | —                    |
 
 Deployment ID (no cambia): `AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg`
@@ -25,6 +25,12 @@ Para volver atrás:
 - Apps Script: Implementar → Administrar implementaciones → lápiz → elegir la versión anterior → Implementar.
 
 ---
+
+## Coma decimal — 2026-09-10
+**index.html v8, boparts_ventas.html v10.8, boparts_demanda.html v8.1, boparts_reportes.html v8**
+- Con la region de la hoja en Venezuela, el CSV exporta '0,6' y '7,5'; las apps leian 0 y 7. Ahora todas leen
+  coma o punto decimal (parseNum). La region de la hoja puede quedar en Venezuela.
+- Pendiente: index.html aun no oculta productos sin precio ni tiene enlaces a Cobros/Compras (ronda de fotos).
 
 ## v11 — 2026-09-10 · Compras / Recepcion de mercancia
 **Code.gs v11** + **boparts_compras.html v1** (+ ventas v10.7 y cobros v1.1: solo el enlace a Compras en el nav)

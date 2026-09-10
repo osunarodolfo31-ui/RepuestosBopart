@@ -1,7 +1,8 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_demanda.html
-  VERSION: v8 (2026-09-09) | requiere Apps Script v7 o superior
+  VERSION: v8.1 (2026-09-10) | requiere Apps Script v7 o superior
+  v8.1: lee precios de proveedores con coma o punto decimal
   Cambios v8: el POST lee la respuesta del script; exito solo con {ok:true}; si falla, el formulario queda intacto y avisa
   Anterior: v7 = commit 4269b17 en GitHub
 -->
@@ -331,7 +332,7 @@ function parseCatalogo(txt) {
     var r = rows[i];
     var desc = (r[0]||'').trim();
     if (!desc || desc === 'DESCRIPCION') continue;
-    var precio = parseFloat(r[3]) || 0;
+    var precio = parseNum(r[3]);
     if (precio <= 0) continue;
     CATALOGO.push({
       descripcion: desc,
@@ -592,6 +593,21 @@ function closeNav() {
 }
 
 loadCatalogo();
+
+// Convierte '0,6', '7,5', '$ 6.04', '1,234.56' o 6.04 en numero. Devuelve 0 si no puede.
+function parseNum(v) {
+  if (typeof v === 'number') return v;
+  var t = String(v == null ? '' : v).replace(/[^0-9.,-]/g, '');
+  if (!t) return 0;
+  if (t.indexOf(',') >= 0 && t.indexOf('.') >= 0) {
+    // ambos: el ultimo separador es el decimal
+    if (t.lastIndexOf(',') > t.lastIndexOf('.')) t = t.replace(/\./g, '').replace(',', '.'); else t = t.replace(/,/g, '');
+  } else if (t.indexOf(',') >= 0) {
+    t = t.replace(',', '.');
+  }
+  var n = parseFloat(t);
+  return isNaN(n) ? 0 : n;
+}
 </script>
 </body>
 </html>
