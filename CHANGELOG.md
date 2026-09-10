@@ -10,12 +10,12 @@ en el comentario del encabezado de cada HTML y en la cabecera de `Code.gs`.
 | Archivo                 | Versión | Requiere Apps Script |
 |-------------------------|---------|----------------------|
 | index.html              | v7      | v7 o superior        |
-| boparts_ventas.html     | v9      | **v9**               |
+| boparts_ventas.html     | v10     | **v10**              |
 | boparts_cobros.html     | v1      | **v9**               |
 | boparts_fotos.html      | v7      | v7 o superior        |
 | boparts_demanda.html    | v8      | v7 o superior        |
 | boparts_reportes.html   | v7      | ninguno (solo lee CSV) |
-| Code.gs (Apps Script)   | v9      | —                    |
+| Code.gs (Apps Script)   | v10     | —                    |
 
 Deployment ID (no cambia): `AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg`
 
@@ -24,6 +24,25 @@ Para volver atrás:
 - Apps Script: Implementar → Administrar implementaciones → lápiz → elegir la versión anterior → Implementar.
 
 ---
+
+## v10 — 2026-09-10 · Nota y cotizacion en PDF
+**boparts_ventas.html v10** + **Code.gs v10** (orden: script → HTML)
+- La nota de entrega ya no se abre como pagina HTML: se genera un PDF en el telefono (jsPDF, desde cdnjs) y se abre
+  la hoja de compartir de Android → Gmail, WhatsApp, Drive, con el PDF adjunto. En escritorio se descarga.
+- Nueva pantalla de nota: "Generar Nota (PDF)" → "Compartir PDF" / "Ver-Descargar" / "Solo mensaje por WhatsApp".
+- La nota muestra condicion CREDITO cuando la venta fue a credito, la tasa BCV y el total de referencia en USD.
+- Boton **Cotizar** junto a Registrar Venta: mismo carrito, genera COT-xxxx (contador en CONFIG!B3) con validez 24 h,
+  se comparte igual, y queda registrada en la hoja COTIZACIONES (estado ENVIADA). No registra venta ni toca el carrito.
+  Opcion "Cotizar sin datos del cliente" para clientes ocasionales.
+- Manual, una vez: en CONFIG poner `0` en B3 (contador de cotizaciones). Si B3 esta vacia, arranca en 1 igual.
+- Requiere internet para cargar la libreria PDF la primera vez; despues queda en cache del navegador.
+
+## v9.1 — 2026-09-10
+**Code.gs v9.1** + **boparts_ventas.html v9.1**
+- Fechas: la app manda `10/9/2026` (dia/mes) y la hoja, en configuracion regional EE.UU., lo leia como 9 de octubre.
+  El script ahora convierte el texto a fecha real y aplica formato `dd/MM/yyyy` en VENTAS, VENTAS_DETALLE y CXC_MOV.
+- ventas.html: si el script responde algo que no es JSON valido, el aviso muestra la respuesta; los avisos de error
+  duran 7 s y ya no se cortan en pantalla.
 
 ## v9 — 2026-09-10 · Cuentas por cobrar
 **boparts_ventas.html v9** + **Code.gs v9** + **boparts_cobros.html v1** (van juntos; orden: script → HTML)
