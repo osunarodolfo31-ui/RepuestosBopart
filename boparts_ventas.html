@@ -1,7 +1,8 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_ventas.html
-  VERSION: v10.2 (2026-09-10) | requiere Apps Script v10.2
+  VERSION: v10.3 (2026-09-10) | requiere Apps Script v10.2
+  v10.3: el mensaje de WhatsApp de la nota incluye la forma de pago recibida; la version se muestra en el encabezado de la app
   v10.2: el numero de nota llega con la respuesta de la venta (no hay espera al generar el PDF); el numero de cotizacion
          se pide al abrir la pantalla de cotizar; la nota de entrega ya no muestra la tasa BCV
   v10.1: la cotizacion se emite en Bs o en USD (selector en la pantalla de cotizacion) y no muestra la tasa BCV
@@ -405,7 +406,7 @@ var lastCart  = [];
 // INIT
 // ============================================================
 document.getElementById('fechaHdr').textContent =
-  new Date().toLocaleDateString('es-VE', {weekday:'long', day:'numeric', month:'long'});
+  APP_VERSION + ' · ' + new Date().toLocaleDateString('es-VE', {weekday:'long', day:'numeric', month:'long'});
 
 loadProducts();
 loadClientes();
@@ -860,7 +861,7 @@ function guardarVenta() {
     var metNom = (!isNaN(metIdx) && METODOS[metIdx]) ? METODOS[metIdx].metodo : '';
     var banNom = (!isNaN(metIdx) && METODOS[metIdx]) ? METODOS[metIdx].banco : '';
     if (p.metodoData && monto > 0) com += p.metodoData.fijo + monto * p.metodoData.pct / 100;
-    pagoData.push({metodo:metNom, banco:banNom, monto:monto, moneda:moneda});
+    pagoData.push({metodo:metNom, banco:banNom, monto:monto, moneda:moneda, label:(!isNaN(metIdx) && METODOS[metIdx]) ? METODOS[metIdx].label : ''});
   }
 
   // Validaciones de pago
@@ -908,6 +909,7 @@ function guardarVenta() {
       if (btn) { btn.disabled = false; btn.textContent = 'Registrar Venta'; }
       if (!d || d.ok !== true) throw new Error(d && d.error ? d.error : 'Respuesta inesperada: ' + JSON.stringify(d).slice(0, 120));
       lastIdVenta = idVenta;
+      lastPagos = pagoData.slice();
       if (d.numNota) { NOTA_NUM = parseInt(d.numNota); localStorage.setItem('boparts_nota_num', NOTA_NUM); lastNotaAsignada = NOTA_NUM; } else { lastNotaAsignada = 0; }
       lastCredito = hayCredito ? {cliente:cliSel, usd:creditoUSD} : null;
       document.getElementById('successMsg').textContent = vendedor + ' - ' + fmtUSD(usd) + ' / ' + fmtBS(bs) +
@@ -944,7 +946,9 @@ function parseNum(v) {
 }
 var lastIdVenta = '';
 var lastCredito = null;
-var lastNotaAsignada = 0;   // numero de nota que el script asigno a la ultima venta
+var lastNotaAsignada = 0;
+var lastPagos = [];         // formas de pago de la ultima venta (para el mensaje de WhatsApp)
+var APP_VERSION = 'v10.3';   // numero de nota que el script asigno a la ultima venta
 var cotNumPromise = null;   // numero de cotizacion pedido al abrir la pantalla
 
 function nuevaVenta() {
@@ -1338,6 +1342,19 @@ function registrarCotizacion(num) {
     .catch(function() { toast('La cotizacion no quedo registrada en la hoja (sin conexion)', 'err'); });
 }
 
+function pagosTexto() {
+  if (!lastPagos.length) return '';
+  var t = '\n\nForma de pago:';
+  for (var i = 0; i < lastPagos.length; i++) {
+    var p = lastPagos[i];
+    if (!p.monto) continue;
+    var nombre = p.label || (p.metodo + (p.banco ? ' ' + p.banco : ''));
+    if (p.metodo === 'Credito') nombre = 'Credito (pendiente de pago)';
+    t += '\n* ' + nombre + ': ' + (p.moneda === 'USD' ? fmtUSD(p.monto) : fmtBS(p.monto));
+  }
+  return t;
+}
+
 function abrirWA() {
   if (!cliSel) return;
   var usd = 0;
@@ -1354,7 +1371,7 @@ function abrirWA() {
   if (enUSD) { lineas = ''; for (var k = 0; k < lastCart.length; k++) lineas += '\n* ' + lastCart[k].producto + ' x' + lastCart[k].cantidad + ' - ' + fmtUSD(lastCart[k].precio * lastCart[k].cantidad); }
   var msg = 'Repuesto BoParts\n' + (esCot ? 'Cotizacion ' : 'Nota de Entrega ') + num + '\nCliente: ' + cliSel.nombre + '\n' +
     lineas + '\n\nTOTAL: ' + (enUSD ? fmtUSD(usd) : (esCot ? fmtBS(bs) : fmtBS(bs) + ' (Ref. ' + fmtUSD(usd) + ')')) +
-    (esCot ? '\nValida por 24 horas.' : '') + '\n\n0412-3185778 / 0414-9536708';
+    (esCot ? '\nValida por 24 horas.' : pagosTexto()) + '\n\n0412-3185778 / 0414-9536708';
   window.open('https://wa.me/?text=' + encodeURIComponent(msg), '_blank');
 }
 

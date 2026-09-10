@@ -10,7 +10,7 @@ en el comentario del encabezado de cada HTML y en la cabecera de `Code.gs`.
 | Archivo                 | Versión | Requiere Apps Script |
 |-------------------------|---------|----------------------|
 | index.html              | v7      | v7 o superior        |
-| boparts_ventas.html     | v10.2   | **v10.2**            |
+| boparts_ventas.html     | v10.3   | **v10.2**            |
 | boparts_cobros.html     | v1      | **v9**               |
 | boparts_fotos.html      | v7      | v7 o superior        |
 | boparts_demanda.html    | v8      | v7 o superior        |
@@ -24,6 +24,11 @@ Para volver atrás:
 - Apps Script: Implementar → Administrar implementaciones → lápiz → elegir la versión anterior → Implementar.
 
 ---
+
+## v10.3 — 2026-09-10
+**boparts_ventas.html v10.3** (el script v10.2 sirve)
+- El mensaje de WhatsApp de la nota lista la forma de pago recibida (metodo, banco, monto en su moneda; credito marcado como pendiente).
+- La version de la app se ve en el encabezado, debajo del titulo, para saber que version corre cada telefono.
 
 ## v10.2 — 2026-09-10
 **Code.gs v10.2** + **boparts_ventas.html v10.2** (van juntos)
