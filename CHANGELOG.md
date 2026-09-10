@@ -10,12 +10,12 @@ en el comentario del encabezado de cada HTML y en la cabecera de `Code.gs`.
 | Archivo                 | Versión | Requiere Apps Script |
 |-------------------------|---------|----------------------|
 | index.html              | v7      | v7 o superior        |
-| boparts_ventas.html     | v10.4   | **v10.2**            |
+| boparts_ventas.html     | v10.5   | **v10.5**            |
 | boparts_cobros.html     | v1      | **v9**               |
 | boparts_fotos.html      | v7      | v7 o superior        |
 | boparts_demanda.html    | v8      | v7 o superior        |
 | boparts_reportes.html   | v7      | ninguno (solo lee CSV) |
-| Code.gs (Apps Script)   | v10.2   | —                    |
+| Code.gs (Apps Script)   | v10.5   | —                    |
 
 Deployment ID (no cambia): `AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg`
 
@@ -24,6 +24,12 @@ Para volver atrás:
 - Apps Script: Implementar → Administrar implementaciones → lápiz → elegir la versión anterior → Implementar.
 
 ---
+
+## v10.5 — 2026-09-10
+**boparts_ventas.html v10.5** + **Code.gs v10.5**
+- Corregido: el encabezado mostraba "undefined" como version.
+- Clientes: si el CSV publicado falla o tarda, la app pide la lista a Apps Script (`?action=clientes`); si ambos fallan,
+  el selector de credito muestra el error real y un enlace "Reintentar" en vez de quedarse en "Cargando...".
 
 ## v10.4 — 2026-09-10
 **boparts_ventas.html v10.4** (script v10.2 sirve)
