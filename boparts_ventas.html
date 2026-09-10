@@ -1,7 +1,8 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_ventas.html
-  VERSION: v10 (2026-09-10) | requiere Apps Script v10
+  VERSION: v10.1 (2026-09-10) | requiere Apps Script v10
+  v10.1: la cotizacion se emite en Bs o en USD (selector en la pantalla de cotizacion) y no muestra la tasa BCV
   v10: nota de entrega y cotizacion en PDF generado en el telefono (jsPDF) con boton Compartir (Gmail, WhatsApp, Drive...);
        boton Cotizar que no registra venta; cotizaciones se guardan en hoja COTIZACIONES con numeracion COT-xxxx
   v9.1: si el script responde algo inesperado, el aviso muestra que respondio; el toast ya no se corta en pantalla
@@ -289,6 +290,14 @@ select option{background:#1E1E1E;color:var(--ink)}
       <div class="field"><label>Notas del cliente</label><textarea id="cliNota" rows="2" placeholder="Descuento especial, preferencias..."></textarea></div>
       <button class="nbtn nbtn-p" onclick="guardarCliente()">Guardar cliente y continuar</button>
       <button class="nbtn nbtn-s" onclick="ocultarFormCliente()" style="margin-top:0">Cancelar</button>
+    </div>
+
+    <div class="field" id="cotMonedaWrap" style="display:none">
+      <label>Moneda de la cotizacion</label>
+      <select id="selCotMon" onchange="localStorage.setItem('boparts_cot_mon', this.value)">
+        <option value="BS">Bolivares (Bs)</option>
+        <option value="USD">Dolares (USD)</option>
+      </select>
     </div>
 
     <!-- BOTONES NOTA -->
@@ -1078,6 +1087,8 @@ function abrirDoc(modo) {
   document.getElementById('btnCerrarDoc').textContent = esCot ? 'Cerrar' : 'Omitir - Nueva Venta';
   document.getElementById('skipNota').textContent = esCot ? 'Cerrar' : 'Omitir - Nueva Venta';
   document.getElementById('cotSinCliente').style.display = esCot ? 'block' : 'none';
+  document.getElementById('cotMonedaWrap').style.display = esCot ? 'block' : 'none';
+  if (esCot) document.getElementById('selCotMon').value = localStorage.getItem('boparts_cot_mon') || 'BS';
   document.getElementById('docListo').style.display = 'none';
   document.getElementById('btnDoc').style.display = 'block';
   var pre = (!esCot && lastCredito) ? lastCredito.cliente : null;
@@ -1175,6 +1186,9 @@ function construirPDF(tipo, numero) {
       var JS = window.jspdf && window.jspdf.jsPDF;
       if (!JS) throw new Error('Libreria PDF no cargo (sin internet?)');
       var esCot = tipo === 'cot';
+      var enUSD = esCot && document.getElementById('selCotMon').value === 'USD';
+      var fmtM = enUSD ? fmtUSD : function(n) { return fmtBS(n); };
+      var sufijo = enUSD ? '$' : 'Bs';
       var num = (esCot ? 'COT-' : 'NE-') + ('000' + numero).slice(-4);
       var doc = new JS({unit:'mm', format:'a4'});
       var W = 210, M = 14, y = 12;
@@ -1199,12 +1213,14 @@ function construirPDF(tipo, numero) {
 
       // Info
       doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(gris[0],gris[1],gris[2]);
-      doc.text('FECHA', M, y); doc.text('CONDICION', M + 45, y); doc.text('TASA BCV', M + 95, y);
-      if (esCot) doc.text('VALIDEZ', M + 140, y);
+      doc.text('FECHA', M, y); doc.text('CONDICION', M + 45, y);
+      if (esCot) { doc.text('MONEDA', M + 95, y); doc.text('VALIDEZ', M + 140, y); }
+      else doc.text('TASA BCV', M + 95, y);
       doc.setFont('helvetica','bold'); doc.setTextColor(negro[0],negro[1],negro[2]); doc.setFontSize(9);
       var cond = esCot ? 'SEGUN FORMA DE PAGO' : (lastCredito ? 'CREDITO' : 'CONTADO');
-      doc.text(fecha, M, y + 5); doc.text(cond, M + 45, y + 5); doc.text('Bs ' + TASA, M + 95, y + 5);
-      if (esCot) doc.text('24 HORAS', M + 140, y + 5);
+      doc.text(fecha, M, y + 5); doc.text(cond, M + 45, y + 5);
+      if (esCot) { doc.text(enUSD ? 'DOLARES (USD)' : 'BOLIVARES (Bs)', M + 95, y + 5); doc.text('24 HORAS', M + 140, y + 5); }
+      else doc.text('Bs ' + TASA, M + 95, y + 5);
       y += 9; doc.setDrawColor(230,230,230); doc.line(M, y, W - M, y); y += 4;
 
       // Cliente
@@ -1227,11 +1243,11 @@ function construirPDF(tipo, numero) {
         var c = lastCart[i];
         var subUsd = c.precio * c.cantidad, subBs = Math.round(subUsd * TASA);
         totalBs += subBs; totalUsd += subUsd;
-        body.push([c.producto, String(c.cantidad), fmtBS(Math.round(c.precio * TASA)), fmtBS(subBs)]);
+        body.push([c.producto, String(c.cantidad), enUSD ? fmtUSD(c.precio) : fmtBS(Math.round(c.precio * TASA)), enUSD ? fmtUSD(subUsd) : fmtBS(subBs)]);
       }
       doc.autoTable({
         startY: y, margin:{left:M, right:M},
-        head:[['DESCRIPCION','CANT.','PRECIO Bs','TOTAL Bs']], body:body,
+        head:[['DESCRIPCION','CANT.','PRECIO ' + sufijo,'TOTAL ' + sufijo]], body:body,
         styles:{fontSize:8, cellPadding:2, textColor:[17,17,17]},
         headStyles:{fillColor:negro, textColor:[255,255,255], fontStyle:'bold'},
         alternateRowStyles:{fillColor:[246,246,246]},
@@ -1242,13 +1258,14 @@ function construirPDF(tipo, numero) {
       // Total
       doc.setFillColor(amarillo[0],amarillo[1],amarillo[2]); doc.roundedRect(W - M - 62, y, 62, 16, 1.5, 1.5, 'F');
       doc.setTextColor(negro[0],negro[1],negro[2]); doc.setFontSize(7); doc.setFont('helvetica','bold'); doc.text('TOTAL', W - M - 58, y + 5);
-      doc.setFontSize(14); doc.text(fmtBS(totalBs), W - M - 4, y + 11, {align:'right'});
-      doc.setFontSize(7); doc.setFont('helvetica','normal'); doc.text('Ref. ' + fmtUSD(totalUsd), W - M - 58, y + 13);
+      doc.setFontSize(14); doc.text(enUSD ? fmtUSD(totalUsd) : fmtBS(totalBs), W - M - 4, y + 11, {align:'right'});
+      doc.setFontSize(7); doc.setFont('helvetica','normal');
+      if (!esCot) doc.text('Ref. ' + fmtUSD(totalUsd), W - M - 58, y + 13);
       y += 22;
 
       if (esCot) {
         doc.setFontSize(7.5); doc.setTextColor(gris[0],gris[1],gris[2]);
-        doc.text('Precios sujetos a cambio segun tasa BCV. Cotizacion valida por 24 horas o hasta agotar existencia.', M, y);
+        doc.text('Precios sujetos a cambio sin previo aviso. Cotizacion valida por 24 horas o hasta agotar existencia.', M, y);
         y += 5;
       } else {
         // Firmas
@@ -1267,7 +1284,7 @@ function construirPDF(tipo, numero) {
       doc.text(esCot ? 'Este documento es una cotizacion y no constituye compromiso de venta.' : 'Este documento no tiene valor fiscal. Solo sirve como comprobante de entrega.', W/2, fy + 6, {align:'center'});
 
       var nombreArchivo = num + '_' + String(cliSel.nombre || 'cliente').replace(/[^a-zA-Z0-9]+/g, '_').slice(0, 30) + '.pdf';
-      resolve({blob: doc.output('blob'), nombre: nombreArchivo, num: num, totalBs: totalBs, totalUsd: totalUsd});
+      resolve({blob: doc.output('blob'), nombre: nombreArchivo, num: num, totalBs: totalBs, totalUsd: totalUsd, moneda: enUSD ? 'USD' : 'BS'});
     } catch (e) { reject(e); }
   });
 }
@@ -1301,7 +1318,7 @@ function registrarCotizacion(num) {
     fecha:now.toLocaleDateString('es-VE'), hora:now.toLocaleTimeString('es-VE', {hour:'2-digit', minute:'2-digit'}),
     vendedor:document.getElementById('selV').value || '', cliente:cliSel ? cliSel.nombre : '', rif:cliSel ? (cliSel.rif || '') : '', tel:cliSel ? (cliSel.tel || '') : '',
     productos:lastCart.map(function(c) { return c.producto + ' x' + c.cantidad + ' (' + fmtUSD(c.precio) + ')'; }).join(' | '),
-    totalUSD:Math.round(usd * 100) / 100, totalBS:Math.round(usd * TASA), tasa:TASA,
+    totalUSD:Math.round(usd * 100) / 100, totalBS:Math.round(usd * TASA), tasa:TASA, moneda:document.getElementById('selCotMon').value,
     lineas:lastCart.map(function(c) { return {codigo:c.codigo, producto:c.producto, cantidad:c.cantidad, precio:c.precio}; })
   };
   postScript(payload).then(function(d) { if (!d || !d.ok) toast('La cotizacion no quedo registrada en la hoja', 'err'); })
@@ -1320,8 +1337,10 @@ function abrirWA() {
     var c = lastCart[i];
     lineas += '\n* ' + c.producto + ' x' + c.cantidad + ' - ' + fmtBS(Math.round(c.precio * c.cantidad * TASA));
   }
+  var enUSD = esCot && lastPDF && lastPDF.moneda === 'USD';
+  if (enUSD) { lineas = ''; for (var k = 0; k < lastCart.length; k++) lineas += '\n* ' + lastCart[k].producto + ' x' + lastCart[k].cantidad + ' - ' + fmtUSD(lastCart[k].precio * lastCart[k].cantidad); }
   var msg = 'Repuesto BoParts\n' + (esCot ? 'Cotizacion ' : 'Nota de Entrega ') + num + '\nCliente: ' + cliSel.nombre + '\n' +
-    lineas + '\n\nTOTAL: ' + fmtBS(bs) + ' (Ref. ' + fmtUSD(usd) + ', tasa ' + TASA + ')' +
+    lineas + '\n\nTOTAL: ' + (enUSD ? fmtUSD(usd) : (esCot ? fmtBS(bs) : fmtBS(bs) + ' (Ref. ' + fmtUSD(usd) + ', tasa ' + TASA + ')')) +
     (esCot ? '\nValida por 24 horas.' : '') + '\n\n0412-3185778 / 0414-9536708';
   window.open('https://wa.me/?text=' + encodeURIComponent(msg), '_blank');
 }

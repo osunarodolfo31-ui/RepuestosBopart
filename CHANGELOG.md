@@ -10,7 +10,7 @@ en el comentario del encabezado de cada HTML y en la cabecera de `Code.gs`.
 | Archivo                 | Versión | Requiere Apps Script |
 |-------------------------|---------|----------------------|
 | index.html              | v7      | v7 o superior        |
-| boparts_ventas.html     | v10     | **v10**              |
+| boparts_ventas.html     | v10.1   | **v10**              |
 | boparts_cobros.html     | v1      | **v9**               |
 | boparts_fotos.html      | v7      | v7 o superior        |
 | boparts_demanda.html    | v8      | v7 o superior        |
@@ -24,6 +24,11 @@ Para volver atrás:
 - Apps Script: Implementar → Administrar implementaciones → lápiz → elegir la versión anterior → Implementar.
 
 ---
+
+## v10.1 — 2026-09-10
+**boparts_ventas.html v10.1**
+- La cotizacion se emite en Bs o en USD (selector, recuerda la ultima eleccion) y no muestra la tasa BCV.
+  La nota de entrega sigue igual (tasa y referencia USD).
 
 ## v10 — 2026-09-10 · Nota y cotizacion en PDF
 **boparts_ventas.html v10** + **Code.gs v10** (orden: script → HTML)
