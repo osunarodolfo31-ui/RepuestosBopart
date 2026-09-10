@@ -1,7 +1,8 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_cobros.html
-  VERSION: v1 (2026-09-10) | requiere Apps Script v9
+  VERSION: v1.1 (2026-09-10) | requiere Apps Script v9
+  v1.1: enlace a Compras en el nav
   Cuentas por cobrar: saldo por cliente en USD, notas pendientes (abonos a las mas viejas primero),
   registro de abonos con metodo/banco/comision, estado de cuenta por WhatsApp.
 -->
@@ -261,6 +262,11 @@ select option{background:#1E1E1E;color:var(--ink)}
       <span class="nicon">📝</span>
       <span class="nlbl">Demanda</span>
       <span class="ndesc">No atendida</span>
+    </a>
+    <a class="ncard" href="boparts_compras.html">
+      <span class="nicon">📦</span>
+      <span class="nlbl">Compras</span>
+      <span class="ndesc">Recibir mercancia</span>
     </a>
     <a class="ncard cur" href="boparts_cobros.html">
       <span class="nicon">🧾</span>

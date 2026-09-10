@@ -10,12 +10,13 @@ en el comentario del encabezado de cada HTML y en la cabecera de `Code.gs`.
 | Archivo                 | Versión | Requiere Apps Script |
 |-------------------------|---------|----------------------|
 | index.html              | v7      | v7 o superior        |
-| boparts_ventas.html     | v10.6   | **v10.5**            |
-| boparts_cobros.html     | v1      | **v9**               |
+| boparts_ventas.html     | v10.7   | **v10.5**            |
+| boparts_cobros.html     | v1.1    | **v9**               |
+| boparts_compras.html    | v1      | **v11**              |
 | boparts_fotos.html      | v7      | v7 o superior        |
 | boparts_demanda.html    | v8      | v7 o superior        |
 | boparts_reportes.html   | v7      | ninguno (solo lee CSV) |
-| Code.gs (Apps Script)   | v10.5   | —                    |
+| Code.gs (Apps Script)   | v11     | —                    |
 
 Deployment ID (no cambia): `AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg`
 
@@ -24,6 +25,16 @@ Para volver atrás:
 - Apps Script: Implementar → Administrar implementaciones → lápiz → elegir la versión anterior → Implementar.
 
 ---
+
+## v11 — 2026-09-10 · Compras / Recepcion de mercancia
+**Code.gs v11** + **boparts_compras.html v1** (+ ventas v10.7 y cobros v1.1: solo el enlace a Compras en el nav)
+- Nueva pantalla Compras (camino B: sin costos). Quien recibe registra proveedor (buscar o crear), nro de factura,
+  foto de la factura (Cloudinary, carpeta boparts/facturas, comprimida), productos y cantidades recibidas, notas.
+- Hojas nuevas: PROVEEDORES, COMPRAS (cabecera, estado PENDIENTE COSTO), COMPRAS_DETALLE (una fila por producto).
+- "+ Producto nuevo": se crea en LISTA DE PRODUCTOS con codigo, marca, nombre y categoria; sin costo ni precio,
+  REF = "NUEVO - SIN PRECIO". Rechaza codigos que ya existen.
+- El costeo (poner costo por linea, actualizar Costo en la lista, cerrar la compra) queda para la app de gerencia.
+- Pendiente: index.html muestra los productos nuevos con precio vacio; hay que ocultarlos o marcarlos hasta que tengan precio.
 
 ## v10.6 — 2026-09-10
 **boparts_ventas.html v10.6**
@@ -132,5 +143,5 @@ Estado con el que arrancó el control de versiones. Commits en GitHub: `4269b17`
 - boparts_fotos.html escribe por número de fila: se rompe si alguien inserta u ordena filas mientras se suben fotos.
 - index.html usa tasa `1000` por defecto si no hay valor guardado ni en la hoja.
 - Todas las hojas están publicadas como CSV público (incluyendo VENTAS y CLIENTES). CXC_MOV no esta publicada; solo se lee via Apps Script.
-- index.html, fotos y demanda no tienen aun el enlace a Cobros en su nav.
+- index.html, fotos y demanda no tienen aun los enlaces a Cobros ni Compras en su nav.
 - boparts_reportes.html cuenta las ventas a credito como ingreso del dia; falta separar vendido de cobrado.
