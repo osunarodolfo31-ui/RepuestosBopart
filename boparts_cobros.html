@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<!--
+  Repuesto BoParts — boparts_cobros.html
+  VERSION: v1 (2026-09-10) | requiere Apps Script v9
+  Cuentas por cobrar: saldo por cliente en USD, notas pendientes (abonos a las mas viejas primero),
+  registro de abonos con metodo/banco/comision, estado de cuenta por WhatsApp.
+-->
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>BoParts · Cobros</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --brand:#F5A800;--brand-soft:rgba(245,168,0,.15);
+  --bg:#111;--bg2:#1A1A1A;--card:#1E1E1E;--card2:#252525;--border:#2E2E2E;
+  --ink:#F0F0F0;--ink-soft:#AAA;--ink-muted:#666;
+  --green:#22C55E;--red:#EF4444;
+  --radius:14px;--radius-sm:8px;
+}
+html,body{min-height:100%;background:var(--bg);font-family:'Inter',sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased}
+header{background:var(--bg2);border-bottom:2px solid var(--brand);padding:12px 16px;display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:50}
+.logo{height:38px;border-radius:4px}
+.hdr h1{font-size:15px;font-weight:700}
+.hdr p{font-size:11px;color:var(--ink-muted)}
+.container{padding:16px;max-width:520px;margin:0 auto;padding-bottom:100px}
+.section{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:12px}
+.stitle{font-size:12px;font-weight:700;color:var(--brand);text-transform:uppercase;letter-spacing:.5px;margin-bottom:12px}
+label{font-size:12px;color:var(--ink-soft);font-weight:600;display:block;margin-bottom:4px}
+input,select,textarea{width:100%;background:var(--card2);border:1.5px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;font-size:14px;font-family:inherit;color:var(--ink);outline:none;transition:border-color .15s}
+input:focus,select:focus,textarea:focus{border-color:var(--brand)}
+input::placeholder,textarea::placeholder{color:var(--ink-muted)}
+select option{background:#1E1E1E;color:var(--ink)}
+.field{margin-bottom:12px}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+
+/* DROPDOWN */
+.wrap{position:relative}
+.drop{background:var(--card2);border:1px solid var(--border);border-radius:var(--radius-sm);max-height:220px;overflow-y:auto;position:absolute;width:100%;z-index:80;display:none;margin-top:4px;box-shadow:0 8px 24px rgba(0,0,0,.4)}
+.drop.open{display:block}
+.ditem{padding:10px 12px;font-size:13px;cursor:pointer;border-bottom:1px solid var(--border);color:var(--ink)}
+.ditem:last-child{border-bottom:none}
+.ditem:active,.ditem:hover{background:var(--brand-soft)}
+.ditem-meta{font-size:10px;color:var(--ink-muted);margin-top:2px}
+.ditem-price{font-size:11px;color:var(--brand);font-weight:600;float:right}
+
+/* CART */
+.cart-empty{text-align:center;padding:20px;color:var(--ink-muted);font-size:13px}
+.citem{background:var(--card2);border-radius:var(--radius-sm);padding:12px;margin-bottom:8px;border:1px solid var(--border)}
+.ctop{display:flex;align-items:flex-start;gap:8px}
+.cname{font-size:13px;font-weight:600;flex:1;line-height:1.3}
+.cdel{background:none;border:none;color:var(--red);cursor:pointer;font-size:20px;line-height:1;padding:0;flex-shrink:0}
+.cbot{display:grid;grid-template-columns:90px 1fr 1fr;gap:8px;margin-top:8px;align-items:center}
+.qwrap{display:flex;align-items:center;gap:6px}
+.qbtn{background:var(--card);border:1px solid var(--border);border-radius:6px;width:28px;height:28px;color:var(--ink);font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.qin{width:36px;text-align:center;padding:4px;font-size:14px;font-weight:700;background:var(--card);border:1px solid var(--border);border-radius:6px}
+.csub{text-align:right;font-size:14px;font-weight:700;color:var(--brand)}
+
+/* TOTALS */
+.tbar{background:var(--card2);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;margin-bottom:12px;display:none}
+.trow{display:flex;justify-content:space-between;margin-bottom:4px}
+.trow:last-child{margin-bottom:0}
+.tlbl{font-size:12px;color:var(--ink-soft)}
+.tval{font-size:14px;font-weight:700}
+.tval.big{font-size:18px;color:var(--brand)}
+.tval.red{color:var(--red)}
+
+/* PAYMENT */
+.pblock{background:var(--card2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;margin-bottom:8px;position:relative}
+.pdel{position:absolute;top:10px;right:10px;background:none;border:none;color:var(--red);cursor:pointer;font-size:16px}
+.addpbtn{width:100%;padding:10px;background:none;border:1.5px dashed var(--border);border-radius:var(--radius-sm);color:var(--ink-muted);font-size:13px;cursor:pointer;font-family:inherit;transition:border-color .15s}
+.addpbtn:hover{border-color:var(--brand);color:var(--brand)}
+.cominfo{font-size:11px;color:var(--ink-muted);margin-top:6px;padding:6px 8px;background:rgba(245,168,0,.08);border-radius:6px;border-left:2px solid var(--brand)}
+
+/* ALIADO */
+.togwrap{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border);margin-bottom:10px}
+.toglbl{font-size:13px;font-weight:600}
+.togsub{font-size:11px;color:var(--ink-muted);margin-top:2px}
+.tog{width:44px;height:24px;background:var(--border);border-radius:12px;cursor:pointer;position:relative;transition:background .2s;border:none;flex-shrink:0}
+.tog.on{background:var(--brand)}
+.tog::after{content:'';position:absolute;width:18px;height:18px;background:#fff;border-radius:50%;top:3px;left:3px;transition:left .2s}
+.tog.on::after{left:23px}
+.asel{display:none;margin-top:10px}
+.asel.open{display:block}
+.acard{background:var(--card2);border:1.5px solid var(--border);border-radius:var(--radius-sm);padding:12px;cursor:pointer;margin-bottom:8px;transition:border-color .15s}
+.acard.sel{border-color:var(--brand);background:var(--brand-soft)}
+.aname{font-size:13px;font-weight:700}
+.aneg{font-size:11px;color:var(--ink-muted)}
+.acom{font-size:11px;color:var(--brand);font-weight:600;float:right}
+.cprev{background:rgba(245,168,0,.1);border:1px solid rgba(245,168,0,.3);border-radius:var(--radius-sm);padding:10px 12px;margin-top:10px;font-size:12px;color:var(--ink-soft);display:none}
+.cprev.open{display:block}
+
+/* SUBMIT */
+.subbtn{width:100%;padding:16px;background:var(--brand);color:#111;border:none;border-radius:var(--radius);font-size:16px;font-weight:700;cursor:pointer;font-family:inherit;position:fixed;bottom:0;left:0;right:0;max-width:520px;margin:0 auto}
+.subbtn:disabled{opacity:.5}
+
+/* MODALS */
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:200;display:none;align-items:flex-end}
+.overlay.open{display:flex}
+.sheet{background:var(--bg2);border-radius:20px 20px 0 0;border-top:2px solid var(--brand);padding:20px 16px 40px;width:100%;max-height:90vh;overflow-y:auto}
+.sheet-title{font-size:16px;font-weight:700;margin-bottom:4px}
+.sheet-sub{font-size:12px;color:var(--ink-muted);margin-bottom:16px}
+
+/* SUCCESS */
+.success{display:none;position:fixed;inset:0;background:var(--bg);z-index:300;flex-direction:column;align-items:center;justify-content:center;padding:24px;text-align:center}
+.success.open{display:flex}
+.sicon{font-size:64px;margin-bottom:16px}
+.success h2{font-size:22px;font-weight:700;margin-bottom:8px}
+.success p{font-size:14px;color:var(--ink-muted);margin-bottom:24px;line-height:1.6;white-space:pre-line}
+.sbtn{width:100%;padding:14px;border:none;border-radius:var(--radius);font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;margin-bottom:10px}
+.sbtn-y{background:var(--brand);color:#111}
+.sbtn-n{background:var(--card2);color:var(--ink-soft);border:1px solid var(--border)}
+
+/* NOTA BUTTONS */
+.nbtn{width:100%;padding:13px;border-radius:var(--radius);font-size:14px;font-weight:700;border:none;cursor:pointer;font-family:inherit;margin-bottom:8px}
+.nbtn-p{background:var(--brand);color:#111}
+.nbtn-w{background:#25D366;color:#fff;display:none}
+.nbtn-s{background:var(--card2);color:var(--ink-soft);border:1px solid var(--border)}
+
+/* CLIENTE CARD */
+.cli-result{background:var(--brand-soft);border:1.5px solid var(--brand);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between}
+.cli-info{font-size:13px;font-weight:600}
+.cli-sub{font-size:11px;color:var(--ink-muted)}
+.cli-clear{background:none;border:none;color:var(--ink-muted);cursor:pointer;font-size:18px}
+.cli-new-btn{width:100%;padding:10px;background:none;border:1.5px dashed var(--brand);border-radius:var(--radius-sm);color:var(--brand);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;margin-top:8px}
+
+/* TOAST */
+.toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%) translateY(80px);background:#222;color:#fff;padding:12px 20px;border-radius:30px;font-size:13px;font-weight:600;transition:transform .3s;z-index:999;white-space:nowrap;border:1px solid var(--border);pointer-events:none}
+.toast.show{transform:translateX(-50%) translateY(0)}
+.toast.ok{border-color:var(--green);color:var(--green)}
+.toast.err{border-color:var(--red);color:var(--red)}
+
+/* NAV */
+.fab{position:fixed;bottom:70px;right:16px;z-index:90;width:48px;height:48px;background:var(--brand);border:none;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 16px rgba(245,168,0,.4)}
+.nav-ov{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:91;opacity:0;pointer-events:none;transition:opacity .2s}
+.nav-ov.open{opacity:1;pointer-events:auto}
+.nav-pan{position:fixed;bottom:0;left:0;right:0;z-index:92;background:var(--bg2);border-radius:20px 20px 0 0;border-top:2px solid var(--brand);padding:20px 16px 40px;transform:translateY(100%);transition:transform .3s}
+.nav-pan.open{transform:translateY(0)}
+.nav-t{font-size:12px;font-weight:700;color:var(--brand);text-transform:uppercase;letter-spacing:.5px;margin-bottom:16px;text-align:center}
+.nav-g{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.ncard{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px 12px;display:flex;flex-direction:column;align-items:center;gap:8px;text-decoration:none;-webkit-tap-highlight-color:transparent}
+.ncard.cur{border-color:var(--brand);background:var(--brand-soft)}
+.nicon{font-size:28px}
+.nlbl{font-size:12px;font-weight:700;color:var(--ink);text-align:center}
+.ndesc{font-size:10px;color:var(--ink-muted);text-align:center}
+
+/* COBROS */
+.ccard{background:var(--card2);border:1.5px solid var(--border);border-radius:var(--radius-sm);padding:12px;margin-bottom:8px;cursor:pointer;display:flex;justify-content:space-between;align-items:center}
+.ccard.sel{border-color:var(--brand);background:var(--brand-soft)}
+.ccard .cn{font-size:13px;font-weight:700}
+.ccard .cr{font-size:11px;color:var(--ink-muted)}
+.ccard .cs{font-size:15px;font-weight:700;color:var(--brand);text-align:right}
+.ccard .cs small{display:block;font-size:10px;color:var(--ink-muted);font-weight:500}
+.nrow{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:12px}
+.nrow:last-child{border-bottom:none}
+.badge{font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px}
+.b-pend{background:rgba(239,68,68,.15);color:var(--red)}
+.b-parc{background:var(--brand-soft);color:var(--brand)}
+.b-pag{background:rgba(34,197,94,.15);color:var(--green)}
+.saldo-big{font-size:26px;font-weight:700;color:var(--brand)}
+.saldo-sub{font-size:12px;color:var(--ink-muted)}
+.empty{text-align:center;padding:20px;color:var(--ink-muted);font-size:13px}
+</style>
+</head>
+<body>
+
+<header>
+  <img src="icon-192.png" alt="BoParts" class="logo">
+  <div class="hdr">
+    <h1>Cobros</h1>
+    <p id="fechaHdr"></p>
+  </div>
+</header>
+
+<div class="container">
+
+  <div class="section">
+    <div class="stitle">Registrado por</div>
+    <select id="selV">
+      <option value="">Seleccionar...</option>
+      <option>Rodolfo Osuna</option>
+      <option>Javier Boves</option>
+      <option>Reinaldo Cuicas</option>
+    </select>
+  </div>
+
+  <div class="section">
+    <div class="stitle">Clientes con saldo <span id="tasaLbl" style="float:right;color:var(--ink-muted);font-weight:500;text-transform:none"></span></div>
+    <div id="cliList"><div class="empty">Cargando...</div></div>
+  </div>
+
+  <div id="detalle" style="display:none">
+    <div class="section">
+      <div class="stitle" id="detNombre">Cliente</div>
+      <div class="saldo-big" id="detSaldo">$0.00</div>
+      <div class="saldo-sub" id="detSaldoBs"></div>
+      <div style="margin-top:12px">
+        <label>Notas de entrega</label>
+        <div id="detNotas"></div>
+      </div>
+      <div style="margin-top:12px">
+        <label>Ultimos abonos</label>
+        <div id="detAbonos"></div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="stitle">Registrar abono</div>
+      <div class="row2">
+        <div class="field"><label>Monto pagado</label><input type="number" id="abMonto" placeholder="0.00" step="0.01" oninput="previewAbono()"></div>
+        <div class="field"><label>Moneda</label><select id="abMoneda" onchange="previewAbono()"><option value="USD">USD</option><option value="BS">Bs</option></select></div>
+      </div>
+      <div class="field"><label>Metodo de pago</label><select id="abMetodo" onchange="previewAbono()"></select></div>
+      <div id="abPreview" class="cominfo" style="display:none"></div>
+      <div class="field" style="margin-top:10px"><label>Notas</label><input type="text" id="abNotas" placeholder="Opcional"></div>
+    </div>
+  </div>
+
+</div>
+
+<button class="subbtn" id="btnAbono" onclick="guardarAbono()" style="display:none">Registrar Abono</button>
+
+<div class="success" id="success">
+  <div class="sicon">✅</div>
+  <h2>Abono Registrado</h2>
+  <p id="successMsg"></p>
+  <button class="sbtn sbtn-y" onclick="enviarEstado()">Enviar estado de cuenta por WhatsApp</button>
+  <button class="sbtn sbtn-n" onclick="volver()">Volver</button>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- FAB NAV -->
+<button class="fab" onclick="toggleNav()">
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#111" stroke-width="2.5" stroke-linecap="round">
+    <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
+  </svg>
+</button>
+<div class="nav-ov" id="navOv" onclick="closeNav()"></div>
+<div class="nav-pan" id="navPan">
+  <div class="nav-t">Repuesto BoParts</div>
+  <div class="nav-g">
+    <a class="ncard" href="index.html">
+      <span class="nicon">📋</span>
+      <span class="nlbl">Lista de Precios</span>
+      <span class="ndesc">Consulta y busqueda</span>
+    </a>
+    <a class="ncard" href="boparts_ventas.html">
+      <span class="nicon">💰</span>
+      <span class="nlbl">Registrar Venta</span>
+      <span class="ndesc">Nueva venta</span>
+    </a>
+    <a class="ncard" href="boparts_fotos.html">
+      <span class="nicon">📷</span>
+      <span class="nlbl">Cargar Fotos</span>
+      <span class="ndesc">Catalogo imagenes</span>
+    </a>
+    <a class="ncard" href="boparts_demanda.html">
+      <span class="nicon">📝</span>
+      <span class="nlbl">Demanda</span>
+      <span class="ndesc">No atendida</span>
+    </a>
+    <a class="ncard cur" href="boparts_cobros.html">
+      <span class="nicon">🧾</span>
+      <span class="nlbl">Cobros</span>
+      <span class="ndesc">Cuentas por cobrar</span>
+    </a>
+  </div>
+</div>
+
+<script>
+var SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
+var TASA = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
+
+var METODOS = [
+  {label:'Efectivo USD',        metodo:'Efectivo',        banco:'',                     moneda:'USD', fijo:0,    pct:0  },
+  {label:'Efectivo Bs',         metodo:'Efectivo',        banco:'',                     moneda:'BS',  fijo:0,    pct:0  },
+  {label:'Pago Movil Banesco',  metodo:'Pago Movil',      banco:'Banesco',               moneda:'BS',  fijo:0,    pct:0  },
+  {label:'Pago Movil Bancrecer',metodo:'Pago Movil',      banco:'Bancrecer',             moneda:'BS',  fijo:0,    pct:0  },
+  {label:'Punto Bancamiga',     metodo:'Punto de Venta',  banco:'Bancamiga',             moneda:'BS',  fijo:1000, pct:1.5},
+  {label:'Punto Bancrecer Emp.',metodo:'Punto de Venta',  banco:'Bancrecer Empresarial', moneda:'BS',  fijo:0,    pct:0  },
+  {label:'Cashea Bancrecer',    metodo:'Cashea',          banco:'Bancrecer Empresarial', moneda:'BS',  fijo:0,    pct:0  },
+  {label:'CREDITO (cuenta por cobrar)', metodo:'Credito', banco:'',                     moneda:'USD', fijo:0,    pct:0, credito:true }
+];
+
+var CLIENTES = [];   // estado de cuenta por cliente (viene de Apps Script)
+var sel = null;
+var ultimo = null;   // ultimo abono registrado (para el mensaje de WhatsApp)
+
+document.getElementById('fechaHdr').textContent = new Date().toLocaleDateString('es-VE', {weekday:'long', day:'numeric', month:'long'});
+
+// Metodos de pago (sin CREDITO)
+(function() {
+  var sl = document.getElementById('abMetodo');
+  var h = '<option value="">Seleccionar...</option>';
+  for (var i = 0; i < METODOS.length; i++) if (!METODOS[i].credito) h += '<option value="' + i + '">' + escHtml(METODOS[i].label) + '</option>';
+  sl.innerHTML = h;
+})();
+
+function cargar() {
+  document.getElementById('cliList').innerHTML = '<div class="empty">Cargando...</div>';
+  fetch(SCRIPT_URL + '?action=cxc&t=' + Date.now())
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (!d || !d.ok) throw new Error(d && d.error ? d.error : 'sin respuesta');
+      if (!TASA && d.tasa > 1) TASA = d.tasa;
+      document.getElementById('tasaLbl').textContent = TASA ? 'Tasa ' + TASA : 'Sin tasa';
+      CLIENTES = d.clientes || [];
+      renderLista();
+      if (sel) { var s2 = CLIENTES.filter(function(c) { return c.cliente === sel.cliente; })[0]; sel = s2 || null; if (sel) renderDetalle(); }
+    })
+    .catch(function(e) { document.getElementById('cliList').innerHTML = '<div class="empty" style="color:var(--red)">No se pudo cargar (' + e.message + '). Revisa la conexion.</div>'; });
+}
+
+function renderLista() {
+  var conSaldo = CLIENTES.filter(function(c) { return c.saldoUSD > 0.009; });
+  if (!conSaldo.length) { document.getElementById('cliList').innerHTML = '<div class="empty">Nadie debe nada. 🎉</div>'; return; }
+  var h = '';
+  conSaldo.forEach(function(c) {
+    var pend = c.notas.filter(function(n) { return n.estado !== 'PAGADA'; }).length;
+    h += '<div class="ccard' + (sel && sel.cliente === c.cliente ? ' sel' : '') + '" onclick="elegir(\'' + escAttr(c.cliente) + '\')">' +
+      '<div><div class="cn">' + escHtml(c.cliente) + '</div><div class="cr">' + pend + ' nota' + (pend === 1 ? '' : 's') + ' pendiente' + (pend === 1 ? '' : 's') + (c.rif ? ' · ' + escHtml(c.rif) : '') + '</div></div>' +
+      '<div class="cs">' + fmtUSD(c.saldoUSD) + '<small>' + (TASA ? fmtBS(c.saldoUSD * TASA) : '') + '</small></div></div>';
+  });
+  document.getElementById('cliList').innerHTML = h;
+}
+
+function elegir(nombre) {
+  sel = CLIENTES.filter(function(c) { return c.cliente === nombre; })[0] || null;
+  renderLista(); renderDetalle();
+  document.getElementById('detalle').scrollIntoView({behavior:'smooth'});
+}
+
+function renderDetalle() {
+  if (!sel) { document.getElementById('detalle').style.display = 'none'; document.getElementById('btnAbono').style.display = 'none'; return; }
+  document.getElementById('detalle').style.display = 'block';
+  document.getElementById('btnAbono').style.display = 'block';
+  document.getElementById('detNombre').textContent = sel.cliente;
+  document.getElementById('detSaldo').textContent = fmtUSD(sel.saldoUSD);
+  document.getElementById('detSaldoBs').textContent = (TASA ? fmtBS(sel.saldoUSD * TASA) + ' a tasa ' + TASA + ' · ' : '') + 'Cargos ' + fmtUSD(sel.cargosUSD) + ' · Abonos ' + fmtUSD(sel.abonosUSD);
+  var h = '';
+  sel.notas.slice().reverse().forEach(function(n) {
+    var cls = n.estado === 'PAGADA' ? 'b-pag' : (n.estado === 'PARCIAL' ? 'b-parc' : 'b-pend');
+    h += '<div class="nrow"><div><b>' + (n.nota ? 'NE-' + ('000' + n.nota).slice(-4) : 'Sin nota') + '</b> · ' + n.fecha + '<br><span style="color:var(--ink-muted)">' + fmtUSD(n.montoUSD) + (n.estado === 'PARCIAL' ? ' · debe ' + fmtUSD(n.pendienteUSD) : '') + '</span></div>' +
+      '<span class="badge ' + cls + '">' + n.estado + '</span></div>';
+  });
+  document.getElementById('detNotas').innerHTML = h || '<div class="empty">Sin notas</div>';
+  var ab = sel.movs.filter(function(m) { return m.tipo === 'ABONO'; }).slice(-5).reverse();
+  var ha = '';
+  ab.forEach(function(m) {
+    ha += '<div class="nrow"><div>' + m.fecha + ' · ' + escHtml(m.metodo) + (m.banco ? ' ' + escHtml(m.banco) : '') + '</div><div>' + fmtUSD(m.montoUSD) + (m.moneda === 'BS' ? '<br><span style="color:var(--ink-muted)">' + fmtBS(m.montoPagado) + '</span>' : '') + '</div></div>';
+  });
+  document.getElementById('detAbonos').innerHTML = ha || '<div class="empty">Sin abonos todavia</div>';
+  document.getElementById('abMonto').value = ''; document.getElementById('abNotas').value = '';
+  document.getElementById('abMetodo').value = ''; previewAbono();
+}
+
+function calcAbono() {
+  var monto = parseFloat(document.getElementById('abMonto').value) || 0;
+  var moneda = document.getElementById('abMoneda').value;
+  var mi = parseInt(document.getElementById('abMetodo').value);
+  var m = isNaN(mi) ? null : METODOS[mi];
+  var usd = moneda === 'BS' ? (TASA ? monto / TASA : 0) : monto;
+  var bs = moneda === 'BS' ? monto : monto * TASA;
+  var com = (m && moneda === 'BS') ? m.fijo + monto * m.pct / 100 : (m ? (m.fijo + bs * m.pct / 100) : 0);
+  return {monto:monto, moneda:moneda, m:m, usd:Math.round(usd * 100) / 100, bs:Math.round(bs), com:Math.round(com)};
+}
+
+function previewAbono() {
+  var a = calcAbono(); var el = document.getElementById('abPreview');
+  if (!a.monto) { el.style.display = 'none'; return; }
+  el.style.display = 'block';
+  el.innerHTML = 'Se abonan <b>' + fmtUSD(a.usd) + '</b> a la deuda' + (a.moneda === 'BS' ? ' (tasa ' + TASA + ')' : '') +
+    (a.com ? ' · comision ' + fmtBS(a.com) : '') +
+    (sel ? ' · saldo quedaria en <b>' + fmtUSD(Math.max(0, sel.saldoUSD - a.usd)) + '</b>' : '');
+}
+
+function guardarAbono() {
+  if (!sel) return;
+  var quien = document.getElementById('selV').value;
+  if (!quien) { toast('Selecciona quien registra', 'err'); return; }
+  var a = calcAbono();
+  if (!a.monto || a.monto <= 0) { toast('Indica el monto', 'err'); return; }
+  if (!a.m) { toast('Selecciona el metodo de pago', 'err'); return; }
+  if (a.moneda === 'BS' && !TASA) { toast('No hay tasa cargada. Abre Lista de Precios y fijala.', 'err'); return; }
+  if (a.usd > sel.saldoUSD + 0.05) { toast('El abono (' + fmtUSD(a.usd) + ') supera el saldo (' + fmtUSD(sel.saldoUSD) + ')', 'err'); return; }
+  var now = new Date();
+  var payload = {
+    tipo:'abono', cliente:sel.cliente, rif:sel.rif || '',
+    fecha:now.toLocaleDateString('es-VE'), hora:now.toLocaleTimeString('es-VE', {hour:'2-digit', minute:'2-digit'}),
+    idAbono:'A' + now.getFullYear() + pad2(now.getMonth()+1) + pad2(now.getDate()) + '-' + pad2(now.getHours()) + pad2(now.getMinutes()) + pad2(now.getSeconds()),
+    montoUSD:a.usd, moneda:a.moneda, montoPagado:a.monto, tasa:TASA,
+    metodo:a.m.metodo, banco:a.m.banco, comision:a.com,
+    registradoPor:quien, notas:document.getElementById('abNotas').value
+  };
+  var btn = document.getElementById('btnAbono');
+  btn.disabled = true; btn.textContent = 'Guardando...';
+  fetch(SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body:JSON.stringify(payload)})
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      btn.disabled = false; btn.textContent = 'Registrar Abono';
+      if (!d || d.ok !== true) throw new Error(d && d.error ? d.error : 'Respuesta invalida');
+      ultimo = {cliente:sel.cliente, usd:a.usd, moneda:a.moneda, monto:a.monto, metodo:a.m.label, saldo:d.saldoUSD};
+      document.getElementById('successMsg').textContent = sel.cliente + ' - ' + fmtUSD(a.usd) + (a.moneda === 'BS' ? ' (' + fmtBS(a.monto) + ')' : '') + '\nSaldo: ' + fmtUSD(d.saldoUSD);
+      document.getElementById('success').classList.add('open');
+      cargar();
+    })
+    .catch(function(err) {
+      btn.disabled = false; btn.textContent = 'Registrar Abono';
+      toast('No se guardo el abono (' + (err && err.message ? err.message : 'sin conexion') + '). Reintenta.', 'err');
+    });
+}
+
+function volver() { document.getElementById('success').classList.remove('open'); }
+
+function enviarEstado() {
+  if (!sel) return;
+  var c = CLIENTES.filter(function(x) { return x.cliente === sel.cliente; })[0] || sel;
+  var lineas = '';
+  c.notas.forEach(function(n) {
+    if (n.estado === 'PAGADA') return;
+    lineas += '\n* ' + (n.nota ? 'NE-' + ('000' + n.nota).slice(-4) : 'Nota') + ' ' + n.fecha + ': ' + fmtUSD(n.pendienteUSD) + (n.estado === 'PARCIAL' ? ' (parcial)' : '');
+  });
+  var msg = 'Repuesto BoParts\nEstado de cuenta - ' + c.cliente + '\n' +
+    (ultimo ? '\nAbono recibido: ' + fmtUSD(ultimo.usd) + (ultimo.moneda === 'BS' ? ' (' + fmtBS(ultimo.monto) + ')' : '') + ' via ' + ultimo.metodo + '\n' : '') +
+    (lineas ? '\nPendiente:' + lineas : '') +
+    '\n\nSALDO: ' + fmtUSD(c.saldoUSD) + (TASA ? ' (' + fmtBS(c.saldoUSD * TASA) + ' a tasa ' + TASA + ')' : '') +
+    '\n\n0412-3185778 / 0414-9536708';
+  window.open('https://wa.me/?text=' + encodeURIComponent(msg), '_blank');
+}
+
+function fmtUSD(n) { return '$' + (Math.round(n * 100) / 100).toFixed(2); }
+function fmtBS(n) { return 'Bs ' + Math.round(n).toLocaleString('es-VE'); }
+function pad2(n) { return (n < 10 ? '0' : '') + n; }
+function escHtml(s) { return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function escAttr(s) { return String(s || '').split('\\').join('').split("'").join("\\'").split('"').join('&quot;'); }
+
+function toast(msg, type) {
+  var el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'toast show ' + (type || '');
+  clearTimeout(el._t);
+  el._t = setTimeout(function() { el.className = 'toast'; }, 3500);
+}
+
+function toggleNav() {
+  document.getElementById('navPan').classList.toggle('open');
+  document.getElementById('navOv').classList.toggle('open');
+}
+function closeNav() {
+  document.getElementById('navPan').classList.remove('open');
+  document.getElementById('navOv').classList.remove('open');
+}
+
+cargar();
+</script>
+</body>
+</html>

@@ -10,11 +10,12 @@ en el comentario del encabezado de cada HTML y en la cabecera de `Code.gs`.
 | Archivo                 | Versión | Requiere Apps Script |
 |-------------------------|---------|----------------------|
 | index.html              | v7      | v7 o superior        |
-| boparts_ventas.html     | v8.1    | **v8**               |
+| boparts_ventas.html     | v9      | **v9**               |
+| boparts_cobros.html     | v1      | **v9**               |
 | boparts_fotos.html      | v7      | v7 o superior        |
-| boparts_demanda.html    | v7      | v7 o superior        |
+| boparts_demanda.html    | v8      | v7 o superior        |
 | boparts_reportes.html   | v7      | ninguno (solo lee CSV) |
-| Code.gs (Apps Script)   | v8      | —                    |
+| Code.gs (Apps Script)   | v9      | —                    |
 
 Deployment ID (no cambia): `AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg`
 
@@ -23,6 +24,23 @@ Para volver atrás:
 - Apps Script: Implementar → Administrar implementaciones → lápiz → elegir la versión anterior → Implementar.
 
 ---
+
+## v9 — 2026-09-10 · Cuentas por cobrar
+**boparts_ventas.html v9** + **Code.gs v9** + **boparts_cobros.html v1** (van juntos; orden: script → HTML)
+- Metodo de pago `CREDITO (cuenta por cobrar)`: solo se puede usar con clientes que tengan `SI` en la columna
+  `CREDITO` (G) de CLIENTES. Rodolfo/Javier marcan esa columna a mano. La deuda queda en **USD**.
+- La venta ahora guarda cliente (Z, AA), moneda de cada pago (AB–AD) y monto a credito (AE).
+- Validacion nueva: los pagos deben cubrir el total de la venta (tolerancia 1%); ninguna forma de pago sin metodo o sin monto.
+- Corregido: al buscar cliente para la nota, se seleccionaba el cliente equivocado (indice sobre la lista filtrada).
+- Si la venta fue a credito, la nota de entrega ya trae el cliente elegido.
+- **Code.gs**: hoja `CXC_MOV` (CARGO automatico al vender a credito; ABONO desde Cobros); `doGet?action=cxc`
+  devuelve saldos y notas por cliente con abonos aplicados a las notas mas viejas primero; `tipo:'abono'` en doPost;
+  ventas a credito entran en COMISIONES como `PENDIENTE COBRO`.
+- **boparts_cobros.html**: lista de clientes con saldo, detalle por notas (PENDIENTE / PARCIAL / PAGADA), registro
+  de abono en USD o Bs con metodo, banco y comision, estado de cuenta por WhatsApp. Enlace agregado al nav de ventas.
+- Manual, una vez: VENTAS Z1..AE1 = `CLIENTE, CLIENTE_RIF, MONEDA_1, MONEDA_2, MONEDA_3, CREDITO_USD`;
+  CLIENTES G1 = `CREDITO`, y `SI` en los clientes autorizados.
+- Cargado historico jun-sep 2026 en VENTAS_DETALLE (442 lineas, IDs H-VTA-xxx).
 
 ## v8.1 — 2026-09-09
 **boparts_ventas.html**
@@ -57,5 +75,6 @@ Estado con el que arrancó el control de versiones. Commits en GitHub: `4269b17`
 - boparts_demanda.html y boparts_fotos.html siguen con `no-cors`: no detectan si el guardado falló.
 - boparts_fotos.html escribe por número de fila: se rompe si alguien inserta u ordena filas mientras se suben fotos.
 - index.html usa tasa `1000` por defecto si no hay valor guardado ni en la hoja.
-- Histórico de ventas jun–sep 2026 está en `OPERACIONES_BOPART.xlsx`, no en `VENTAS_DETALLE`.
-- Todas las hojas están publicadas como CSV público (incluyendo VENTAS y CLIENTES).
+- Todas las hojas están publicadas como CSV público (incluyendo VENTAS y CLIENTES). CXC_MOV no esta publicada; solo se lee via Apps Script.
+- index.html, fotos y demanda no tienen aun el enlace a Cobros en su nav.
+- boparts_reportes.html cuenta las ventas a credito como ingreso del dia; falta separar vendido de cobrado.
