@@ -1,7 +1,9 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_ventas.html
-  VERSION: v10.1 (2026-09-10) | requiere Apps Script v10
+  VERSION: v10.2 (2026-09-10) | requiere Apps Script v10.2
+  v10.2: el numero de nota llega con la respuesta de la venta (no hay espera al generar el PDF); el numero de cotizacion
+         se pide al abrir la pantalla de cotizar; la nota de entrega ya no muestra la tasa BCV
   v10.1: la cotizacion se emite en Bs o en USD (selector en la pantalla de cotizacion) y no muestra la tasa BCV
   v10: nota de entrega y cotizacion en PDF generado en el telefono (jsPDF) con boton Compartir (Gmail, WhatsApp, Drive...);
        boton Cotizar que no registra venta; cotizaciones se guardan en hoja COTIZACIONES con numeracion COT-xxxx
@@ -906,6 +908,7 @@ function guardarVenta() {
       if (btn) { btn.disabled = false; btn.textContent = 'Registrar Venta'; }
       if (!d || d.ok !== true) throw new Error(d && d.error ? d.error : 'Respuesta inesperada: ' + JSON.stringify(d).slice(0, 120));
       lastIdVenta = idVenta;
+      if (d.numNota) { NOTA_NUM = parseInt(d.numNota); localStorage.setItem('boparts_nota_num', NOTA_NUM); lastNotaAsignada = NOTA_NUM; } else { lastNotaAsignada = 0; }
       lastCredito = hayCredito ? {cliente:cliSel, usd:creditoUSD} : null;
       document.getElementById('successMsg').textContent = vendedor + ' - ' + fmtUSD(usd) + ' / ' + fmtBS(bs) +
         (hayCredito ? '\nA credito: ' + fmtUSD(creditoUSD) + ' - ' + cliSel.nombre : '');
@@ -941,6 +944,8 @@ function parseNum(v) {
 }
 var lastIdVenta = '';
 var lastCredito = null;
+var lastNotaAsignada = 0;   // numero de nota que el script asigno a la ultima venta
+var cotNumPromise = null;   // numero de cotizacion pedido al abrir la pantalla
 
 function nuevaVenta() {
   document.getElementById('success').classList.remove('open');
@@ -1075,6 +1080,11 @@ function abrirCotizacion() {
   if (!cart.length) { toast('Agrega al menos un producto', 'err'); return; }
   if (!TASA || TASA < 1) { toast('No hay tasa BCV cargada. Abre Lista de Precios y fijala primero.', 'err'); return; }
   lastCart = cart.map(function(c) { return {producto:c.producto, codigo:c.codigo, precio:parseFloat(c.precio)||0, costo:parseFloat(c.costo)||0, cantidad:parseInt(c.cantidad)||1}; });
+  // Pedir el numero mientras el vendedor elige cliente (si cancela, ese numero se pierde; en cotizaciones no importa)
+  cotNumPromise = fetch(SCRIPT_URL + '?action=nextCot')
+    .then(function(r) { return r.json(); })
+    .then(function(d) { return d && d.num ? d.num : null; })
+    .catch(function() { return null; });
   abrirDoc('cot');
 }
 
@@ -1127,11 +1137,16 @@ function generarDoc() {
   var btn = document.getElementById('btnDoc');
   btn.disabled = true; btn.textContent = 'Generando...';
   var esCot = modoDoc === 'cot';
-  var url = SCRIPT_URL + (esCot ? '?action=nextCot' : '?action=nextNota&idVenta=' + encodeURIComponent(lastIdVenta));
-  fetch(url)
-    .then(function(r) { return r.json(); })
-    .then(function(d) { return d && d.num ? d.num : null; })
-    .catch(function() { return null; })
+  var pNum;
+  if (esCot) {
+    pNum = cotNumPromise || Promise.resolve(null);
+  } else if (lastNotaAsignada) {
+    pNum = Promise.resolve(lastNotaAsignada);            // ya vino con la venta: sin espera
+  } else {
+    pNum = fetch(SCRIPT_URL + '?action=nextNota&idVenta=' + encodeURIComponent(lastIdVenta))   // script viejo
+      .then(function(r) { return r.json(); }).then(function(d) { return d && d.num ? d.num : null; }).catch(function() { return null; });
+  }
+  pNum
     .then(function(num) {
       if (esCot) {
         if (!num) { num = parseInt(localStorage.getItem('boparts_cot_num') || '0') + 1; }
@@ -1215,12 +1230,10 @@ function construirPDF(tipo, numero) {
       doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(gris[0],gris[1],gris[2]);
       doc.text('FECHA', M, y); doc.text('CONDICION', M + 45, y);
       if (esCot) { doc.text('MONEDA', M + 95, y); doc.text('VALIDEZ', M + 140, y); }
-      else doc.text('TASA BCV', M + 95, y);
       doc.setFont('helvetica','bold'); doc.setTextColor(negro[0],negro[1],negro[2]); doc.setFontSize(9);
       var cond = esCot ? 'SEGUN FORMA DE PAGO' : (lastCredito ? 'CREDITO' : 'CONTADO');
       doc.text(fecha, M, y + 5); doc.text(cond, M + 45, y + 5);
       if (esCot) { doc.text(enUSD ? 'DOLARES (USD)' : 'BOLIVARES (Bs)', M + 95, y + 5); doc.text('24 HORAS', M + 140, y + 5); }
-      else doc.text('Bs ' + TASA, M + 95, y + 5);
       y += 9; doc.setDrawColor(230,230,230); doc.line(M, y, W - M, y); y += 4;
 
       // Cliente
@@ -1340,7 +1353,7 @@ function abrirWA() {
   var enUSD = esCot && lastPDF && lastPDF.moneda === 'USD';
   if (enUSD) { lineas = ''; for (var k = 0; k < lastCart.length; k++) lineas += '\n* ' + lastCart[k].producto + ' x' + lastCart[k].cantidad + ' - ' + fmtUSD(lastCart[k].precio * lastCart[k].cantidad); }
   var msg = 'Repuesto BoParts\n' + (esCot ? 'Cotizacion ' : 'Nota de Entrega ') + num + '\nCliente: ' + cliSel.nombre + '\n' +
-    lineas + '\n\nTOTAL: ' + (enUSD ? fmtUSD(usd) : (esCot ? fmtBS(bs) : fmtBS(bs) + ' (Ref. ' + fmtUSD(usd) + ', tasa ' + TASA + ')')) +
+    lineas + '\n\nTOTAL: ' + (enUSD ? fmtUSD(usd) : (esCot ? fmtBS(bs) : fmtBS(bs) + ' (Ref. ' + fmtUSD(usd) + ')')) +
     (esCot ? '\nValida por 24 horas.' : '') + '\n\n0412-3185778 / 0414-9536708';
   window.open('https://wa.me/?text=' + encodeURIComponent(msg), '_blank');
 }
