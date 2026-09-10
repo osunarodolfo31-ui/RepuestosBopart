@@ -10,7 +10,7 @@ en el comentario del encabezado de cada HTML y en la cabecera de `Code.gs`.
 | Archivo                 | Versión | Requiere Apps Script |
 |-------------------------|---------|----------------------|
 | index.html              | v7      | v7 o superior        |
-| boparts_ventas.html     | v10.3   | **v10.2**            |
+| boparts_ventas.html     | v10.4   | **v10.2**            |
 | boparts_cobros.html     | v1      | **v9**               |
 | boparts_fotos.html      | v7      | v7 o superior        |
 | boparts_demanda.html    | v8      | v7 o superior        |
@@ -24,6 +24,15 @@ Para volver atrás:
 - Apps Script: Implementar → Administrar implementaciones → lápiz → elegir la versión anterior → Implementar.
 
 ---
+
+## v10.4 — 2026-09-10
+**boparts_ventas.html v10.4** (script v10.2 sirve)
+- Corregido: "Agregar forma de pago" borraba lo escrito en las formas anteriores.
+- Al elegir un metodo, el monto se rellena con lo que falta por cubrir, en la moneda del metodo (editable).
+- Comision del punto oculta al vender (la asume la tienda); se sigue calculando y guardando en COMISION/NETO.
+- Avisos: se ocultan solos de verdad y se cierran al tocarlos; el aviso de pagos incompletos desglosa cada forma de pago.
+- Clientes: la ultima lista se guarda en el telefono y se usa mientras llega la de la hoja; si la hoja no responde,
+  reintenta; el selector de credito espera la carga en vez de decir "no hay autorizados".
 
 ## v10.3 — 2026-09-10
 **boparts_ventas.html v10.3** (el script v10.2 sirve)

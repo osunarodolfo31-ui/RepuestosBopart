@@ -1,7 +1,9 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_ventas.html
-  VERSION: v10.3 (2026-09-10) | requiere Apps Script v10.2
+  VERSION: v10.4 (2026-09-10) | requiere Apps Script v10.2
+  v10.4: agregar forma de pago ya no borra las anteriores; al elegir metodo se sugiere el monto que falta; avisos se cierran solos
+         y al tocarlos; comision oculta al vender (se sigue calculando); clientes guardados en el telefono por si la hoja tarda
   v10.3: el mensaje de WhatsApp de la nota incluye la forma de pago recibida; la version se muestra en el encabezado de la app
   v10.2: el numero de nota llega con la respuesta de la venta (no hay espera al generar el PDF); el numero de cotizacion
          se pide al abrir la pantalla de cotizar; la nota de entrega ya no muestra la tasa BCV
@@ -142,10 +144,10 @@ select option{background:#1E1E1E;color:var(--ink)}
 .cli-new-btn{width:100%;padding:10px;background:none;border:1.5px dashed var(--brand);border-radius:var(--radius-sm);color:var(--brand);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;margin-top:8px}
 
 /* TOAST */
-.toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%) translateY(80px);background:#222;color:#fff;padding:12px 20px;border-radius:18px;font-size:13px;font-weight:600;transition:transform .3s;z-index:999;max-width:92vw;text-align:center;line-height:1.4;border:1px solid var(--border);pointer-events:none}
-.toast.show{transform:translateX(-50%) translateY(0)}
+.toast{position:fixed;bottom:90px;left:50%;transform:translateX(-50%) translateY(40px);opacity:0;visibility:hidden;background:#222;color:#fff;padding:12px 20px;border-radius:18px;font-size:13px;font-weight:600;transition:transform .3s,opacity .3s,visibility .3s;z-index:999;max-width:92vw;text-align:center;line-height:1.4;cursor:pointer;border:1px solid var(--border);pointer-events:none}
+.toast.show{transform:translateX(-50%) translateY(0);opacity:1;visibility:visible}
 .toast.ok{border-color:var(--green);color:var(--green)}
-.toast.err{border-color:var(--red);color:var(--red)}
+.toast.err{border-color:var(--red);color:var(--red);white-space:pre-line}
 
 /* NAV */
 .fab{position:fixed;bottom:70px;right:16px;z-index:90;width:48px;height:48px;background:var(--brand);border:none;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 16px rgba(245,168,0,.4)}
@@ -319,7 +321,7 @@ select option{background:#1E1E1E;color:var(--ink)}
 </div>
 
 <!-- TOAST -->
-<div class="toast" id="toast"></div>
+<div class="toast" id="toast" onclick="this.className='toast'"></div>
 
 <!-- FAB NAV -->
 <button class="fab" onclick="toggleNav()">
@@ -507,10 +509,14 @@ function loadClientes() {
           credito:(r[6] || '').trim().toUpperCase() === 'SI'   // col G de CLIENTES, la marcan Rodolfo/Javier
         });
       }
-      if (loaded.length) CLIENTES = loaded;
+      if (loaded.length) { CLIENTES = loaded; try { localStorage.setItem('boparts_clientes', JSON.stringify(loaded)); } catch (e) {} }
+      clientesListos = true;
     })
-    .catch(function() {});
+    .catch(function() { setTimeout(loadClientes, 4000); });   // reintenta si la hoja no respondio
 }
+var clientesListos = false;
+// Arranca con la ultima lista guardada en el telefono mientras llega la de la hoja
+try { var _cc = JSON.parse(localStorage.getItem('boparts_clientes') || '[]'); if (_cc.length) CLIENTES = _cc; } catch (e) {}
 
 // ============================================================
 // HELPERS
@@ -638,15 +644,11 @@ function updateTotals() {
     var monto = mEl ? parseFloat(mEl.value) || 0 : 0;
     if (monto > 0) com += pagos[i].metodoData.fijo + monto * pagos[i].metodoData.pct / 100;
   }
-  if (com > 0) {
-    document.getElementById('tComRow').style.display = 'flex';
-    document.getElementById('tNetRow').style.display = 'flex';
-    document.getElementById('tCom').textContent = fmtBS(com);
-    document.getElementById('tNet').textContent = fmtBS(bs - com);
-  } else {
-    document.getElementById('tComRow').style.display = 'none';
-    document.getElementById('tNetRow').style.display = 'none';
-  }
+  // v10.4: la comision del punto la asume la tienda; se calcula y se guarda, pero no se muestra al vender
+  document.getElementById('tCom').textContent = fmtBS(com);
+  document.getElementById('tNet').textContent = fmtBS(bs - com);
+  document.getElementById('tComRow').style.display = 'none';
+  document.getElementById('tNetRow').style.display = 'none';
   if (aliadoSel) updateComPrev();
 }
 
@@ -654,14 +656,32 @@ function updateTotals() {
 // PAYMENT METHODS
 // ============================================================
 function addPago() {
+  syncPagosDesdeDOM();
   pid++;
-  pagos.push({id:pid, metodoData:null});
+  pagos.push({id:pid, metodoData:null, metIdx:'', monto:'', moneda:'BS'});
   renderPagos();
 }
 
 function delPago(id) {
+  syncPagosDesdeDOM();
   pagos = pagos.filter(function(p) { return p.id !== id; });
   renderPagos(); updateTotals();
+}
+
+// Guarda en memoria lo que el vendedor escribio, para que re-dibujar no lo borre
+function syncPagosDesdeDOM() {
+  for (var i = 0; i < pagos.length; i++) {
+    var p = pagos[i];
+    var metEl = document.getElementById('met_' + p.id), mEl = document.getElementById('monto_' + p.id), monEl = document.getElementById('mon_' + p.id);
+    if (metEl) p.metIdx = metEl.value;
+    if (mEl) p.monto = mEl.value;
+    if (monEl) p.moneda = monEl.value;
+  }
+}
+function totalCarritoUSD() {
+  var usd = 0;
+  for (var i = 0; i < cart.length; i++) usd += cart[i].precio * cart[i].cantidad;
+  return usd;
 }
 
 function renderPagos() {
@@ -670,21 +690,23 @@ function renderPagos() {
   for (var i = 0; i < pagos.length; i++) {
     var p = pagos[i];
     var delBtn = pagos.length > 1 ? '<button class="pdel" onclick="delPago(' + p.id + ')">&#x2715;</button>' : '';
+    var mi = String(p.metIdx === undefined ? '' : p.metIdx);
     var opts = '<option value="">Seleccionar...</option>';
     for (var j = 0; j < METODOS.length; j++) {
-      opts += '<option value="' + j + '">' + escHtml(METODOS[j].label) + '</option>';
+      opts += '<option value="' + j + '"' + (mi === String(j) ? ' selected' : '') + '>' + escHtml(METODOS[j].label) + '</option>';
     }
+    var mon = p.moneda || 'BS';
     h += '<div class="pblock" id="pb_' + p.id + '">' + delBtn +
       '<div class="field"><label>Metodo de pago</label>' +
         '<select id="met_' + p.id + '" onchange="onMet(' + p.id + ')">' + opts + '</select>' +
       '</div>' +
       '<div class="row2">' +
         '<div class="field"><label>Monto</label>' +
-          '<input type="number" id="monto_' + p.id + '" placeholder="0.00" step="0.01" onchange="updateTotals()">' +
+          '<input type="number" id="monto_' + p.id + '" placeholder="0.00" step="0.01" value="' + escHtml(p.monto || '') + '" oninput="syncPagosDesdeDOM();updateTotals()">' +
         '</div>' +
         '<div class="field"><label>Moneda</label>' +
-          '<select id="mon_' + p.id + '">' +
-            '<option value="BS">Bs</option><option value="USD">USD</option>' +
+          '<select id="mon_' + p.id + '" onchange="syncPagosDesdeDOM();updateTotals()">' +
+            '<option value="BS"' + (mon === 'BS' ? ' selected' : '') + '>Bs</option><option value="USD"' + (mon === 'USD' ? ' selected' : '') + '>USD</option>' +
           '</select>' +
         '</div>' +
       '</div>' +
@@ -693,6 +715,12 @@ function renderPagos() {
     '</div>';
   }
   el.innerHTML = h;
+  // Restaurar metodoData y el selector de credito de cada bloque
+  for (var k = 0; k < pagos.length; k++) {
+    var q = pagos[k], idx = parseInt(q.metIdx);
+    q.metodoData = (!isNaN(idx) && METODOS[idx]) ? METODOS[idx] : null;
+    if (q.metodoData && q.metodoData.credito) renderCredito(q.id, true);
+  }
 }
 
 function onMet(id) {
@@ -707,11 +735,14 @@ function onMet(id) {
   document.getElementById('mon_' + id).value = m.moneda;
   renderCredito(id, !!m.credito);
   var inf = document.getElementById('cominf_' + id);
-  if (m.fijo > 0 || m.pct > 0) {
-    inf.innerHTML = '<div class="cominfo">Comision: Bs ' + m.fijo.toLocaleString('es-VE') + ' fijo + ' + m.pct + '% sobre el monto</div>';
-  } else {
-    inf.innerHTML = '';
+  inf.innerHTML = '';
+  // Sugerir el monto que falta por cubrir, en la moneda del metodo (el vendedor puede cambiarlo)
+  var mEl = document.getElementById('monto_' + id);
+  if (mEl && !(parseFloat(mEl.value) > 0)) {
+    var falta = totalCarritoUSD() - sumaPagosUSD();
+    if (falta > 0.009) mEl.value = m.moneda === 'BS' ? String(Math.round(falta * TASA)) : String(Math.round(falta * 100) / 100);
   }
+  syncPagosDesdeDOM();
   updateTotals();
 }
 
@@ -725,6 +756,11 @@ function renderCredito(pagoId, on) {
   if (!on) { box.innerHTML = ''; return; }
   var autorizados = CLIENTES.filter(function(c) { return c.credito; });
   if (!autorizados.length) {
+    if (!clientesListos) {
+      box.innerHTML = '<div class="cominfo">Cargando clientes de la hoja...</div>';
+      setTimeout(function() { renderCredito(pagoId, true); }, 1500);
+      return;
+    }
     box.innerHTML = '<div class="cominfo" style="border-left-color:var(--red)">No hay clientes autorizados para credito. Rodolfo o Javier deben marcar SI en la columna CREDITO de la hoja CLIENTES.</div>';
     return;
   }
@@ -881,7 +917,13 @@ function guardarVenta() {
   if (!pagos.length) { toast('Agrega la forma de pago', 'err'); return; }
   var cubierto = sumaPagosUSD();
   if (Math.abs(cubierto - usd) > Math.max(0.05, usd * 0.01)) {
-    toast('Los pagos suman ' + fmtUSD(cubierto) + ' y la venta es ' + fmtUSD(usd) + '. Ajusta los montos.', 'err'); return;
+    var det = [];
+    for (var k2 = 0; k2 < pagos.length; k2++) {
+      var mE = document.getElementById('monto_' + pagos[k2].id), moE = document.getElementById('mon_' + pagos[k2].id);
+      var mv = mE ? parseFloat(mE.value) || 0 : 0, mo = moE ? moE.value : 'BS';
+      det.push((pagos[k2].metodoData ? pagos[k2].metodoData.label : '?') + ' ' + (mo === 'USD' ? fmtUSD(mv) : fmtBS(mv) + ' = ' + fmtUSD(mv / TASA)));
+    }
+    toast('Venta ' + fmtUSD(usd) + ' / pagos ' + fmtUSD(cubierto) + ':\n' + det.join('\n') + '\n' + (cubierto < usd ? 'Faltan ' + fmtUSD(usd - cubierto) : 'Sobran ' + fmtUSD(cubierto - usd)), 'err'); return;
   }
   if (hayCredito && !(cliSel && cliSel.credito)) { toast('Selecciona el cliente autorizado para el credito', 'err'); return; }
   creditoUSD = Math.round(creditoUSD * 100) / 100;
@@ -948,7 +990,7 @@ var lastIdVenta = '';
 var lastCredito = null;
 var lastNotaAsignada = 0;
 var lastPagos = [];         // formas de pago de la ultima venta (para el mensaje de WhatsApp)
-var APP_VERSION = 'v10.3';   // numero de nota que el script asigno a la ultima venta
+var APP_VERSION = 'v10.4';   // numero de nota que el script asigno a la ultima venta
 var cotNumPromise = null;   // numero de cotizacion pedido al abrir la pantalla
 
 function nuevaVenta() {
@@ -984,7 +1026,11 @@ cliSearch.addEventListener('input', function() {
     if (hay.indexOf(q) >= 0) res.push(c);
   }
   cliRes = res;
-  if (!res.length) { cliDrop.classList.remove('open'); return; }
+  if (!res.length) {
+    cliDrop.innerHTML = (CLIENTES.length ? '<div class="ditem" style="color:var(--ink-muted)">Sin coincidencias entre ' + CLIENTES.length + ' clientes</div>' : '<div class="ditem" style="color:var(--red)">La lista de clientes no ha cargado. Revisa la conexion.</div>') +
+      '<div class="ditem" onclick="mostrarFormCliente()" style="color:var(--brand);font-weight:600">+ Nuevo cliente</div>';
+    cliDrop.classList.add('open'); return;
+  }
   var h = '';
   for (var i = 0; i < res.length; i++) {
     var c = res[i];
