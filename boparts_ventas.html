@@ -1,7 +1,8 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_ventas.html
-  VERSION: v10.5 (2026-09-10) | requiere Apps Script v10.5 (v10.2 sirve, sin el respaldo de clientes)
+  VERSION: v10.6 (2026-09-10) | requiere Apps Script v10.5
+  v10.6: al generar la nota se usa el cliente que esta en pantalla aunque la variable interna se haya perdido
   v10.5: la version se mostraba como 'undefined'; la carga de clientes reporta que fallo y se apoya en Apps Script si el CSV no responde
   v10.4: agregar forma de pago ya no borra las anteriores; al elegir metodo se sugiere el monto que falta; avisos se cierran solos
          y al tocarlos; comision oculta al vender (se sigue calculando); clientes guardados en el telefono por si la hoja tarda
@@ -369,7 +370,7 @@ select option{background:#1E1E1E;color:var(--ink)}
 var CSV_URL     = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRaAnGd-Bfaxo3LjUiGeV8p0F2weaKqHGwJ0hWibSMj02-h7dRAQPDMmGL5B8-XQg66Yjd3zgOAaz8X/pub?gid=2100998338&single=true&output=csv';
 var CLIENTES_URL= 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRaAnGd-Bfaxo3LjUiGeV8p0F2weaKqHGwJ0hWibSMj02-h7dRAQPDMmGL5B8-XQg66Yjd3zgOAaz8X/pub?gid=647304383&single=true&output=csv';
 var SCRIPT_URL  = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
-var APP_VERSION = 'v10.5';
+var APP_VERSION = 'v10.6';
 var TASA        = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
 var TASA_ORIGEN = TASA ? 'dispositivo' : 'ninguna';
 var NOTA_NUM    = parseInt(localStorage.getItem('boparts_nota_num') || '0');
@@ -1070,7 +1071,9 @@ function selCliente(idx) {
   mostrarBotonesNota();
 }
 
+var cliMostrado = null;   // el cliente que se ve en la tarjeta de la nota (respaldo de cliSel)
 function mostrarCliSelected(c) {
+  cliMostrado = c;
   var el = document.getElementById('cliSelected');
   el.innerHTML = '<div class="cli-result">' +
     '<div><div class="cli-info">' + escHtml(c.nombre) + '</div>' +
@@ -1084,7 +1087,7 @@ function mostrarCliSelected(c) {
 }
 
 function limpiarCliente() {
-  cliSel = null;
+  cliSel = null; cliMostrado = null;
   document.getElementById('cliSelected').style.display = 'none';
   document.getElementById('cliSearchWrap').style.display = 'block';
   document.getElementById('cliNewBtn').style.display = 'block';
@@ -1197,6 +1200,12 @@ function cerrarNota() {
 }
 
 function generarDoc() {
+  if (!cliSel) {
+    // Respaldo: el cliente que se ve en la tarjeta, o el del credito de esta venta
+    var tarjetaVisible = document.getElementById('cliSelected').style.display !== 'none';
+    if (tarjetaVisible && cliMostrado) cliSel = cliMostrado;
+    else if (modoDoc === 'nota' && lastCredito && lastCredito.cliente) { cliSel = lastCredito.cliente; mostrarCliSelected(cliSel); }
+  }
   if (!cliSel) { toast('Selecciona o registra un cliente primero', 'err'); return; }
   var btn = document.getElementById('btnDoc');
   btn.disabled = true; btn.textContent = 'Generando...';

@@ -10,7 +10,7 @@ en el comentario del encabezado de cada HTML y en la cabecera de `Code.gs`.
 | Archivo                 | Versión | Requiere Apps Script |
 |-------------------------|---------|----------------------|
 | index.html              | v7      | v7 o superior        |
-| boparts_ventas.html     | v10.5   | **v10.5**            |
+| boparts_ventas.html     | v10.6   | **v10.5**            |
 | boparts_cobros.html     | v1      | **v9**               |
 | boparts_fotos.html      | v7      | v7 o superior        |
 | boparts_demanda.html    | v8      | v7 o superior        |
@@ -24,6 +24,11 @@ Para volver atrás:
 - Apps Script: Implementar → Administrar implementaciones → lápiz → elegir la versión anterior → Implementar.
 
 ---
+
+## v10.6 — 2026-09-10
+**boparts_ventas.html v10.6**
+- Nota de entrega: si la tarjeta del cliente esta en pantalla, se usa ese cliente aunque la variable interna se haya
+  perdido (caso reportado con cliente de credito prellenado). Causa raiz no reproducida; el respaldo cubre el sintoma.
 
 ## v10.5 — 2026-09-10
 **boparts_ventas.html v10.5** + **Code.gs v10.5**
