@@ -1,7 +1,8 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_compras.html
-  VERSION: v1 (2026-09-10) | requiere Apps Script v11
+  VERSION: v1.1 (2026-09-10) | requiere Apps Script v11
+  v1.1: marca con lista de las marcas existentes; modo 'Pegar lista' para recepciones grandes (codigo + cantidad por linea)
   Recepcion de mercancia (camino B): proveedor, factura, foto, lineas con cantidad. Sin costos: los completan los socios.
   Productos nuevos se crean en LISTA DE PRODUCTOS sin precio.
 -->
@@ -213,11 +214,18 @@ select option{background:#1E1E1E;color:var(--ink)}
       <div class="field"><label>Nombre del producto *</label><input type="text" id="npNombre"></div>
       <div class="row2">
         <div class="field"><label>Codigo *</label><input type="text" id="npCodigo" placeholder="Del proveedor o interno"></div>
-        <div class="field"><label>Marca</label><input type="text" id="npMarca"></div>
+        <div class="field"><label>Marca</label><input type="text" id="npMarca" list="marcaList" placeholder="Elige o escribe"><datalist id="marcaList"></datalist></div>
       </div>
       <div class="field"><label>Categoria</label><input type="text" id="npCat" list="catList" placeholder="Escribe o elige"><datalist id="catList"></datalist></div>
       <button class="nbtn nbtn-p" onclick="agregarNuevo()">Agregar a la recepcion</button>
       <button class="nbtn nbtn-s" onclick="document.getElementById('formNuevo').style.display='none'">Cancelar</button>
+    </div>
+    <button class="nbtn nbtn-s" style="margin-top:0" onclick="var b=document.getElementById('bulkBox');b.style.display=b.style.display==='none'?'block':'none'">Pegar lista (recepciones grandes)</button>
+    <div id="bulkBox" style="display:none">
+      <div class="cominfo" style="margin:8px 0">Una linea por producto: <b>codigo</b> y <b>cantidad</b>, separados por espacio, coma, punto y coma o tabulador. Ej:<br>ZO-4T 12<br>ACT-2050M-00, 6<br>Se puede pegar directo desde Excel (columnas codigo y cantidad).</div>
+      <textarea id="bulkTxt" rows="6" placeholder="ZO-4T 12&#10;ACT-2050M-00 6"></textarea>
+      <button class="nbtn nbtn-p" onclick="procesarBulk()">Agregar lista</button>
+      <div id="bulkRes"></div>
     </div>
     <div id="lineasEl"><div class="cart-empty">Sin productos aun</div></div>
     <div class="resumen" id="resumen" style="display:none"></div>
@@ -288,7 +296,7 @@ select option{background:#1E1E1E;color:var(--ink)}
 var CSV_URL    = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRaAnGd-Bfaxo3LjUiGeV8p0F2weaKqHGwJ0hWibSMj02-h7dRAQPDMmGL5B8-XQg66Yjd3zgOAaz8X/pub?gid=2100998338&single=true&output=csv';
 var SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
 var CLOUD = 'c7jufi9v', PRESET = 'boparts_productos';
-var APP_VERSION = 'v1';
+var APP_VERSION = 'v1.1';
 
 var PRODUCTS = [], PROVEEDORES = [], lineas = [], provSel = null, fotoUrl = '';
 document.getElementById('fechaHdr').textContent = APP_VERSION + ' · ' + new Date().toLocaleDateString('es-VE', {weekday:'long', day:'numeric', month:'long'});
@@ -296,13 +304,15 @@ document.getElementById('fechaHdr').textContent = APP_VERSION + ' · ' + new Dat
 // ---- productos (CSV publicado) ----
 fetch(CSV_URL + '&t=' + Date.now()).then(function(r) { return r.text(); }).then(function(txt) {
   if (!isValidCSV(txt)) return;
-  var rows = parseCSV(txt), cats = {};
+  var rows = parseCSV(txt), cats = {}, marcas = {};
   for (var i = 2; i < rows.length; i++) {
     var r = rows[i]; var prod = (r[2] || '').trim(); if (!prod) continue;
     PRODUCTS.push({codigo:(r[0]||'').trim(), marca:(r[1]||'').trim(), producto:prod, categoria:(r[3]||'').trim()});
     if (r[3]) cats[r[3].trim()] = 1;
+    if (r[1]) marcas[r[1].trim().toUpperCase()] = 1;
   }
   document.getElementById('catList').innerHTML = Object.keys(cats).sort().map(function(c) { return '<option value="' + escHtml(c) + '">'; }).join('');
+  document.getElementById('marcaList').innerHTML = Object.keys(marcas).sort().map(function(c) { return '<option value="' + escHtml(c) + '">'; }).join('');
 }).catch(function() { toast('No cargo la lista de productos', 'err'); });
 
 // ---- proveedores (via Apps Script; la hoja no esta publicada) ----
@@ -404,6 +414,34 @@ function agregarNuevo() {
   if (PRODUCTS.some(function(p) { return p.codigo && p.codigo.toUpperCase() === n.codigo; })) { toast('Ese codigo ya existe en la lista. Buscalo en vez de crearlo.', 'err'); return; }
   lineas.push(n); document.getElementById('formNuevo').style.display = 'none'; prodSearch.value = ''; renderLineas();
 }
+function procesarBulk() {
+  var txt = document.getElementById('bulkTxt').value;
+  var ls = txt.split(/\r?\n/), ok = 0, malas = [];
+  var idx = {};
+  PRODUCTS.forEach(function(p) { if (p.codigo) idx[p.codigo.toUpperCase()] = p; });
+  ls.forEach(function(line) {
+    var t = line.trim(); if (!t) return;
+    var parts = t.split(/[\t;,]+|\s{2,}|\s+(?=\d+(?:[.,]\d+)?$)/).map(function(x) { return x.trim(); }).filter(Boolean);
+    var codigo = '', cant = 0, mx = /^(\d+)\s*x?\s+(.+)$/i.exec(t);
+    if (mx && !/^\d+$/.test(mx[2].trim())) { cant = parseInt(mx[1]); codigo = mx[2]; parts = []; }   // "12 x ZO-4T" / "12 ZO-4T"
+    if (parts.length >= 2) {
+      if (/^\d+$/.test(parts[0]) && !/^\d+$/.test(parts[parts.length - 1])) { cant = parseInt(parts[0]); codigo = parts.slice(1).join(' '); }   // "12 ZO-4T"
+      else { cant = parseInt(parts[parts.length - 1]); codigo = parts.slice(0, -1).join(' '); }
+    } else if (parts.length === 1) { codigo = parts[0]; cant = 1; }
+    codigo = codigo.replace(/^x/i, '').trim().toUpperCase();
+    var p = idx[codigo];
+    if (!p || !(cant > 0)) { malas.push(t); return; }
+    var ex = lineas.filter(function(l) { return l.codigo === p.codigo && !l.nuevo; })[0];
+    if (ex) ex.cantidad += cant; else lineas.push({codigo:p.codigo, producto:p.producto, marca:p.marca, categoria:p.categoria, cantidad:cant, nuevo:false});
+    ok++;
+  });
+  renderLineas();
+  document.getElementById('bulkTxt').value = malas.join('\n');
+  document.getElementById('bulkRes').innerHTML = '<div class="cominfo" style="margin-top:8px' + (malas.length ? ';border-left-color:var(--red)' : '') + '">' + ok + ' linea(s) agregadas. ' +
+    (malas.length ? malas.length + ' no reconocidas quedan en el cuadro: corrige el codigo o agregalas una a una con el buscador.' : 'Todo reconocido.') + '</div>';
+  if (ok) toast(ok + ' productos agregados', 'ok');
+}
+
 function setCant(i, v) { var c = parseInt(v) || 0; if (c < 1) c = 1; lineas[i].cantidad = c; renderLineas(); }
 function delLinea(i) { lineas.splice(i, 1); renderLineas(); }
 function renderLineas() {

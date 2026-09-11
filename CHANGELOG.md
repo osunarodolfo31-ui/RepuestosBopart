@@ -12,7 +12,7 @@ en el comentario del encabezado de cada HTML y en la cabecera de `Code.gs`.
 | index.html              | v8      | v7 o superior        |
 | boparts_ventas.html     | v10.8   | **v10.5**            |
 | boparts_cobros.html     | v1.1    | **v9**               |
-| boparts_compras.html    | v1      | **v11**              |
+| boparts_compras.html    | v1.1    | **v11**              |
 | boparts_fotos.html      | v7      | v7 o superior        |
 | boparts_demanda.html    | v8.1    | v7 o superior        |
 | boparts_reportes.html   | v8      | ninguno (solo lee CSV) |
@@ -25,6 +25,11 @@ Para volver atrás:
 - Apps Script: Implementar → Administrar implementaciones → lápiz → elegir la versión anterior → Implementar.
 
 ---
+
+## compras v1.1 — 2026-09-10
+- Marca de producto nuevo: lista desplegable con las marcas ya existentes en LISTA DE PRODUCTOS (permite escribir una nueva).
+- "Pegar lista": para recepciones grandes, se pega codigo + cantidad por linea (o dos columnas desde Excel);
+  reconoce por codigo, suma cantidades, y deja en el cuadro las lineas que no reconocio.
 
 ## Coma decimal — 2026-09-10
 **index.html v8, boparts_ventas.html v10.8, boparts_demanda.html v8.1, boparts_reportes.html v8**
