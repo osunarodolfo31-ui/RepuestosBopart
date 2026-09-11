@@ -9,15 +9,15 @@ en el comentario del encabezado de cada HTML y en la cabecera de `Code.gs`.
 
 | Archivo                 | Versión | Requiere Apps Script |
 |-------------------------|---------|----------------------|
-| index.html              | v8      | v7 o superior        |
+| index.html              | v8.1    | v7 o superior        |
 | boparts_ventas.html     | v10.9   | **v10.5**            |
 | boparts_cobros.html     | v1.2    | **v9**               |
 | boparts_compras.html    | v1.2    | **v11**              |
-| boparts_gastos.html     | v1      | **v11.1**            |
-| boparts_fotos.html      | v7      | v7 o superior        |
-| boparts_demanda.html    | v8.1    | v7 o superior        |
+| boparts_gastos.html     | v1.1    | **v11.2**            |
+| boparts_fotos.html      | v7.1    | v7 o superior        |
+| boparts_demanda.html    | v8.2    | v7 o superior        |
 | boparts_reportes.html   | v8      | ninguno (solo lee CSV) |
-| Code.gs (Apps Script)   | v11.1   | —                    |
+| Code.gs (Apps Script)   | v11.2   | —                    |
 
 Deployment ID (no cambia): `AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg`
 
@@ -26,6 +26,15 @@ Para volver atrás:
 - Apps Script: Implementar → Administrar implementaciones → lápiz → elegir la versión anterior → Implementar.
 
 ---
+
+## v11.2 — 2026-09-11 · Menu completo, cuenta de socios
+**Code.gs v11.2**, **boparts_gastos.html v1.1**, **index.html v8.1**, **boparts_fotos.html v7.1**, **boparts_demanda.html v8.2**
+- Menu de 7 modulos en todas las pantallas (index, fotos y demanda solo mostraban 4).
+- Gastos: "CUENTA BOPART" en vez de "CUENTA BOSC".
+- Cuenta corriente de socios (hoja SOCIOS_MOV): un gasto pagado por RODOLFO o JAVIER genera automaticamente un
+  PRESTAMO del socio a la tienda. REEMBOLSO, APORTE_CAPITAL y RETIRO se registran con doPost tipo='socio' (pantalla
+  en gerencia). doGet action=socios devuelve por socio: prestamos, reembolsos, por pagar, aportes, retiros, capital.
+- Pendiente: compras pagadas por un socio (camino B no registra pago); se resuelve en el costeo desde gerencia.
 
 ## v11.1 — 2026-09-10 · Gastos
 **Code.gs v11.1** + **boparts_gastos.html v1** (+ enlace Gastos en el nav de ventas, cobros y compras)
@@ -164,5 +173,4 @@ Estado con el que arrancó el control de versiones. Commits en GitHub: `4269b17`
 - boparts_fotos.html escribe por número de fila: se rompe si alguien inserta u ordena filas mientras se suben fotos.
 - index.html usa tasa `1000` por defecto si no hay valor guardado ni en la hoja.
 - Todas las hojas están publicadas como CSV público (incluyendo VENTAS y CLIENTES). CXC_MOV no esta publicada; solo se lee via Apps Script.
-- index.html, fotos y demanda no tienen aun los enlaces a Cobros ni Compras en su nav.
 - boparts_reportes.html cuenta las ventas a credito como ingreso del dia; falta separar vendido de cobrado.

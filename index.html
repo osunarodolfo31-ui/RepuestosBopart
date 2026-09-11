@@ -1,7 +1,8 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — index.html
-  VERSION: v8 (2026-09-10)
+  VERSION: v8.1 (2026-09-11)
+  v8.1: menu completo (Compras, Gastos, Cobros)
   v8: lee precios y tasa con coma o punto decimal (la hoja exporta '0,6' si la region es Venezuela)
   Anterior: v7 = commit 4269b17
 -->
@@ -592,6 +593,21 @@ document.addEventListener('touchend', e => {
       <span class="nav-icon">📝</span>
       <span class="nav-label">Demanda</span>
       <span class="nav-desc">No atendida</span>
+    </a>
+    <a class="nav-card" href="boparts_compras.html">
+      <span class="nav-icon">📦</span>
+      <span class="nav-label">Compras</span>
+      <span class="nav-desc">Recibir mercancia</span>
+    </a>
+    <a class="nav-card" href="boparts_gastos.html">
+      <span class="nav-icon">💸</span>
+      <span class="nav-label">Gastos</span>
+      <span class="nav-desc">Registrar gasto</span>
+    </a>
+    <a class="nav-card" href="boparts_cobros.html">
+      <span class="nav-icon">🧾</span>
+      <span class="nav-label">Cobros</span>
+      <span class="nav-desc">Cuentas por cobrar</span>
     </a>
   </div>
 </div>

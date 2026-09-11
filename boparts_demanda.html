@@ -1,7 +1,8 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_demanda.html
-  VERSION: v8.1 (2026-09-10) | requiere Apps Script v7 o superior
+  VERSION: v8.2 (2026-09-11) | requiere Apps Script v7 o superior
+  v8.2: menu completo (Compras, Gastos, Cobros)
   v8.1: lee precios de proveedores con coma o punto decimal
   Cambios v8: el POST lee la respuesta del script; exito solo con {ok:true}; si falla, el formulario queda intacto y avisa
   Anterior: v7 = commit 4269b17 en GitHub
@@ -268,6 +269,21 @@ select option{background:#1E1E1E;color:var(--ink)}
       <span class="nicon">📝</span>
       <span class="nlbl">Demanda</span>
       <span class="ndesc">No atendida</span>
+    </a>
+    <a class="ncard" href="boparts_compras.html">
+      <span class="nicon">📦</span>
+      <span class="nlbl">Compras</span>
+      <span class="ndesc">Recibir mercancia</span>
+    </a>
+    <a class="ncard" href="boparts_gastos.html">
+      <span class="nicon">💸</span>
+      <span class="nlbl">Gastos</span>
+      <span class="ndesc">Registrar gasto</span>
+    </a>
+    <a class="ncard" href="boparts_cobros.html">
+      <span class="nicon">🧾</span>
+      <span class="nlbl">Cobros</span>
+      <span class="ndesc">Cuentas por cobrar</span>
     </a>
   </div>
 </div>
