@@ -1,8 +1,8 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_cobros.html
-  VERSION: v1.2 (2026-09-10) | requiere Apps Script v9
-  v1.2: enlace a Gastos en el nav
+  VERSION: v2 (2026-09-11) | requiere Apps Script v11.3
+  v2: cada nota muestra los productos que se debe; fechas cortas dd/mm/aaaa; version visible en el encabezado
   v1.1: enlace a Compras en el nav
   Cuentas por cobrar: saldo por cliente en USD, notas pendientes (abonos a las mas viejas primero),
   registro de abonos con metodo/banco/comision, estado de cuenta por WhatsApp.
@@ -301,7 +301,8 @@ var CLIENTES = [];   // estado de cuenta por cliente (viene de Apps Script)
 var sel = null;
 var ultimo = null;   // ultimo abono registrado (para el mensaje de WhatsApp)
 
-document.getElementById('fechaHdr').textContent = new Date().toLocaleDateString('es-VE', {weekday:'long', day:'numeric', month:'long'});
+var APP_VERSION = 'v2';
+document.getElementById('fechaHdr').textContent = APP_VERSION + ' · ' + new Date().toLocaleDateString('es-VE', {weekday:'long', day:'numeric', month:'long'});
 
 // Metodos de pago (sin CREDITO)
 (function() {
@@ -355,14 +356,16 @@ function renderDetalle() {
   var h = '';
   sel.notas.slice().reverse().forEach(function(n) {
     var cls = n.estado === 'PAGADA' ? 'b-pag' : (n.estado === 'PARCIAL' ? 'b-parc' : 'b-pend');
-    h += '<div class="nrow"><div><b>' + (n.nota ? 'NE-' + ('000' + n.nota).slice(-4) : 'Sin nota') + '</b> · ' + n.fecha + '<br><span style="color:var(--ink-muted)">' + fmtUSD(n.montoUSD) + (n.estado === 'PARCIAL' ? ' · debe ' + fmtUSD(n.pendienteUSD) : '') + '</span></div>' +
-      '<span class="badge ' + cls + '">' + n.estado + '</span></div>';
+    h += '<div class="nrow"><div style="flex:1;padding-right:8px"><b>' + (n.nota ? 'NE-' + ('000' + n.nota).slice(-4) : 'Sin nota') + '</b> · ' + fechaCorta(n.fecha) +
+      '<br><span style="color:var(--ink-muted)">' + fmtUSD(n.montoUSD) + (n.estado === 'PARCIAL' ? ' · debe ' + fmtUSD(n.pendienteUSD) : '') + '</span>' +
+      (n.productos ? '<div style="font-size:11px;color:var(--ink-soft);margin-top:4px;line-height:1.4">' + escHtml(limpiarProductos(n.productos)) + '</div>' : '') +
+      '</div><span class="badge ' + cls + '">' + n.estado + '</span></div>';
   });
   document.getElementById('detNotas').innerHTML = h || '<div class="empty">Sin notas</div>';
   var ab = sel.movs.filter(function(m) { return m.tipo === 'ABONO'; }).slice(-5).reverse();
   var ha = '';
   ab.forEach(function(m) {
-    ha += '<div class="nrow"><div>' + m.fecha + ' · ' + escHtml(m.metodo) + (m.banco ? ' ' + escHtml(m.banco) : '') + '</div><div>' + fmtUSD(m.montoUSD) + (m.moneda === 'BS' ? '<br><span style="color:var(--ink-muted)">' + fmtBS(m.montoPagado) + '</span>' : '') + '</div></div>';
+    ha += '<div class="nrow"><div>' + fechaCorta(m.fecha) + ' · ' + escHtml(m.metodo) + (m.banco ? ' ' + escHtml(m.banco) : '') + '</div><div>' + fmtUSD(m.montoUSD) + (m.moneda === 'BS' ? '<br><span style="color:var(--ink-muted)">' + fmtBS(m.montoPagado) + '</span>' : '') + '</div></div>';
   });
   document.getElementById('detAbonos').innerHTML = ha || '<div class="empty">Sin abonos todavia</div>';
   document.getElementById('abMonto').value = ''; document.getElementById('abNotas').value = '';
@@ -433,7 +436,8 @@ function enviarEstado() {
   var lineas = '';
   c.notas.forEach(function(n) {
     if (n.estado === 'PAGADA') return;
-    lineas += '\n* ' + (n.nota ? 'NE-' + ('000' + n.nota).slice(-4) : 'Nota') + ' ' + n.fecha + ': ' + fmtUSD(n.pendienteUSD) + (n.estado === 'PARCIAL' ? ' (parcial)' : '');
+    lineas += '\n* ' + (n.nota ? 'NE-' + ('000' + n.nota).slice(-4) : 'Nota') + ' ' + fechaCorta(n.fecha) + ': ' + fmtUSD(n.pendienteUSD) + (n.estado === 'PARCIAL' ? ' (parcial)' : '') +
+      (n.productos ? '\n  ' + limpiarProductos(n.productos) : '');
   });
   var msg = 'Repuesto BoParts\nEstado de cuenta - ' + c.cliente + '\n' +
     (ultimo ? '\nAbono recibido: ' + fmtUSD(ultimo.usd) + (ultimo.moneda === 'BS' ? ' (' + fmtBS(ultimo.monto) + ')' : '') + ' via ' + ultimo.metodo + '\n' : '') +
@@ -443,6 +447,19 @@ function enviarEstado() {
   window.open('https://wa.me/?text=' + encodeURIComponent(msg), '_blank');
 }
 
+// La hoja puede devolver la fecha larga de Javascript: dejar solo dd/mm/aaaa
+function fechaCorta(f) {
+  var t = String(f || '');
+  var m1 = /(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/.exec(t);
+  if (m1) return pad2(parseInt(m1[1], 10)) + '/' + pad2(parseInt(m1[2], 10)) + '/' + m1[3];
+  var d = new Date(t);
+  if (!isNaN(d.getTime())) return pad2(d.getDate()) + '/' + pad2(d.getMonth() + 1) + '/' + d.getFullYear();
+  return t;
+}
+// "ACEITE 20W50 x2 ($6.00) | BUJIA x1 ($1.5)" -> "ACEITE 20W50 x2 · BUJIA x1"
+function limpiarProductos(p) {
+  return String(p || '').split('|').map(function(t) { return t.replace(/\s*\(\$[^)]*\)/g, '').trim(); }).filter(Boolean).join(' · ');
+}
 function fmtUSD(n) { return '$' + (Math.round(n * 100) / 100).toFixed(2); }
 function fmtBS(n) { return 'Bs ' + Math.round(n).toLocaleString('es-VE'); }
 function pad2(n) { return (n < 10 ? '0' : '') + n; }
