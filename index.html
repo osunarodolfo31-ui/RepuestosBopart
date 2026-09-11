@@ -1,7 +1,8 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — index.html
-  VERSION: v9 (2026-09-11)
+  VERSION: v9.1 (2026-09-11)
+  v9.1: las fotos de Cloudinary se piden en tamano reducido (miniatura en la lista, 900px al ampliar)
   v9: abre al instante con la ultima lista guardada en el dispositivo y actualiza por detras; productos y equivalencias
       se piden en paralelo; logo como archivo (el HTML pasa de 175 KB a ~45 KB); compatible con navegadores viejos (sin '?.')
   v8.1: menu completo (Compras, Gastos, Cobros)
@@ -442,7 +443,7 @@ function openDetail(idx) {
   let imgHtml = '';
   if (imgs.length > 0) {
     const slides = imgs.map((url, i) =>
-      `<div class="img-slide"><img src="${url}" alt="foto ${i+1}" onerror="this.style.display='none'"></div>`
+      `<div class="img-slide"><img src="${cldn(url, 900)}" loading="lazy" alt="foto ${i+1}" onerror="this.style.display='none'"></div>`
     ).join('');
     const dots = imgs.length > 1 ? `<div class="img-dots">${imgs.map((_,i) => `<div class="img-dot${i===0?' active':''}" onclick="goSlide(${idx},${i})"></div>`).join('')}</div>` : '';
     imgHtml = `<div class="img-carousel" id="car-${idx}"><div class="img-track-wrap"><div class="img-track" id="track-${idx}">${slides}</div></div>${dots}</div>`;
@@ -621,6 +622,14 @@ function closeNav(){
 }
 
 // Convierte '0,6', '7,5', '$ 6.04', '1,234.56' o 6.04 en numero. Devuelve 0 si no puede.
+// Pide a Cloudinary la foto reducida: w_900 al ampliar, calidad y formato automaticos.
+// Una foto de 4 MB baja a ~80 KB sin diferencia visible en pantalla.
+function cldn(url, w) {
+  var u = String(url || '');
+  if (u.indexOf('res.cloudinary.com') < 0 || u.indexOf('/upload/') < 0) return u;
+  if (/\/upload\/(?:[a-z]+_[^\/,]+[,\/])/.test(u)) return u;          // ya trae transformaciones
+  return u.replace('/upload/', '/upload/w_' + (w || 900) + ',q_auto,f_auto/');
+}
 function parseNum(v) {
   if (typeof v === 'number') return v;
   var t = String(v == null ? '' : v).replace(/[^0-9.,-]/g, '');

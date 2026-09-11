@@ -9,12 +9,12 @@ en el comentario del encabezado de cada HTML y en la cabecera de `Code.gs`.
 
 | Archivo                 | Versión | Requiere Apps Script |
 |-------------------------|---------|----------------------|
-| index.html              | v9      | v7 o superior        |
+| index.html              | v9.1    | v7 o superior        |
 | boparts_ventas.html     | v10.9   | **v10.5**            |
 | boparts_cobros.html     | v1.2    | **v9**               |
 | boparts_compras.html    | v1.2    | **v11**              |
 | boparts_gastos.html     | v1.1    | **v11.2**            |
-| boparts_fotos.html      | v7.1    | v7 o superior        |
+| boparts_fotos.html      | v8      | **v11.5**            |
 | boparts_demanda.html    | v8.2    | v7 o superior        |
 | boparts_reportes.html   | v8      | ninguno (solo lee CSV) |
 | Code.gs (Apps Script)   | v11.2   | —                    |
@@ -177,8 +177,7 @@ Estado con el que arrancó el control de versiones. Commits en GitHub: `4269b17`
 - Code.gs: doGet `nextNota`; doPost fotos / cliente / demanda / venta (+ COMISIONES si hay aliado).
 
 ## Pendientes conocidos (no son versiones, son deudas)
-- boparts_demanda.html y boparts_fotos.html siguen con `no-cors`: no detectan si el guardado falló.
-- boparts_fotos.html escribe por número de fila: se rompe si alguien inserta u ordena filas mientras se suben fotos.
+- boparts_fotos.html: las fotos subidas antes de v8 conservan su nombre aleatorio y su peso original.
 - index.html usa tasa `1000` por defecto si no hay valor guardado ni en la hoja.
 - Todas las hojas están publicadas como CSV público (incluyendo VENTAS y CLIENTES). CXC_MOV no esta publicada; solo se lee via Apps Script.
 - boparts_reportes.html cuenta las ventas a credito como ingreso del dia; falta separar vendido de cobrado.

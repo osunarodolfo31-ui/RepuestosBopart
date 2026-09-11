@@ -1,8 +1,10 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_fotos.html
-  VERSION: v7.1 (2026-09-11)
-  v7.1: menu completo (Compras, Gastos, Cobros). Anterior: v7 = commit 4269b17
+  VERSION: v8 (2026-09-11) | requiere Apps Script v11.5
+  v8: galeria ademas de camara; las fotos se comprimen en el telefono antes de subir (max 1400px, ~150-250 KB);
+      nombre en Cloudinary por codigo de producto (boparts/CODIGO_1); guardado con respuesta del script;
+      el script ubica el producto por codigo (antes por numero de fila); version visible en el encabezado
 -->
 <html lang="es">
 <head>
@@ -126,17 +128,17 @@
     <div class="photo-slot" id="slot0">
       <span class="slot-icon">📷</span>
       <span class="slot-label">Foto 1</span>
-      <input type="file" accept="image/*" capture="environment" onchange="handleFile(this,0)">
+      <input type="file" accept="image/*" onchange="handleFile(this,0)">
     </div>
     <div class="photo-slot" id="slot1">
       <span class="slot-icon">📷</span>
       <span class="slot-label">Foto 2</span>
-      <input type="file" accept="image/*" capture="environment" onchange="handleFile(this,1)">
+      <input type="file" accept="image/*" onchange="handleFile(this,1)">
     </div>
     <div class="photo-slot" id="slot2">
       <span class="slot-icon">📷</span>
       <span class="slot-label">Foto 3</span>
-      <input type="file" accept="image/*" capture="environment" onchange="handleFile(this,2)">
+      <input type="file" accept="image/*" onchange="handleFile(this,2)">
     </div>
   </div>
 
@@ -254,7 +256,7 @@ function clearSelection() {
   document.getElementById('saveBtn').classList.remove('show');
   [0,1,2].forEach(i => {
     const slot = document.getElementById('slot'+i);
-    slot.innerHTML = `<span class="slot-icon">📷</span><span class="slot-label">Foto ${i+1}</span><input type="file" accept="image/*" capture="environment" onchange="handleFile(this,${i})">`;
+    slot.innerHTML = `<span class="slot-icon">📷</span><span class="slot-label">Foto ${i+1}</span><input type="file" accept="image/*" onchange="handleFile(this,${i})">`;
   });
 }
 
@@ -266,10 +268,10 @@ function renderSlot(i) {
       <img src="${url}" alt="foto ${i+1}">
       <button class="remove-btn" onclick="removePhoto(${i})">×</button>
       <span class="slot-status ok">✓</span>
-      <input type="file" accept="image/*" capture="environment" onchange="handleFile(this,${i})">
+      <input type="file" accept="image/*" onchange="handleFile(this,${i})">
     `;
   } else {
-    slot.innerHTML = `<span class="slot-icon">📷</span><span class="slot-label">Foto ${i+1}</span><input type="file" accept="image/*" capture="environment" onchange="handleFile(this,${i})">`;
+    slot.innerHTML = `<span class="slot-icon">📷</span><span class="slot-label">Foto ${i+1}</span><input type="file" accept="image/*" onchange="handleFile(this,${i})">`;
   }
 }
 
@@ -287,10 +289,17 @@ async function handleFile(input, slotIdx) {
   // Show progress
   slot.innerHTML = `<span class="slot-icon">⏳</span><span class="slot-label">Subiendo…</span><div class="progress" id="prog${slotIdx}" style="width:0%"></div>`;
 
+  let blob = file;
+  try { blob = await comprimir(file, 1400, 0.82); } catch(e) {}   // si falla, se sube el original
+
   const formData = new FormData();
-  formData.append('file', file);
+  formData.append('file', blob, 'foto.jpg');
   formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET);
   formData.append('folder', 'boparts');
+  // Nombre legible por codigo (requiere en el preset de Cloudinary: "Use filename or externally defined public ID")
+  const slug = (selectedProduct && selectedProduct.codigo ? selectedProduct.codigo : 'sin-codigo')
+    .toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace(/^-|-$/g, '');
+  formData.append('public_id', `${slug}_${slotIdx + 1}`);
 
   try {
     const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD}/image/upload`, {
@@ -301,7 +310,7 @@ async function handleFile(input, slotIdx) {
     if (data.secure_url) {
       uploadedUrls[slotIdx] = data.secure_url;
       renderSlot(slotIdx);
-      showToast('Foto subida ✓', 'success');
+      showToast(`Foto subida ✓ (${Math.round(blob.size / 1024)} KB)`, 'success');
     } else {
       throw new Error(data.error?.message || 'Error');
     }
@@ -309,6 +318,23 @@ async function handleFile(input, slotIdx) {
     slot.innerHTML = `<span class="slot-icon">⚠️</span><span class="slot-label" style="color:var(--red)">Error</span><input type="file" accept="image/*" onchange="handleFile(this,${slotIdx})">`;
     showToast('Error subiendo foto: ' + e.message, 'error');
   }
+}
+
+// Reduce la foto en el telefono antes de subir: menos datos al subir y al verla en la lista
+function comprimir(file, maxPx, calidad) {
+  return new Promise((res, rej) => {
+    const img = new Image(), url = URL.createObjectURL(file);
+    img.onload = () => {
+      const sc = Math.min(1, maxPx / Math.max(img.width, img.height));
+      const cv = document.createElement('canvas');
+      cv.width = Math.round(img.width * sc); cv.height = Math.round(img.height * sc);
+      cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+      URL.revokeObjectURL(url);
+      cv.toBlob(b => b ? res(b) : rej(new Error('sin blob')), 'image/jpeg', calidad);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); rej(new Error('no se pudo leer la imagen')); };
+    img.src = url;
+  });
 }
 
 // ── GUARDAR EN SHEET ──────────────────────────────────────────
@@ -333,17 +359,21 @@ async function saveToSheet() {
   btn.disabled = true;
   btn.textContent = 'Guardando…';
   try {
-    await fetch(APPS_SCRIPT_URL, {
+    const r = await fetch(APPS_SCRIPT_URL, {
       method: 'POST',
-      mode: 'no-cors',
-      headers: {'Content-Type':'application/json'},
+      headers: {'Content-Type':'text/plain;charset=utf-8'},
       body: JSON.stringify({
         row: selectedProduct.row,
+        codigo: selectedProduct.codigo,          // el script prefiere el codigo: si alguien ordena la hoja, la fila cambia
+        producto: selectedProduct.producto,
         imagen: uploadedUrls[0] || '',
         imagen2: uploadedUrls[1] || '',
         imagen3: uploadedUrls[2] || ''
       })
     });
+    const txt = await r.text();
+    let d; try { d = JSON.parse(txt); } catch(e) { throw new Error('El script respondió: ' + txt.replace(/<[^>]+>/g,' ').slice(0,80)); }
+    if (!d || d.ok !== true) throw new Error(d && d.error ? d.error : 'Respuesta inesperada');
     showToast('¡Guardado en catálogo! ✓', 'success');
     // Update local data
     selectedProduct.imagen = uploadedUrls[0] || selectedProduct.imagen;
@@ -351,7 +381,7 @@ async function saveToSheet() {
     selectedProduct.imagen3 = uploadedUrls[2] || selectedProduct.imagen3;
     setTimeout(clearSelection, 1500);
   } catch(e) {
-    showToast('Error guardando', 'error');
+    showToast('NO se guardó: ' + e.message, 'error');
   } finally {
     btn.disabled = false;
     btn.textContent = '💾 Guardar en catálogo';
@@ -367,6 +397,9 @@ function showToast(msg, type='') {
 }
 
 // ── INIT ──────────────────────────────────────────────────────
+const APP_VERSION = 'v8';
+const hdrP = document.querySelector('.header-text p, header p');
+if (hdrP) hdrP.textContent = APP_VERSION + ' · ' + hdrP.textContent;
 loadProducts();
 </script>
 
