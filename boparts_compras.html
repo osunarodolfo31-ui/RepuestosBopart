@@ -1,7 +1,8 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_compras.html
-  VERSION: v1.1 (2026-09-10) | requiere Apps Script v11
+  VERSION: v1.2 (2026-09-10) | requiere Apps Script v11
+  v1.2: enlace a Gastos en el nav
   v1.1: marca con lista de las marcas existentes; modo 'Pegar lista' para recepciones grandes (codigo + cantidad por linea)
   Recepcion de mercancia (camino B): proveedor, factura, foto, lineas con cantidad. Sin costos: los completan los socios.
   Productos nuevos se crean en LISTA DE PRODUCTOS sin precio.
@@ -284,6 +285,11 @@ select option{background:#1E1E1E;color:var(--ink)}
       <span class="nlbl">Compras</span>
       <span class="ndesc">Recibir mercancia</span>
     </a>
+    <a class="ncard" href="boparts_gastos.html">
+      <span class="nicon">💸</span>
+      <span class="nlbl">Gastos</span>
+      <span class="ndesc">Registrar gasto</span>
+    </a>
     <a class="ncard" href="boparts_cobros.html">
       <span class="nicon">🧾</span>
       <span class="nlbl">Cobros</span>
@@ -296,7 +302,7 @@ select option{background:#1E1E1E;color:var(--ink)}
 var CSV_URL    = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRaAnGd-Bfaxo3LjUiGeV8p0F2weaKqHGwJ0hWibSMj02-h7dRAQPDMmGL5B8-XQg66Yjd3zgOAaz8X/pub?gid=2100998338&single=true&output=csv';
 var SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
 var CLOUD = 'c7jufi9v', PRESET = 'boparts_productos';
-var APP_VERSION = 'v1.1';
+var APP_VERSION = 'v1.2';
 
 var PRODUCTS = [], PROVEEDORES = [], lineas = [], provSel = null, fotoUrl = '';
 document.getElementById('fechaHdr').textContent = APP_VERSION + ' · ' + new Date().toLocaleDateString('es-VE', {weekday:'long', day:'numeric', month:'long'});

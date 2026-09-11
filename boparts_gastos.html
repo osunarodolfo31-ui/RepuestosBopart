@@ -1,17 +1,14 @@
 <!DOCTYPE html>
 <!--
-  Repuesto BoParts — boparts_cobros.html
-  VERSION: v1.2 (2026-09-10) | requiere Apps Script v9
-  v1.2: enlace a Gastos en el nav
-  v1.1: enlace a Compras en el nav
-  Cuentas por cobrar: saldo por cliente en USD, notas pendientes (abonos a las mas viejas primero),
-  registro de abonos con metodo/banco/comision, estado de cuenta por WhatsApp.
+  Repuesto BoParts — boparts_gastos.html
+  VERSION: v1 (2026-09-10) | requiere Apps Script v11.1
+  Registro de gastos operativos (no inventario: eso entra por Compras). Monto en USD o Bs, metodo, quien pago, comprobante.
 -->
 <html lang="es">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-<title>BoParts · Cobros</title>
+<title>BoParts · Gastos</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -97,6 +94,10 @@ select option{background:#1E1E1E;color:var(--ink)}
 /* SUBMIT */
 .subbtn{width:100%;padding:16px;background:var(--brand);color:#111;border:none;border-radius:var(--radius);font-size:16px;font-weight:700;cursor:pointer;font-family:inherit;position:fixed;bottom:0;left:0;right:0;max-width:520px;margin:0 auto}
 .subbtn:disabled{opacity:.5}
+.botbar{position:fixed;bottom:0;left:0;right:0;display:flex;gap:8px;padding:10px 12px;background:var(--bg);border-top:1px solid var(--border);z-index:100;max-width:520px;margin:0 auto}
+.botbar .subbtn{position:static;flex:1;padding:14px}
+.botbar .cotbtn{flex:0 0 36%;background:var(--card2);color:var(--brand);border:1.5px solid var(--brand)}
+.nbtn-p:disabled{opacity:.5}
 
 /* MODALS */
 .overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:200;display:none;align-items:flex-end}
@@ -129,10 +130,10 @@ select option{background:#1E1E1E;color:var(--ink)}
 .cli-new-btn{width:100%;padding:10px;background:none;border:1.5px dashed var(--brand);border-radius:var(--radius-sm);color:var(--brand);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;margin-top:8px}
 
 /* TOAST */
-.toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%) translateY(80px);background:#222;color:#fff;padding:12px 20px;border-radius:30px;font-size:13px;font-weight:600;transition:transform .3s;z-index:999;white-space:nowrap;border:1px solid var(--border);pointer-events:none}
-.toast.show{transform:translateX(-50%) translateY(0)}
+.toast{position:fixed;bottom:90px;left:50%;transform:translateX(-50%) translateY(40px);opacity:0;visibility:hidden;background:#222;color:#fff;padding:12px 20px;border-radius:18px;font-size:13px;font-weight:600;transition:transform .3s,opacity .3s,visibility .3s;z-index:999;max-width:92vw;text-align:center;line-height:1.4;cursor:pointer;border:1px solid var(--border);pointer-events:none}
+.toast.show{transform:translateX(-50%) translateY(0);opacity:1;visibility:visible}
 .toast.ok{border-color:var(--green);color:var(--green)}
-.toast.err{border-color:var(--red);color:var(--red)}
+.toast.err{border-color:var(--red);color:var(--red);white-space:pre-line}
 
 /* NAV */
 .fab{position:fixed;bottom:70px;right:16px;z-index:90;width:48px;height:48px;background:var(--brand);border:none;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 16px rgba(245,168,0,.4)}
@@ -148,22 +149,17 @@ select option{background:#1E1E1E;color:var(--ink)}
 .nlbl{font-size:12px;font-weight:700;color:var(--ink);text-align:center}
 .ndesc{font-size:10px;color:var(--ink-muted);text-align:center}
 
-/* COBROS */
-.ccard{background:var(--card2);border:1.5px solid var(--border);border-radius:var(--radius-sm);padding:12px;margin-bottom:8px;cursor:pointer;display:flex;justify-content:space-between;align-items:center}
-.ccard.sel{border-color:var(--brand);background:var(--brand-soft)}
-.ccard .cn{font-size:13px;font-weight:700}
-.ccard .cr{font-size:11px;color:var(--ink-muted)}
-.ccard .cs{font-size:15px;font-weight:700;color:var(--brand);text-align:right}
-.ccard .cs small{display:block;font-size:10px;color:var(--ink-muted);font-weight:500}
-.nrow{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:12px}
-.nrow:last-child{border-bottom:none}
-.badge{font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px}
-.b-pend{background:rgba(239,68,68,.15);color:var(--red)}
-.b-parc{background:var(--brand-soft);color:var(--brand)}
-.b-pag{background:rgba(34,197,94,.15);color:var(--green)}
-.saldo-big{font-size:26px;font-weight:700;color:var(--brand)}
-.saldo-sub{font-size:12px;color:var(--ink-muted)}
-.empty{text-align:center;padding:20px;color:var(--ink-muted);font-size:13px}
+/* COMPRAS */
+.linea{background:var(--card2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:8px}
+.linea .ltop{display:flex;gap:8px;align-items:flex-start}
+.linea .lname{flex:1;font-size:13px;font-weight:600;line-height:1.3}
+.linea .lmeta{font-size:11px;color:var(--ink-muted);margin-top:2px}
+.linea .lbot{display:flex;align-items:center;gap:10px;margin-top:8px}
+.tagnuevo{font-size:10px;font-weight:700;background:var(--brand-soft);color:var(--brand);padding:2px 8px;border-radius:10px}
+.fotobox{border:1.5px dashed var(--border);border-radius:var(--radius-sm);padding:14px;text-align:center;color:var(--ink-muted);font-size:13px;cursor:pointer;position:relative}
+.fotobox input{position:absolute;inset:0;opacity:0;cursor:pointer}
+.fotobox.ok{border-color:var(--green);color:var(--green)}
+.resumen{display:flex;justify-content:space-between;font-size:13px;color:var(--ink-soft);padding:8px 0}
 </style>
 </head>
 <body>
@@ -171,68 +167,67 @@ select option{background:#1E1E1E;color:var(--ink)}
 <header>
   <img src="icon-192.png" alt="BoParts" class="logo">
   <div class="hdr">
-    <h1>Cobros</h1>
+    <h1>Registrar Gasto</h1>
     <p id="fechaHdr"></p>
   </div>
 </header>
 
 <div class="container">
-
   <div class="section">
-    <div class="stitle">Registrado por</div>
-    <select id="selV">
-      <option value="">Seleccionar...</option>
-      <option>Rodolfo Osuna</option>
-      <option>Javier Boves</option>
-      <option>Reinaldo Cuicas</option>
-    </select>
-  </div>
-
-  <div class="section">
-    <div class="stitle">Clientes con saldo <span id="tasaLbl" style="float:right;color:var(--ink-muted);font-weight:500;text-transform:none"></span></div>
-    <div id="cliList"><div class="empty">Cargando...</div></div>
-  </div>
-
-  <div id="detalle" style="display:none">
-    <div class="section">
-      <div class="stitle" id="detNombre">Cliente</div>
-      <div class="saldo-big" id="detSaldo">$0.00</div>
-      <div class="saldo-sub" id="detSaldoBs"></div>
-      <div style="margin-top:12px">
-        <label>Notas de entrega</label>
-        <div id="detNotas"></div>
-      </div>
-      <div style="margin-top:12px">
-        <label>Ultimos abonos</label>
-        <div id="detAbonos"></div>
+    <div class="stitle">Gasto</div>
+    <div class="row2">
+      <div class="field"><label>Fecha</label><input type="date" id="inFecha"></div>
+      <div class="field"><label>Categoria *</label>
+        <select id="selCat">
+          <option value="">Seleccionar...</option>
+          <option>ALQUILER</option>
+          <option>SUELDOS Y COMISIONES</option>
+          <option>SERVICIOS (luz, agua, internet, telefono)</option>
+          <option>LOGISTICA (fletes, envios, transporte)</option>
+          <option>IMPUESTOS Y BANCARIOS</option>
+          <option>MANTENIMIENTO Y EQUIPOS</option>
+          <option>PAPELERIA Y LIMPIEZA</option>
+          <option>PUBLICIDAD</option>
+          <option>OTROS</option>
+        </select>
       </div>
     </div>
-
-    <div class="section">
-      <div class="stitle">Registrar abono</div>
-      <div class="row2">
-        <div class="field"><label>Monto pagado</label><input type="number" id="abMonto" placeholder="0.00" step="0.01" oninput="previewAbono()"></div>
-        <div class="field"><label>Moneda</label><select id="abMoneda" onchange="previewAbono()"><option value="USD">USD</option><option value="BS">Bs</option></select></div>
-      </div>
-      <div class="field"><label>Metodo de pago</label><select id="abMetodo" onchange="previewAbono()"></select></div>
-      <div id="abPreview" class="cominfo" style="display:none"></div>
-      <div class="field" style="margin-top:10px"><label>Notas</label><input type="text" id="abNotas" placeholder="Opcional"></div>
+    <div class="cominfo" style="margin-bottom:10px">Compra de mercancia para vender NO se registra aqui: va por <b>Compras</b>.</div>
+    <div class="field"><label>Descripcion *</label><input type="text" id="inDesc" placeholder="Ej: Internet septiembre, flete Caracas, bolsas..."></div>
+    <div class="row2">
+      <div class="field"><label>Monto *</label><input type="number" id="inMonto" placeholder="0.00" step="0.01" oninput="preview()"></div>
+      <div class="field"><label>Moneda</label><select id="selMon" onchange="preview()"><option value="BS">Bs</option><option value="USD">USD</option></select></div>
     </div>
+    <div id="prev" class="cominfo" style="display:none"></div>
   </div>
 
+  <div class="section">
+    <div class="stitle">Pago</div>
+    <div class="field"><label>Metodo</label><select id="selMet"></select></div>
+    <div class="row2">
+      <div class="field"><label>Pagado por *</label>
+        <select id="selPago"><option value="">Seleccionar...</option><option>CAJA TIENDA</option><option>RODOLFO</option><option>JAVIER</option><option>CUENTA BOSC</option></select>
+      </div>
+      <div class="field"><label>Registrado por *</label>
+        <select id="selV"><option value="">Seleccionar...</option><option>Rodolfo Osuna</option><option>Javier Boves</option><option>Reinaldo Cuicas</option></select>
+      </div>
+    </div>
+    <label>Comprobante (factura, capture del pago)</label>
+    <div class="fotobox" id="fotoBox">Tocar para fotografiar o elegir de galeria<input type="file" accept="image/*" onchange="subirFoto(this)"></div>
+    <div class="field" style="margin-top:10px"><label>Notas</label><input type="text" id="inNotas" placeholder="Opcional"></div>
+  </div>
 </div>
 
-<button class="subbtn" id="btnAbono" onclick="guardarAbono()" style="display:none">Registrar Abono</button>
+<button class="subbtn" id="btnGuardar" onclick="guardar()">Registrar Gasto</button>
 
 <div class="success" id="success">
-  <div class="sicon">✅</div>
-  <h2>Abono Registrado</h2>
+  <div class="sicon">💸</div>
+  <h2>Gasto Registrado</h2>
   <p id="successMsg"></p>
-  <button class="sbtn sbtn-y" onclick="enviarEstado()">Enviar estado de cuenta por WhatsApp</button>
-  <button class="sbtn sbtn-n" onclick="volver()">Volver</button>
+  <button class="sbtn sbtn-y" onclick="nuevo()">Registrar otro</button>
 </div>
 
-<div class="toast" id="toast"></div>
+<div class="toast" id="toast" onclick="this.className='toast'"></div>
 
 <!-- FAB NAV -->
 <button class="fab" onclick="toggleNav()">
@@ -269,12 +264,12 @@ select option{background:#1E1E1E;color:var(--ink)}
       <span class="nlbl">Compras</span>
       <span class="ndesc">Recibir mercancia</span>
     </a>
-    <a class="ncard" href="boparts_gastos.html">
+    <a class="ncard cur" href="boparts_gastos.html">
       <span class="nicon">💸</span>
       <span class="nlbl">Gastos</span>
       <span class="ndesc">Registrar gasto</span>
     </a>
-    <a class="ncard cur" href="boparts_cobros.html">
+    <a class="ncard" href="boparts_cobros.html">
       <span class="nicon">🧾</span>
       <span class="nlbl">Cobros</span>
       <span class="ndesc">Cuentas por cobrar</span>
@@ -284,8 +279,10 @@ select option{background:#1E1E1E;color:var(--ink)}
 
 <script>
 var SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
+var CLOUD = 'c7jufi9v', PRESET = 'boparts_productos';
+var APP_VERSION = 'v1';
 var TASA = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
-
+var comprobante = '';
 var METODOS = [
   {label:'Efectivo USD',        metodo:'Efectivo',        banco:'',                     moneda:'USD', fijo:0,    pct:0  },
   {label:'Efectivo Bs',         metodo:'Efectivo',        banco:'',                     moneda:'BS',  fijo:0,    pct:0  },
@@ -297,164 +294,93 @@ var METODOS = [
   {label:'CREDITO (cuenta por cobrar)', metodo:'Credito', banco:'',                     moneda:'USD', fijo:0,    pct:0, credito:true }
 ];
 
-var CLIENTES = [];   // estado de cuenta por cliente (viene de Apps Script)
-var sel = null;
-var ultimo = null;   // ultimo abono registrado (para el mensaje de WhatsApp)
-
-document.getElementById('fechaHdr').textContent = new Date().toLocaleDateString('es-VE', {weekday:'long', day:'numeric', month:'long'});
-
-// Metodos de pago (sin CREDITO)
+document.getElementById('fechaHdr').textContent = APP_VERSION + ' · ' + new Date().toLocaleDateString('es-VE', {weekday:'long', day:'numeric', month:'long'});
 (function() {
-  var sl = document.getElementById('abMetodo');
+  var d = new Date(); document.getElementById('inFecha').value = d.getFullYear() + '-' + pad2(d.getMonth()+1) + '-' + pad2(d.getDate());
   var h = '<option value="">Seleccionar...</option>';
   for (var i = 0; i < METODOS.length; i++) if (!METODOS[i].credito) h += '<option value="' + i + '">' + escHtml(METODOS[i].label) + '</option>';
-  sl.innerHTML = h;
+  document.getElementById('selMet').innerHTML = h;
+  ['selCat','selPago','selV','selMet','selMon'].forEach(function(id) { var s = localStorage.getItem('boparts_gasto_' + id); if (s) document.getElementById(id).value = s; });
 })();
-
-function cargar() {
-  document.getElementById('cliList').innerHTML = '<div class="empty">Cargando...</div>';
-  fetch(SCRIPT_URL + '?action=cxc&t=' + Date.now())
-    .then(function(r) { return r.json(); })
-    .then(function(d) {
-      if (!d || !d.ok) throw new Error(d && d.error ? d.error : 'sin respuesta');
-      if (!TASA && d.tasa > 1) TASA = d.tasa;
-      document.getElementById('tasaLbl').textContent = TASA ? 'Tasa ' + TASA : 'Sin tasa';
-      CLIENTES = d.clientes || [];
-      renderLista();
-      if (sel) { var s2 = CLIENTES.filter(function(c) { return c.cliente === sel.cliente; })[0]; sel = s2 || null; if (sel) renderDetalle(); }
-    })
-    .catch(function(e) { document.getElementById('cliList').innerHTML = '<div class="empty" style="color:var(--red)">No se pudo cargar (' + e.message + '). Revisa la conexion.</div>'; });
-}
-
-function renderLista() {
-  var conSaldo = CLIENTES.filter(function(c) { return c.saldoUSD > 0.009; });
-  if (!conSaldo.length) { document.getElementById('cliList').innerHTML = '<div class="empty">Nadie debe nada. 🎉</div>'; return; }
-  var h = '';
-  conSaldo.forEach(function(c) {
-    var pend = c.notas.filter(function(n) { return n.estado !== 'PAGADA'; }).length;
-    h += '<div class="ccard' + (sel && sel.cliente === c.cliente ? ' sel' : '') + '" onclick="elegir(\'' + escAttr(c.cliente) + '\')">' +
-      '<div><div class="cn">' + escHtml(c.cliente) + '</div><div class="cr">' + pend + ' nota' + (pend === 1 ? '' : 's') + ' pendiente' + (pend === 1 ? '' : 's') + (c.rif ? ' · ' + escHtml(c.rif) : '') + '</div></div>' +
-      '<div class="cs">' + fmtUSD(c.saldoUSD) + '<small>' + (TASA ? fmtBS(c.saldoUSD * TASA) : '') + '</small></div></div>';
-  });
-  document.getElementById('cliList').innerHTML = h;
-}
-
-function elegir(nombre) {
-  sel = CLIENTES.filter(function(c) { return c.cliente === nombre; })[0] || null;
-  renderLista(); renderDetalle();
-  document.getElementById('detalle').scrollIntoView({behavior:'smooth'});
-}
-
-function renderDetalle() {
-  if (!sel) { document.getElementById('detalle').style.display = 'none'; document.getElementById('btnAbono').style.display = 'none'; return; }
-  document.getElementById('detalle').style.display = 'block';
-  document.getElementById('btnAbono').style.display = 'block';
-  document.getElementById('detNombre').textContent = sel.cliente;
-  document.getElementById('detSaldo').textContent = fmtUSD(sel.saldoUSD);
-  document.getElementById('detSaldoBs').textContent = (TASA ? fmtBS(sel.saldoUSD * TASA) + ' a tasa ' + TASA + ' · ' : '') + 'Cargos ' + fmtUSD(sel.cargosUSD) + ' · Abonos ' + fmtUSD(sel.abonosUSD);
-  var h = '';
-  sel.notas.slice().reverse().forEach(function(n) {
-    var cls = n.estado === 'PAGADA' ? 'b-pag' : (n.estado === 'PARCIAL' ? 'b-parc' : 'b-pend');
-    h += '<div class="nrow"><div><b>' + (n.nota ? 'NE-' + ('000' + n.nota).slice(-4) : 'Sin nota') + '</b> · ' + n.fecha + '<br><span style="color:var(--ink-muted)">' + fmtUSD(n.montoUSD) + (n.estado === 'PARCIAL' ? ' · debe ' + fmtUSD(n.pendienteUSD) : '') + '</span></div>' +
-      '<span class="badge ' + cls + '">' + n.estado + '</span></div>';
-  });
-  document.getElementById('detNotas').innerHTML = h || '<div class="empty">Sin notas</div>';
-  var ab = sel.movs.filter(function(m) { return m.tipo === 'ABONO'; }).slice(-5).reverse();
-  var ha = '';
-  ab.forEach(function(m) {
-    ha += '<div class="nrow"><div>' + m.fecha + ' · ' + escHtml(m.metodo) + (m.banco ? ' ' + escHtml(m.banco) : '') + '</div><div>' + fmtUSD(m.montoUSD) + (m.moneda === 'BS' ? '<br><span style="color:var(--ink-muted)">' + fmtBS(m.montoPagado) + '</span>' : '') + '</div></div>';
-  });
-  document.getElementById('detAbonos').innerHTML = ha || '<div class="empty">Sin abonos todavia</div>';
-  document.getElementById('abMonto').value = ''; document.getElementById('abNotas').value = '';
-  document.getElementById('abMetodo').value = ''; previewAbono();
-}
-
-function calcAbono() {
-  var monto = parseFloat(document.getElementById('abMonto').value) || 0;
-  var moneda = document.getElementById('abMoneda').value;
-  var mi = parseInt(document.getElementById('abMetodo').value);
-  var m = isNaN(mi) ? null : METODOS[mi];
-  var usd = moneda === 'BS' ? (TASA ? monto / TASA : 0) : monto;
-  var bs = moneda === 'BS' ? monto : monto * TASA;
-  var com = (m && moneda === 'BS') ? m.fijo + monto * m.pct / 100 : (m ? (m.fijo + bs * m.pct / 100) : 0);
-  return {monto:monto, moneda:moneda, m:m, usd:Math.round(usd * 100) / 100, bs:Math.round(bs), com:Math.round(com)};
-}
-
-function previewAbono() {
-  var a = calcAbono(); var el = document.getElementById('abPreview');
-  if (!a.monto) { el.style.display = 'none'; return; }
+function preview() {
+  var m = parseFloat(document.getElementById('inMonto').value) || 0, mon = document.getElementById('selMon').value, el = document.getElementById('prev');
+  if (!m) { el.style.display = 'none'; return; }
   el.style.display = 'block';
-  el.innerHTML = 'Se abonan <b>' + fmtUSD(a.usd) + '</b> a la deuda' + (a.moneda === 'BS' ? ' (tasa ' + TASA + ')' : '') +
-    (a.com ? ' · comision ' + fmtBS(a.com) : '') +
-    (sel ? ' · saldo quedaria en <b>' + fmtUSD(Math.max(0, sel.saldoUSD - a.usd)) + '</b>' : '');
+  el.innerHTML = TASA ? (mon === 'BS' ? 'Equivale a <b>' + fmtUSD(m / TASA) + '</b> a tasa ' + TASA : 'Equivale a <b>' + fmtBS(m * TASA) + '</b> a tasa ' + TASA) : 'Sin tasa guardada en este telefono: se registra sin equivalencia.';
 }
-
-function guardarAbono() {
-  if (!sel) return;
-  var quien = document.getElementById('selV').value;
-  if (!quien) { toast('Selecciona quien registra', 'err'); return; }
-  var a = calcAbono();
-  if (!a.monto || a.monto <= 0) { toast('Indica el monto', 'err'); return; }
-  if (!a.m) { toast('Selecciona el metodo de pago', 'err'); return; }
-  if (a.moneda === 'BS' && !TASA) { toast('No hay tasa cargada. Abre Lista de Precios y fijala.', 'err'); return; }
-  if (a.usd > sel.saldoUSD + 0.05) { toast('El abono (' + fmtUSD(a.usd) + ') supera el saldo (' + fmtUSD(sel.saldoUSD) + ')', 'err'); return; }
-  var now = new Date();
-  var payload = {
-    tipo:'abono', cliente:sel.cliente, rif:sel.rif || '',
-    fecha:now.toLocaleDateString('es-VE'), hora:now.toLocaleTimeString('es-VE', {hour:'2-digit', minute:'2-digit'}),
-    idAbono:'A' + now.getFullYear() + pad2(now.getMonth()+1) + pad2(now.getDate()) + '-' + pad2(now.getHours()) + pad2(now.getMinutes()) + pad2(now.getSeconds()),
-    montoUSD:a.usd, moneda:a.moneda, montoPagado:a.monto, tasa:TASA,
-    metodo:a.m.metodo, banco:a.m.banco, comision:a.com,
-    registradoPor:quien, notas:document.getElementById('abNotas').value
-  };
-  var btn = document.getElementById('btnAbono');
-  btn.disabled = true; btn.textContent = 'Guardando...';
-  fetch(SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body:JSON.stringify(payload)})
-    .then(function(r) { return r.json(); })
-    .then(function(d) {
-      btn.disabled = false; btn.textContent = 'Registrar Abono';
-      if (!d || d.ok !== true) throw new Error(d && d.error ? d.error : 'Respuesta invalida');
-      ultimo = {cliente:sel.cliente, usd:a.usd, moneda:a.moneda, monto:a.monto, metodo:a.m.label, saldo:d.saldoUSD};
-      document.getElementById('successMsg').textContent = sel.cliente + ' - ' + fmtUSD(a.usd) + (a.moneda === 'BS' ? ' (' + fmtBS(a.monto) + ')' : '') + '\nSaldo: ' + fmtUSD(d.saldoUSD);
-      document.getElementById('success').classList.add('open');
-      cargar();
-    })
-    .catch(function(err) {
-      btn.disabled = false; btn.textContent = 'Registrar Abono';
-      toast('No se guardo el abono (' + (err && err.message ? err.message : 'sin conexion') + '). Reintenta.', 'err');
-    });
+function subirFoto(input) {
+  var file = input.files[0]; if (!file) return;
+  var box = document.getElementById('fotoBox'); box.textContent = 'Subiendo...';
+  comprimir(file, 1600, 0.8).then(function(blob) {
+    var fd = new FormData(); fd.append('file', blob, 'gasto.jpg'); fd.append('upload_preset', PRESET); fd.append('folder', 'boparts/gastos');
+    return fetch('https://api.cloudinary.com/v1_1/' + CLOUD + '/image/upload', {method:'POST', body:fd}).then(function(r) { return r.json(); });
+  }).then(function(d) {
+    if (!d.secure_url) throw new Error('sin url');
+    comprobante = d.secure_url; box.className = 'fotobox ok'; box.innerHTML = 'Comprobante subido ✓<input type="file" accept="image/*" onchange="subirFoto(this)">';
+  }).catch(function() { box.className = 'fotobox'; box.innerHTML = 'Error al subir. Tocar para reintentar<input type="file" accept="image/*" onchange="subirFoto(this)">'; });
 }
-
-function volver() { document.getElementById('success').classList.remove('open'); }
-
-function enviarEstado() {
-  if (!sel) return;
-  var c = CLIENTES.filter(function(x) { return x.cliente === sel.cliente; })[0] || sel;
-  var lineas = '';
-  c.notas.forEach(function(n) {
-    if (n.estado === 'PAGADA') return;
-    lineas += '\n* ' + (n.nota ? 'NE-' + ('000' + n.nota).slice(-4) : 'Nota') + ' ' + n.fecha + ': ' + fmtUSD(n.pendienteUSD) + (n.estado === 'PARCIAL' ? ' (parcial)' : '');
+function comprimir(file, maxPx, calidad) {
+  return new Promise(function(res) {
+    var img = new Image(), url = URL.createObjectURL(file);
+    img.onload = function() {
+      var sc = Math.min(1, maxPx / Math.max(img.width, img.height));
+      var cv = document.createElement('canvas'); cv.width = Math.round(img.width * sc); cv.height = Math.round(img.height * sc);
+      cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+      URL.revokeObjectURL(url);
+      cv.toBlob(function(b) { res(b || file); }, 'image/jpeg', calidad);
+    };
+    img.onerror = function() { res(file); };
+    img.src = url;
   });
-  var msg = 'Repuesto BoParts\nEstado de cuenta - ' + c.cliente + '\n' +
-    (ultimo ? '\nAbono recibido: ' + fmtUSD(ultimo.usd) + (ultimo.moneda === 'BS' ? ' (' + fmtBS(ultimo.monto) + ')' : '') + ' via ' + ultimo.metodo + '\n' : '') +
-    (lineas ? '\nPendiente:' + lineas : '') +
-    '\n\nSALDO: ' + fmtUSD(c.saldoUSD) + (TASA ? ' (' + fmtBS(c.saldoUSD * TASA) + ' a tasa ' + TASA + ')' : '') +
-    '\n\n0412-3185778 / 0414-9536708';
-  window.open('https://wa.me/?text=' + encodeURIComponent(msg), '_blank');
 }
 
+function guardar() {
+  var cat = document.getElementById('selCat').value, desc = document.getElementById('inDesc').value.trim();
+  var monto = parseFloat(document.getElementById('inMonto').value) || 0, mon = document.getElementById('selMon').value;
+  var mi = parseInt(document.getElementById('selMet').value), m = isNaN(mi) ? null : METODOS[mi];
+  var pagadoPor = document.getElementById('selPago').value, quien = document.getElementById('selV').value, f = document.getElementById('inFecha').value;
+  if (!cat) { toast('Elige la categoria', 'err'); return; }
+  if (!desc) { toast('Escribe la descripcion', 'err'); return; }
+  if (!(monto > 0)) { toast('Indica el monto', 'err'); return; }
+  if (!pagadoPor || !quien) { toast('Indica quien pago y quien registra', 'err'); return; }
+  if (!f) { toast('Indica la fecha', 'err'); return; }
+  ['selCat','selPago','selV','selMet','selMon'].forEach(function(id) { localStorage.setItem('boparts_gasto_' + id, document.getElementById(id).value); });
+  var fp = f.split('-'), now = new Date();
+  var payload = {
+    tipo:'gasto', idGasto:'G' + now.getFullYear() + pad2(now.getMonth()+1) + pad2(now.getDate()) + '-' + pad2(now.getHours()) + pad2(now.getMinutes()) + pad2(now.getSeconds()),
+    fecha:parseInt(fp[2]) + '/' + parseInt(fp[1]) + '/' + fp[0], hora:now.toLocaleTimeString('es-VE', {hour:'2-digit', minute:'2-digit'}),
+    categoria:cat.split(' (')[0], descripcion:desc, monto:monto, moneda:mon, tasa:TASA,
+    metodo:m ? m.metodo : '', banco:m ? m.banco : '', pagadoPor:pagadoPor, registradoPor:quien, comprobante:comprobante, notas:document.getElementById('inNotas').value.trim()
+  };
+  var btn = document.getElementById('btnGuardar'); btn.disabled = true; btn.textContent = 'Guardando...';
+  fetch(SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body:JSON.stringify(payload)})
+    .then(function(r) { return r.text(); }).then(function(t) { try { return JSON.parse(t); } catch (e) { throw new Error('El script respondio: ' + t.replace(/<[^>]+>/g, ' ').slice(0, 100)); } })
+    .then(function(d) {
+      btn.disabled = false; btn.textContent = 'Registrar Gasto';
+      if (!d || d.ok !== true) throw new Error(d && d.error ? d.error : 'Respuesta inesperada');
+      document.getElementById('successMsg').textContent = payload.categoria + ' - ' + desc + '\n' + (mon === 'BS' ? fmtBS(monto) : fmtUSD(monto)) + ' · ' + pagadoPor;
+      document.getElementById('success').classList.add('open');
+    })
+    .catch(function(e) { btn.disabled = false; btn.textContent = 'Registrar Gasto'; toast('No se guardo el gasto (' + (e && e.message ? e.message : 'sin conexion') + '). Reintenta.', 'err'); });
+}
+function nuevo() {
+  document.getElementById('success').classList.remove('open');
+  document.getElementById('inDesc').value = ''; document.getElementById('inMonto').value = ''; document.getElementById('inNotas').value = ''; comprobante = ''; preview();
+  var box = document.getElementById('fotoBox'); box.className = 'fotobox'; box.innerHTML = 'Tocar para fotografiar o elegir de galeria<input type="file" accept="image/*" onchange="subirFoto(this)">';
+}
 function fmtUSD(n) { return '$' + (Math.round(n * 100) / 100).toFixed(2); }
 function fmtBS(n) { return 'Bs ' + Math.round(n).toLocaleString('es-VE'); }
 function pad2(n) { return (n < 10 ? '0' : '') + n; }
-function escHtml(s) { return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
-function escAttr(s) { return String(s || '').split('\\').join('').split("'").join("\\'").split('"').join('&quot;'); }
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
 
 function toast(msg, type) {
   var el = document.getElementById('toast');
   el.textContent = msg;
   el.className = 'toast show ' + (type || '');
   clearTimeout(el._t);
-  el._t = setTimeout(function() { el.className = 'toast'; }, 3500);
+  el._t = setTimeout(function() { el.className = 'toast'; }, type === 'err' ? 7000 : 3500);
 }
 
 function toggleNav() {
@@ -466,7 +392,6 @@ function closeNav() {
   document.getElementById('navOv').classList.remove('open');
 }
 
-cargar();
 </script>
 </body>
 </html>

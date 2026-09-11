@@ -10,13 +10,14 @@ en el comentario del encabezado de cada HTML y en la cabecera de `Code.gs`.
 | Archivo                 | Versión | Requiere Apps Script |
 |-------------------------|---------|----------------------|
 | index.html              | v8      | v7 o superior        |
-| boparts_ventas.html     | v10.8   | **v10.5**            |
-| boparts_cobros.html     | v1.1    | **v9**               |
-| boparts_compras.html    | v1.1    | **v11**              |
+| boparts_ventas.html     | v10.9   | **v10.5**            |
+| boparts_cobros.html     | v1.2    | **v9**               |
+| boparts_compras.html    | v1.2    | **v11**              |
+| boparts_gastos.html     | v1      | **v11.1**            |
 | boparts_fotos.html      | v7      | v7 o superior        |
 | boparts_demanda.html    | v8.1    | v7 o superior        |
 | boparts_reportes.html   | v8      | ninguno (solo lee CSV) |
-| Code.gs (Apps Script)   | v11     | —                    |
+| Code.gs (Apps Script)   | v11.1   | —                    |
 
 Deployment ID (no cambia): `AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg`
 
@@ -25,6 +26,15 @@ Para volver atrás:
 - Apps Script: Implementar → Administrar implementaciones → lápiz → elegir la versión anterior → Implementar.
 
 ---
+
+## v11.1 — 2026-09-10 · Gastos
+**Code.gs v11.1** + **boparts_gastos.html v1** (+ enlace Gastos en el nav de ventas, cobros y compras)
+- Registro de gasto: fecha, categoria (ALQUILER, SUELDOS Y COMISIONES, SERVICIOS, LOGISTICA, IMPUESTOS Y BANCARIOS,
+  MANTENIMIENTO Y EQUIPOS, PAPELERIA Y LIMPIEZA, PUBLICIDAD, OTROS), descripcion, monto en Bs o USD (se guarda en ambas
+  a la tasa del telefono), metodo/banco, pagado por (CAJA TIENDA / RODOLFO / JAVIER / CUENTA BOSC), registrado por,
+  foto del comprobante (Cloudinary boparts/gastos), notas. Hoja GASTOS se crea sola.
+- Inventario NO es categoria de gasto: entra por Compras. Evita contar el costo dos veces en el estado de resultados.
+- "Pagado por" existe para saber cuanto pusieron los socios de su bolsillo y cuanto salio de caja.
 
 ## compras v1.1 — 2026-09-10
 - Marca de producto nuevo: lista desplegable con las marcas ya existentes en LISTA DE PRODUCTOS (permite escribir una nueva).
