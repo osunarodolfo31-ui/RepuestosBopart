@@ -9,7 +9,7 @@ en el comentario del encabezado de cada HTML y en la cabecera de `Code.gs`.
 
 | Archivo                 | Versión | Requiere Apps Script |
 |-------------------------|---------|----------------------|
-| index.html              | v8.1    | v7 o superior        |
+| index.html              | v9      | v7 o superior        |
 | boparts_ventas.html     | v10.9   | **v10.5**            |
 | boparts_cobros.html     | v1.2    | **v9**               |
 | boparts_compras.html    | v1.2    | **v11**              |
@@ -26,6 +26,14 @@ Para volver atrás:
 - Apps Script: Implementar → Administrar implementaciones → lápiz → elegir la versión anterior → Implementar.
 
 ---
+
+## index v9 — 2026-09-11 · Velocidad
+**index.html v9**
+- Abre al instante con la ultima lista guardada en el dispositivo (localStorage, persiste entre sesiones) y pide la
+  nueva por detras; si cambio, se refresca sola. Sin red, sigue mostrando la ultima lista.
+- Productos y equivalencias se piden en paralelo (antes uno detras de otro).
+- El logo era una imagen incrustada de 130 KB dentro del HTML: ahora usa icon-192.png. HTML de 175 KB a 32 KB.
+- Quitada sintaxis `?.` (Chrome 80+): en navegadores viejos (la PC del local) el archivo entero fallaba y no cargaba nada.
 
 ## v11.2 — 2026-09-11 · Menu completo, cuenta de socios
 **Code.gs v11.2**, **boparts_gastos.html v1.1**, **index.html v8.1**, **boparts_fotos.html v7.1**, **boparts_demanda.html v8.2**
