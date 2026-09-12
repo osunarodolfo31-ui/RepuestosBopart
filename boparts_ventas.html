@@ -1,8 +1,8 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_ventas.html
-  VERSION: v10.9 (2026-09-10) | requiere Apps Script v10.5
-  v10.9: enlace a Gastos en el nav
+  VERSION: v10.10 (2026-09-11) | requiere Apps Script v10.5
+  v10.10: logo sin fondo en el encabezado
   v10.8: lee precio y tasa con coma o punto decimal
   v10.7: enlace a Compras en el nav
   v10.6: al generar la nota se usa el cliente que esta en pantalla aunque la variable interna se haya perdido
@@ -40,7 +40,7 @@
 }
 html,body{min-height:100%;background:var(--bg);font-family:'Inter',sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased}
 header{background:var(--bg2);border-bottom:2px solid var(--brand);padding:12px 16px;display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:50}
-.logo{height:38px;border-radius:4px}
+.logo{height:34px;width:auto}
 .hdr h1{font-size:15px;font-weight:700}
 .hdr p{font-size:11px;color:var(--ink-muted)}
 .container{padding:16px;max-width:520px;margin:0 auto;padding-bottom:100px}
@@ -174,7 +174,7 @@ select option{background:#1E1E1E;color:var(--ink)}
 <body>
 
 <header>
-  <img src="icon-192.png" alt="BoParts" class="logo">
+  <img src="logo-header.png" alt="BoParts" class="logo">
   <div class="hdr">
     <h1>Registrar Venta</h1>
     <p id="fechaHdr"></p>
@@ -383,7 +383,7 @@ select option{background:#1E1E1E;color:var(--ink)}
 var CSV_URL     = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRaAnGd-Bfaxo3LjUiGeV8p0F2weaKqHGwJ0hWibSMj02-h7dRAQPDMmGL5B8-XQg66Yjd3zgOAaz8X/pub?gid=2100998338&single=true&output=csv';
 var CLIENTES_URL= 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRaAnGd-Bfaxo3LjUiGeV8p0F2weaKqHGwJ0hWibSMj02-h7dRAQPDMmGL5B8-XQg66Yjd3zgOAaz8X/pub?gid=647304383&single=true&output=csv';
 var SCRIPT_URL  = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
-var APP_VERSION = 'v10.9';
+var APP_VERSION = 'v10.10';
 var TASA        = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
 var TASA_ORIGEN = TASA ? 'dispositivo' : 'ninguna';
 var NOTA_NUM    = parseInt(localStorage.getItem('boparts_nota_num') || '0');

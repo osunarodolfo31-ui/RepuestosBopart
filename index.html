@@ -1,7 +1,8 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — index.html
-  VERSION: v9.1 (2026-09-11)
+  VERSION: v9.2 (2026-09-11)
+  v9.2: logo sin fondo en el encabezado (logo-header.png)
   v9.1: las fotos de Cloudinary se piden en tamano reducido (miniatura en la lista, 900px al ampliar)
   v9: abre al instante con la ultima lista guardada en el dispositivo y actualiza por detras; productos y equivalencias
       se piden en paralelo; logo como archivo (el HTML pasa de 175 KB a ~45 KB); compatible con navegadores viejos (sin '?.')
@@ -43,7 +44,7 @@
   /* HEADER */
   header{position:sticky;top:0;z-index:50;background:var(--bg2);border-bottom:2px solid var(--brand);padding:12px 16px 10px}
   .logo-row{display:flex;align-items:center;gap:10px;margin-bottom:10px}
-  .logo-img{height:42px;width:auto;object-fit:contain;border-radius:4px}
+  .logo-img{height:36px;width:auto;object-fit:contain}
   .header-right{margin-left:auto;display:flex;align-items:center;gap:6px}
   .tasa-badge{font-size:11px;color:var(--brand);background:var(--brand-soft);border:1px solid rgba(245,168,0,0.3);border-radius:20px;padding:4px 10px;cursor:pointer;white-space:nowrap;font-weight:600}
   .tasa-badge:active{opacity:.7}
@@ -181,7 +182,7 @@
 
 <header>
   <div class="logo-row">
-    <img src="icon-192.png" alt="Repuesto BoParts" class="logo-img">
+    <img src="logo-header.png" alt="Repuesto BoParts" class="logo-img">
     <div class="header-right">
       <div class="tasa-badge" id="tasaBadge" onclick="openTasaEditor()">Bs <span id="tasaVal">…</span> ✎</div>
       <button class="refresh-btn" id="refreshBtn" onclick="loadData(true)" title="Actualizar">

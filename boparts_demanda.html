@@ -1,8 +1,8 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_demanda.html
-  VERSION: v8.2 (2026-09-11) | requiere Apps Script v7 o superior
-  v8.2: menu completo (Compras, Gastos, Cobros)
+  VERSION: v8.3 (2026-09-11) | requiere Apps Script v7 o superior
+  v8.3: menu completo (Compras, Gastos, Cobros); logo sin fondo en el encabezado
   v8.1: lee precios de proveedores con coma o punto decimal
   Cambios v8: el POST lee la respuesta del script; exito solo con {ok:true}; si falla, el formulario queda intacto y avisa
   Anterior: v7 = commit 4269b17 en GitHub
@@ -25,7 +25,7 @@
 }
 html,body{min-height:100%;background:var(--bg);font-family:'Inter',sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased}
 header{background:var(--bg2);border-bottom:2px solid var(--brand);padding:12px 16px;display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:50}
-.logo{height:38px;border-radius:4px}
+.logo{height:34px;width:auto}
 .hdr h1{font-size:15px;font-weight:700}
 .hdr p{font-size:11px;color:var(--ink-muted)}
 .container{padding:16px;max-width:520px;margin:0 auto;padding-bottom:100px}
@@ -121,7 +121,7 @@ select option{background:#1E1E1E;color:var(--ink)}
 <body>
 
 <header>
-  <img src="icon-192.png" alt="BoParts" class="logo">
+  <img src="logo-header.png" alt="BoParts" class="logo">
   <div class="hdr">
     <h1>Demanda No Atendida</h1>
     <p id="fechaHdr"></p>

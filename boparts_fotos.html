@@ -1,7 +1,10 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_fotos.html
-  VERSION: v8 (2026-09-11) | requiere Apps Script v11.5
+  VERSION: v8.2 (2026-09-11) | requiere Apps Script v11.5
+  v8.2: logo en el encabezado
+  v8.1: cada casilla tiene boton de camara y de galeria por separado; vista previa desde el archivo local (no del link,
+        que puede tardar en propagar); el nombre en Cloudinary lleva fecha+hora para no chocar con una foto anterior
   v8: galeria ademas de camara; las fotos se comprimen en el telefono antes de subir (max 1400px, ~150-250 KB);
       nombre en Cloudinary por codigo de producto (boparts/CODIGO_1); guardado con respuesta del script;
       el script ubica el producto por codigo (antes por numero de fila); version visible en el encabezado
@@ -60,6 +63,10 @@
   .photo-slot input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer;font-size:0}
   .photo-slot.uploading{border-color:var(--brand)}
   .photo-slot .progress{position:absolute;bottom:0;left:0;height:3px;background:var(--brand);transition:width .3s}
+  .slot-actions{position:absolute;inset:auto 0 0 0;display:flex;border-top:1px solid var(--border)}
+  .slot-actions label{flex:1;text-align:center;font-size:15px;padding:6px 0;cursor:pointer;background:rgba(0,0,0,.35);position:relative}
+  .slot-actions label:first-child{border-right:1px solid var(--border)}
+  .slot-actions input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer;font-size:0}
 
   /* STATUS */
   .slot-status{position:absolute;top:4px;left:4px;font-size:10px;font-weight:700;padding:2px 5px;border-radius:4px}
@@ -102,6 +109,7 @@
 <body>
 
 <header>
+  <img src="logo-header.png" alt="BoParts" style="height:34px;width:auto;margin-right:10px;flex:0 0 auto">
   <div>
     <h1>BoParts · Cargar Fotos</h1>
     <p>Selecciona un producto y sube hasta 3 fotos</p>
@@ -125,21 +133,9 @@
   </div>
 
   <div class="photos-grid" id="photosGrid" style="display:none">
-    <div class="photo-slot" id="slot0">
-      <span class="slot-icon">📷</span>
-      <span class="slot-label">Foto 1</span>
-      <input type="file" accept="image/*" onchange="handleFile(this,0)">
-    </div>
-    <div class="photo-slot" id="slot1">
-      <span class="slot-icon">📷</span>
-      <span class="slot-label">Foto 2</span>
-      <input type="file" accept="image/*" onchange="handleFile(this,1)">
-    </div>
-    <div class="photo-slot" id="slot2">
-      <span class="slot-icon">📷</span>
-      <span class="slot-label">Foto 3</span>
-      <input type="file" accept="image/*" onchange="handleFile(this,2)">
-    </div>
+    <div class="photo-slot" id="slot0"></div>
+    <div class="photo-slot" id="slot1"></div>
+    <div class="photo-slot" id="slot2"></div>
   </div>
 
   <button class="save-btn" id="saveBtn" onclick="saveToSheet()">💾 Guardar en catálogo</button>
@@ -231,6 +227,7 @@ document.addEventListener('click', e => {
 
 function selectProduct(idx) {
   selectedProduct = PRODUCTS[idx];
+  previewUrls.forEach((u, i) => { if (u) URL.revokeObjectURL(u); previewUrls[i] = null; });
   uploadedUrls = [
     selectedProduct.imagen || null,
     selectedProduct.imagen2 || null,
@@ -251,32 +248,41 @@ function selectProduct(idx) {
 function clearSelection() {
   selectedProduct = null;
   uploadedUrls = [null,null,null];
+  previewUrls.forEach((u, i) => { if (u) URL.revokeObjectURL(u); previewUrls[i] = null; });
   document.getElementById('selectedProduct').classList.remove('show');
   document.getElementById('photosGrid').style.display = 'none';
   document.getElementById('saveBtn').classList.remove('show');
-  [0,1,2].forEach(i => {
-    const slot = document.getElementById('slot'+i);
-    slot.innerHTML = `<span class="slot-icon">📷</span><span class="slot-label">Foto ${i+1}</span><input type="file" accept="image/*" onchange="handleFile(this,${i})">`;
-  });
+  [0,1,2].forEach(i => renderSlot(i));
+}
+
+// Botones separados: la camara necesita capture="environment"; sin el, Android abre solo la galeria.
+function botonesSlot(i) {
+  return `<div class="slot-actions">
+    <label title="Camara">📷<input type="file" accept="image/*" capture="environment" onchange="handleFile(this,${i})"></label>
+    <label title="Galeria">🖼️<input type="file" accept="image/*" onchange="handleFile(this,${i})"></label>
+  </div>`;
 }
 
 function renderSlot(i) {
   const slot = document.getElementById('slot'+i);
-  const url = uploadedUrls[i];
+  const url = previewUrls[i] || uploadedUrls[i];
   if (url) {
     slot.innerHTML = `
       <img src="${url}" alt="foto ${i+1}">
       <button class="remove-btn" onclick="removePhoto(${i})">×</button>
       <span class="slot-status ok">✓</span>
-      <input type="file" accept="image/*" onchange="handleFile(this,${i})">
+      ${botonesSlot(i)}
     `;
   } else {
-    slot.innerHTML = `<span class="slot-icon">📷</span><span class="slot-label">Foto ${i+1}</span><input type="file" accept="image/*" onchange="handleFile(this,${i})">`;
+    slot.innerHTML = `<span class="slot-icon">📷</span><span class="slot-label">Foto ${i+1}</span>${botonesSlot(i)}`;
   }
 }
 
+// Vista previa tomada del archivo del telefono: se ve al instante y no depende de que el link ya este publicado
+var previewUrls = [null, null, null];
 function removePhoto(i) {
   uploadedUrls[i] = null;
+  if (previewUrls[i]) { URL.revokeObjectURL(previewUrls[i]); previewUrls[i] = null; }
   renderSlot(i);
 }
 
@@ -286,8 +292,10 @@ async function handleFile(input, slotIdx) {
   if (!file) return;
   const slot = document.getElementById('slot'+slotIdx);
 
-  // Show progress
-  slot.innerHTML = `<span class="slot-icon">⏳</span><span class="slot-label">Subiendo…</span><div class="progress" id="prog${slotIdx}" style="width:0%"></div>`;
+  // Vista previa inmediata del archivo elegido
+  if (previewUrls[slotIdx]) URL.revokeObjectURL(previewUrls[slotIdx]);
+  previewUrls[slotIdx] = URL.createObjectURL(file);
+  slot.innerHTML = `<img src="${previewUrls[slotIdx]}" alt="subiendo"><span class="slot-label" style="position:absolute;bottom:6px;left:0;right:0;background:rgba(0,0,0,.6);padding:3px">Subiendo…</span><div class="progress" id="prog${slotIdx}" style="width:0%"></div>`;
 
   let blob = file;
   try { blob = await comprimir(file, 1400, 0.82); } catch(e) {}   // si falla, se sube el original
@@ -299,7 +307,10 @@ async function handleFile(input, slotIdx) {
   // Nombre legible por codigo (requiere en el preset de Cloudinary: "Use filename or externally defined public ID")
   const slug = (selectedProduct && selectedProduct.codigo ? selectedProduct.codigo : 'sin-codigo')
     .toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace(/^-|-$/g, '');
-  formData.append('public_id', `${slug}_${slotIdx + 1}`);
+  // Fecha+hora al final: el preset no permite sobrescribir (es unsigned), asi que un nombre repetido
+  // devolveria la foto vieja en vez de la nueva. Con la marca de tiempo cada subida es un archivo propio.
+  const d = new Date(), st = String(d.getMonth()+1).padStart(2,'0') + String(d.getDate()).padStart(2,'0') + String(d.getHours()).padStart(2,'0') + String(d.getMinutes()).padStart(2,'0');
+  formData.append('public_id', `${slug}_${slotIdx + 1}_${st}`);
 
   try {
     const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD}/image/upload`, {
@@ -309,13 +320,14 @@ async function handleFile(input, slotIdx) {
     const data = await res.json();
     if (data.secure_url) {
       uploadedUrls[slotIdx] = data.secure_url;
-      renderSlot(slotIdx);
+      renderSlot(slotIdx);   // sigue mostrando la vista previa local; el link queda guardado
       showToast(`Foto subida ✓ (${Math.round(blob.size / 1024)} KB)`, 'success');
     } else {
       throw new Error(data.error?.message || 'Error');
     }
   } catch(e) {
-    slot.innerHTML = `<span class="slot-icon">⚠️</span><span class="slot-label" style="color:var(--red)">Error</span><input type="file" accept="image/*" onchange="handleFile(this,${slotIdx})">`;
+    if (previewUrls[slotIdx]) { URL.revokeObjectURL(previewUrls[slotIdx]); previewUrls[slotIdx] = null; }
+    slot.innerHTML = `<span class="slot-icon">⚠️</span><span class="slot-label" style="color:var(--red)">Error</span>${botonesSlot(slotIdx)}`;
     showToast('Error subiendo foto: ' + e.message, 'error');
   }
 }
@@ -400,6 +412,7 @@ function showToast(msg, type='') {
 const APP_VERSION = 'v8';
 const hdrP = document.querySelector('.header-text p, header p');
 if (hdrP) hdrP.textContent = APP_VERSION + ' · ' + hdrP.textContent;
+[0,1,2].forEach(i => renderSlot(i));
 loadProducts();
 </script>
 

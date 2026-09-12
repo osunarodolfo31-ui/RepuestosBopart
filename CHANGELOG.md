@@ -9,13 +9,13 @@ en el comentario del encabezado de cada HTML y en la cabecera de `Code.gs`.
 
 | Archivo                 | Versión | Requiere Apps Script |
 |-------------------------|---------|----------------------|
-| index.html              | v9.1    | v7 o superior        |
-| boparts_ventas.html     | v10.9   | **v10.5**            |
-| boparts_cobros.html     | v1.2    | **v9**               |
-| boparts_compras.html    | v1.2    | **v11**              |
-| boparts_gastos.html     | v1.1    | **v11.2**            |
-| boparts_fotos.html      | v8      | **v11.5**            |
-| boparts_demanda.html    | v8.2    | v7 o superior        |
+| index.html              | v9.2    | v7 o superior        |
+| boparts_ventas.html     | v10.10  | **v10.5**            |
+| boparts_cobros.html     | v2.1    | **v11.3**            |
+| boparts_compras.html    | v1.3    | **v11**              |
+| boparts_gastos.html     | v1.2    | **v11.2**            |
+| boparts_fotos.html      | v8.2    | **v11.5**            |
+| boparts_demanda.html    | v8.3    | v7 o superior        |
 | boparts_reportes.html   | v8      | ninguno (solo lee CSV) |
 | Code.gs (Apps Script)   | v11.2   | —                    |
 

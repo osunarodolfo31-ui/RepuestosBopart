@@ -2,7 +2,7 @@
 <!--
   Repuesto BoParts — boparts_cobros.html
   VERSION: v2 (2026-09-11) | requiere Apps Script v11.3
-  v2: cada nota muestra los productos que se debe; fechas cortas dd/mm/aaaa; version visible en el encabezado
+  v2.1: cada nota muestra los productos que se debe; fechas cortas dd/mm/aaaa; logo sin fondo en el encabezado
   v1.1: enlace a Compras en el nav
   Cuentas por cobrar: saldo por cliente en USD, notas pendientes (abonos a las mas viejas primero),
   registro de abonos con metodo/banco/comision, estado de cuenta por WhatsApp.
@@ -24,7 +24,7 @@
 }
 html,body{min-height:100%;background:var(--bg);font-family:'Inter',sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased}
 header{background:var(--bg2);border-bottom:2px solid var(--brand);padding:12px 16px;display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:50}
-.logo{height:38px;border-radius:4px}
+.logo{height:34px;width:auto}
 .hdr h1{font-size:15px;font-weight:700}
 .hdr p{font-size:11px;color:var(--ink-muted)}
 .container{padding:16px;max-width:520px;margin:0 auto;padding-bottom:100px}
@@ -169,7 +169,7 @@ select option{background:#1E1E1E;color:var(--ink)}
 <body>
 
 <header>
-  <img src="icon-192.png" alt="BoParts" class="logo">
+  <img src="logo-header.png" alt="BoParts" class="logo">
   <div class="hdr">
     <h1>Cobros</h1>
     <p id="fechaHdr"></p>
@@ -301,7 +301,7 @@ var CLIENTES = [];   // estado de cuenta por cliente (viene de Apps Script)
 var sel = null;
 var ultimo = null;   // ultimo abono registrado (para el mensaje de WhatsApp)
 
-var APP_VERSION = 'v2';
+var APP_VERSION = 'v2.1';
 document.getElementById('fechaHdr').textContent = APP_VERSION + ' · ' + new Date().toLocaleDateString('es-VE', {weekday:'long', day:'numeric', month:'long'});
 
 // Metodos de pago (sin CREDITO)
