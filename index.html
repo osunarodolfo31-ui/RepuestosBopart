@@ -1,8 +1,9 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — index.html
-  VERSION: v9.2 (2026-09-11)
-  v9.2: logo sin fondo en el encabezado (logo-header.png)
+  VERSION: v9.3 (2026-09-11)
+  v9.3: pantalla de bienvenida con el logo mientras carga; la lista aparece apenas llegan los productos
+        (antes esperaba tambien a la hoja de equivalencias y se quedaba pensando); cada hoja tiene 12 s de limite
   v9.1: las fotos de Cloudinary se piden en tamano reducido (miniatura en la lista, 900px al ampliar)
   v9: abre al instante con la ultima lista guardada en el dispositivo y actualiza por detras; productos y equivalencias
       se piden en paralelo; logo como archivo (el HTML pasa de 175 KB a ~45 KB); compatible con navegadores viejos (sin '?.')
@@ -22,6 +23,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <title>Repuesto BoParts · Precios</title>
 <style>
+  .splash{position:fixed;inset:0;z-index:9999;background:#111111;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;transition:opacity .45s ease}
+  .splash img{width:min(58vw,240px);height:auto;animation:splashIn .7s cubic-bezier(.2,.8,.3,1)}
+  .splash-bar{width:120px;height:3px;border-radius:2px;background:rgba(255,255,255,.12);overflow:hidden}
+  .splash-bar span{display:block;height:100%;width:40%;border-radius:2px;background:#F5A800;animation:splashBar 1.1s ease-in-out infinite}
+  .splash.oculto{opacity:0;pointer-events:none}
+  @keyframes splashIn{from{opacity:0;transform:scale(.86)}to{opacity:1;transform:scale(1)}}
+  @keyframes splashBar{0%{transform:translateX(-110%)}100%{transform:translateX(320%)}}
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{
@@ -180,6 +188,12 @@
 </head>
 <body>
 
+<div class="splash" id="splash">
+  <img src="icon-512.png" alt="Repuesto BoParts">
+  <div class="splash-bar"><span></span></div>
+</div>
+
+
 <header>
   <div class="logo-row">
     <img src="logo-header.png" alt="Repuesto BoParts" class="logo-img">
@@ -257,6 +271,23 @@ function parseCSV(text) {
 
 // v9: cache persistente. Se muestra lo guardado al instante y se actualiza por detras.
 var CACHE_KEY = 'boparts_csv_v9', EQUIV_KEY = 'boparts_equiv_v9';
+
+// Pantalla de bienvenida: se queda al menos SPLASH_MIN ms y se va cuando la lista ya esta lista.
+// Si quieres que dure mas, sube este numero (3000 = 3 segundos).
+var SPLASH_MIN = 1600;
+var splashDesde = Date.now(), splashCerrado = false;
+function cerrarSplash() {
+  if (splashCerrado) return;
+  splashCerrado = true;
+  var falta = Math.max(0, SPLASH_MIN - (Date.now() - splashDesde));
+  setTimeout(function() {
+    var el = document.getElementById('splash');
+    if (!el) return;
+    el.classList.add('oculto');
+    setTimeout(function() { el.style.display = 'none'; }, 500);
+  }, falta);
+}
+setTimeout(cerrarSplash, 6000);   // pase lo que pase, a los 6 s se quita
 function leerCache(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
 function guardarCache(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
 
@@ -268,35 +299,56 @@ function loadData(force) {
   var mostrado = false;
   if (cText) { aplicarDatos(cText, cEquiv); mostrado = true; } else { showLoading(); }
 
-  // Pedir las dos hojas a la vez
-  var pProd = fetch(CSV_URL + '&t=' + Date.now()).then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); });
-  var pEq = fetch(EQUIV_URL + '&t=' + Date.now()).then(function(r) { return r.ok ? r.text() : ''; }).catch(function() { return ''; });
-  Promise.all([pProd, pEq]).then(function(res) {
-    var text = res[0], equivText = res[1];
-    if (!isValidCSV(text)) throw new Error('CSV invalido');
-    var cambio = (text !== cText) || (equivText && equivText !== cEquiv);
-    guardarCache(CACHE_KEY, text);
-    if (equivText) guardarCache(EQUIV_KEY, equivText);
-    if (!mostrado || cambio) aplicarDatos(text, equivText || cEquiv);
-    icon.classList.remove('spinning');
-  }).catch(function(e) {
-    icon.classList.remove('spinning');
-    if (!mostrado) showError(e.message);   // sin cache y sin red: si hay cache, se queda con lo mostrado
+  // Las dos hojas se piden a la vez, pero la lista se muestra apenas llegan los PRODUCTOS:
+  // las equivalencias solo sirven para buscar por codigo de otra marca y pueden llegar despues.
+  conTiempo(fetch(CSV_URL + '&t=' + Date.now()), 12000)
+    .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+    .then(function(text) {
+      if (!isValidCSV(text)) throw new Error('respuesta invalida de la hoja');
+      guardarCache(CACHE_KEY, text);
+      if (!mostrado || text !== cText) aplicarDatos(text, null);
+      icon.classList.remove('spinning');
+      cerrarSplash();
+    })
+    .catch(function(e) {
+      icon.classList.remove('spinning');
+      cerrarSplash();
+      if (!mostrado) showError(e.message);   // con cache: se queda con la ultima lista guardada
+    });
+
+  conTiempo(fetch(EQUIV_URL + '&t=' + Date.now()), 12000)
+    .then(function(r) { return r.ok ? r.text() : ''; })
+    .then(function(equivText) {
+      if (!equivText || equivText === cEquiv) return;
+      guardarCache(EQUIV_KEY, equivText);
+      cargarEquivalencias(equivText);
+    })
+    .catch(function() {});
+}
+
+// Corta la espera si Google no responde: sin esto la pantalla se queda pensando sin fin
+function conTiempo(promesa, ms) {
+  return new Promise(function(res, rej) {
+    var t = setTimeout(function() { rej(new Error('la hoja tardo demasiado en responder')); }, ms);
+    promesa.then(function(v) { clearTimeout(t); res(v); }, function(e) { clearTimeout(t); rej(e); });
   });
 }
 function isValidCSV(t) { return typeof t === 'string' && t.length > 50 && t.indexOf('<html') < 0 && t.indexOf('<!DOCTYPE') < 0; }
 
-function aplicarDatos(text, equivText) {
-  if (equivText) {
-    var erows = parseCSV(equivText);
-    EQUIVALENCIAS = [];
-    for (var i = 1; i < erows.length; i++) {
-      var r = erows[i];
-      if (r[0] && r[1]) {
-        EQUIVALENCIAS.push({ codigoExterno: r[0].trim().toUpperCase(), miCodigo: r[1].trim().toUpperCase(), aplicacion: (r[3] || '').trim() });
-      }
+function cargarEquivalencias(equivText) {
+  if (!equivText) return;
+  var erows = parseCSV(equivText);
+  EQUIVALENCIAS = [];
+  for (var i = 1; i < erows.length; i++) {
+    var r = erows[i];
+    if (r[0] && r[1]) {
+      EQUIVALENCIAS.push({ codigoExterno: r[0].trim().toUpperCase(), miCodigo: r[1].trim().toUpperCase(), aplicacion: (r[3] || '').trim() });
     }
   }
+}
+
+function aplicarDatos(text, equivText) {
+  if (equivText) cargarEquivalencias(equivText);
   var rows = parseCSV(text);
   var tasaFromSheet = parseNum((rows[0] || [])[4]);
   if (tasaFromSheet && !localStorage.getItem('motoauto_tasa')) currentTasa = tasaFromSheet;
