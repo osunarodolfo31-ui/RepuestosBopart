@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_ventas.html
-  VERSION: v10.10 (2026-09-11) | requiere Apps Script v10.5
+  VERSION: v10.11 (2026-09-11) — nav con Gerencia | requiere Apps Script v10.5
   v10.10: logo sin fondo en el encabezado
   v10.8: lee precio y tasa con coma o punto decimal
   v10.7: enlace a Compras en el nav
@@ -373,6 +373,11 @@ select option{background:#1E1E1E;color:var(--ink)}
       <span class="nlbl">Cobros</span>
       <span class="ndesc">Cuentas por cobrar</span>
     </a>
+    <a class="ncard" href="boparts_gerencia.html">
+      <span class="nicon">📊</span>
+      <span class="nlbl">Gerencia</span>
+      <span class="ndesc">Solo socios</span>
+    </a>
   </div>
 </div>
 
@@ -383,7 +388,7 @@ select option{background:#1E1E1E;color:var(--ink)}
 var CSV_URL     = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRaAnGd-Bfaxo3LjUiGeV8p0F2weaKqHGwJ0hWibSMj02-h7dRAQPDMmGL5B8-XQg66Yjd3zgOAaz8X/pub?gid=2100998338&single=true&output=csv';
 var CLIENTES_URL= 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRaAnGd-Bfaxo3LjUiGeV8p0F2weaKqHGwJ0hWibSMj02-h7dRAQPDMmGL5B8-XQg66Yjd3zgOAaz8X/pub?gid=647304383&single=true&output=csv';
 var SCRIPT_URL  = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
-var APP_VERSION = 'v10.10';
+var APP_VERSION = 'v10.11';
 var TASA        = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
 var TASA_ORIGEN = TASA ? 'dispositivo' : 'ninguna';
 var NOTA_NUM    = parseInt(localStorage.getItem('boparts_nota_num') || '0');

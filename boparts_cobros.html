@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_cobros.html
-  VERSION: v2 (2026-09-11) | requiere Apps Script v11.3
+  VERSION: v2.2 (2026-09-11) — nav con Gerencia | requiere Apps Script v11.3
   v2.1: cada nota muestra los productos que se debe; fechas cortas dd/mm/aaaa; logo sin fondo en el encabezado
   v1.1: enlace a Compras en el nav
   Cuentas por cobrar: saldo por cliente en USD, notas pendientes (abonos a las mas viejas primero),
@@ -279,6 +279,11 @@ select option{background:#1E1E1E;color:var(--ink)}
       <span class="nlbl">Cobros</span>
       <span class="ndesc">Cuentas por cobrar</span>
     </a>
+    <a class="ncard" href="boparts_gerencia.html">
+      <span class="nicon">📊</span>
+      <span class="nlbl">Gerencia</span>
+      <span class="ndesc">Solo socios</span>
+    </a>
   </div>
 </div>
 
@@ -301,7 +306,7 @@ var CLIENTES = [];   // estado de cuenta por cliente (viene de Apps Script)
 var sel = null;
 var ultimo = null;   // ultimo abono registrado (para el mensaje de WhatsApp)
 
-var APP_VERSION = 'v2.1';
+var APP_VERSION = 'v2.2';
 document.getElementById('fechaHdr').textContent = APP_VERSION + ' · ' + new Date().toLocaleDateString('es-VE', {weekday:'long', day:'numeric', month:'long'});
 
 // Metodos de pago (sin CREDITO)
