@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<!--
+  Repuesto BoParts — boparts_gerencia.html
+  VERSION: v1.1 (2026-09-11) | requiere Apps Script v12
+  v1.1: PIN de socios al entrar (se recuerda 12 h en el dispositivo). Es una puerta con pestillo, no una cerradura:
+        el archivo sigue siendo publico. La proteccion real llega con el token en Apps Script (bloque D).
+  Reporte de ventas para socios: vendido, costo, utilidad y margen desde VENTAS_DETALLE; por dia, producto,
+  categoria, vendedor, canal y metodo de pago; vendido vs cobrado (credito) y gastos del periodo.
+  Lee via Apps Script (no usa CSV publicados).
+-->
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>BoParts · Gerencia</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --brand:#F5A800;--brand-soft:rgba(245,168,0,.15);
+  --bg:#111;--bg2:#1A1A1A;--card:#1E1E1E;--card2:#252525;--border:#2E2E2E;
+  --ink:#F0F0F0;--ink-soft:#AAA;--ink-muted:#666;
+  --green:#22C55E;--red:#EF4444;
+  --radius:14px;--radius-sm:8px;
+}
+html,body{min-height:100%;background:var(--bg);font-family:'Inter',sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased}
+header{background:var(--bg2);border-bottom:2px solid var(--brand);padding:12px 16px;display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:50}
+.logo{height:34px;width:auto}
+.hdr h1{font-size:15px;font-weight:700}
+.hdr p{font-size:11px;color:var(--ink-muted)}
+.container{padding:16px;max-width:520px;margin:0 auto;padding-bottom:100px}
+.section{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:12px}
+.stitle{font-size:12px;font-weight:700;color:var(--brand);text-transform:uppercase;letter-spacing:.5px;margin-bottom:12px}
+label{font-size:12px;color:var(--ink-soft);font-weight:600;display:block;margin-bottom:4px}
+input,select,textarea{width:100%;background:var(--card2);border:1.5px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;font-size:14px;font-family:inherit;color:var(--ink);outline:none;transition:border-color .15s}
+input:focus,select:focus,textarea:focus{border-color:var(--brand)}
+input::placeholder,textarea::placeholder{color:var(--ink-muted)}
+select option{background:#1E1E1E;color:var(--ink)}
+.field{margin-bottom:12px}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+
+/* DROPDOWN */
+.wrap{position:relative}
+.drop{background:var(--card2);border:1px solid var(--border);border-radius:var(--radius-sm);max-height:220px;overflow-y:auto;position:absolute;width:100%;z-index:80;display:none;margin-top:4px;box-shadow:0 8px 24px rgba(0,0,0,.4)}
+.drop.open{display:block}
+.ditem{padding:10px 12px;font-size:13px;cursor:pointer;border-bottom:1px solid var(--border);color:var(--ink)}
+.ditem:last-child{border-bottom:none}
+.ditem:active,.ditem:hover{background:var(--brand-soft)}
+.ditem-meta{font-size:10px;color:var(--ink-muted);margin-top:2px}
+.ditem-price{font-size:11px;color:var(--brand);font-weight:600;float:right}
+
+/* CART */
+.cart-empty{text-align:center;padding:20px;color:var(--ink-muted);font-size:13px}
+.citem{background:var(--card2);border-radius:var(--radius-sm);padding:12px;margin-bottom:8px;border:1px solid var(--border)}
+.ctop{display:flex;align-items:flex-start;gap:8px}
+.cname{font-size:13px;font-weight:600;flex:1;line-height:1.3}
+.cdel{background:none;border:none;color:var(--red);cursor:pointer;font-size:20px;line-height:1;padding:0;flex-shrink:0}
+.cbot{display:grid;grid-template-columns:90px 1fr 1fr;gap:8px;margin-top:8px;align-items:center}
+.qwrap{display:flex;align-items:center;gap:6px}
+.qbtn{background:var(--card);border:1px solid var(--border);border-radius:6px;width:28px;height:28px;color:var(--ink);font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.qin{width:36px;text-align:center;padding:4px;font-size:14px;font-weight:700;background:var(--card);border:1px solid var(--border);border-radius:6px}
+.csub{text-align:right;font-size:14px;font-weight:700;color:var(--brand)}
+
+/* TOTALS */
+.tbar{background:var(--card2);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;margin-bottom:12px;display:none}
+.trow{display:flex;justify-content:space-between;margin-bottom:4px}
+.trow:last-child{margin-bottom:0}
+.tlbl{font-size:12px;color:var(--ink-soft)}
+.tval{font-size:14px;font-weight:700}
+.tval.big{font-size:18px;color:var(--brand)}
+.tval.red{color:var(--red)}
+
+/* PAYMENT */
+.pblock{background:var(--card2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;margin-bottom:8px;position:relative}
+.pdel{position:absolute;top:10px;right:10px;background:none;border:none;color:var(--red);cursor:pointer;font-size:16px}
+.addpbtn{width:100%;padding:10px;background:none;border:1.5px dashed var(--border);border-radius:var(--radius-sm);color:var(--ink-muted);font-size:13px;cursor:pointer;font-family:inherit;transition:border-color .15s}
+.addpbtn:hover{border-color:var(--brand);color:var(--brand)}
+.cominfo{font-size:11px;color:var(--ink-muted);margin-top:6px;padding:6px 8px;background:rgba(245,168,0,.08);border-radius:6px;border-left:2px solid var(--brand)}
+
+/* ALIADO */
+.togwrap{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border);margin-bottom:10px}
+.toglbl{font-size:13px;font-weight:600}
+.togsub{font-size:11px;color:var(--ink-muted);margin-top:2px}
+.tog{width:44px;height:24px;background:var(--border);border-radius:12px;cursor:pointer;position:relative;transition:background .2s;border:none;flex-shrink:0}
+.tog.on{background:var(--brand)}
+.tog::after{content:'';position:absolute;width:18px;height:18px;background:#fff;border-radius:50%;top:3px;left:3px;transition:left .2s}
+.tog.on::after{left:23px}
+.asel{display:none;margin-top:10px}
+.asel.open{display:block}
+.acard{background:var(--card2);border:1.5px solid var(--border);border-radius:var(--radius-sm);padding:12px;cursor:pointer;margin-bottom:8px;transition:border-color .15s}
+.acard.sel{border-color:var(--brand);background:var(--brand-soft)}
+.aname{font-size:13px;font-weight:700}
+.aneg{font-size:11px;color:var(--ink-muted)}
+.acom{font-size:11px;color:var(--brand);font-weight:600;float:right}
+.cprev{background:rgba(245,168,0,.1);border:1px solid rgba(245,168,0,.3);border-radius:var(--radius-sm);padding:10px 12px;margin-top:10px;font-size:12px;color:var(--ink-soft);display:none}
+.cprev.open{display:block}
+
+/* SUBMIT */
+.subbtn{width:100%;padding:16px;background:var(--brand);color:#111;border:none;border-radius:var(--radius);font-size:16px;font-weight:700;cursor:pointer;font-family:inherit;position:fixed;bottom:0;left:0;right:0;max-width:520px;margin:0 auto}
+.subbtn:disabled{opacity:.5}
+.botbar{position:fixed;bottom:0;left:0;right:0;display:flex;gap:8px;padding:10px 12px;background:var(--bg);border-top:1px solid var(--border);z-index:100;max-width:520px;margin:0 auto}
+.botbar .subbtn{position:static;flex:1;padding:14px}
+.botbar .cotbtn{flex:0 0 36%;background:var(--card2);color:var(--brand);border:1.5px solid var(--brand)}
+.nbtn-p:disabled{opacity:.5}
+
+/* MODALS */
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:200;display:none;align-items:flex-end}
+.overlay.open{display:flex}
+.sheet{background:var(--bg2);border-radius:20px 20px 0 0;border-top:2px solid var(--brand);padding:20px 16px 40px;width:100%;max-height:90vh;overflow-y:auto}
+.sheet-title{font-size:16px;font-weight:700;margin-bottom:4px}
+.sheet-sub{font-size:12px;color:var(--ink-muted);margin-bottom:16px}
+
+/* SUCCESS */
+.success{display:none;position:fixed;inset:0;background:var(--bg);z-index:300;flex-direction:column;align-items:center;justify-content:center;padding:24px;text-align:center}
+.success.open{display:flex}
+.sicon{font-size:64px;margin-bottom:16px}
+.success h2{font-size:22px;font-weight:700;margin-bottom:8px}
+.success p{font-size:14px;color:var(--ink-muted);margin-bottom:24px;line-height:1.6;white-space:pre-line}
+.sbtn{width:100%;padding:14px;border:none;border-radius:var(--radius);font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;margin-bottom:10px}
+.sbtn-y{background:var(--brand);color:#111}
+.sbtn-n{background:var(--card2);color:var(--ink-soft);border:1px solid var(--border)}
+
+/* NOTA BUTTONS */
+.nbtn{width:100%;padding:13px;border-radius:var(--radius);font-size:14px;font-weight:700;border:none;cursor:pointer;font-family:inherit;margin-bottom:8px}
+.nbtn-p{background:var(--brand);color:#111}
+.nbtn-w{background:#25D366;color:#fff;display:none}
+.nbtn-s{background:var(--card2);color:var(--ink-soft);border:1px solid var(--border)}
+
+/* CLIENTE CARD */
+.cli-result{background:var(--brand-soft);border:1.5px solid var(--brand);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between}
+.cli-info{font-size:13px;font-weight:600}
+.cli-sub{font-size:11px;color:var(--ink-muted)}
+.cli-clear{background:none;border:none;color:var(--ink-muted);cursor:pointer;font-size:18px}
+.cli-new-btn{width:100%;padding:10px;background:none;border:1.5px dashed var(--brand);border-radius:var(--radius-sm);color:var(--brand);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;margin-top:8px}
+
+/* TOAST */
+.toast{position:fixed;bottom:90px;left:50%;transform:translateX(-50%) translateY(40px);opacity:0;visibility:hidden;background:#222;color:#fff;padding:12px 20px;border-radius:18px;font-size:13px;font-weight:600;transition:transform .3s,opacity .3s,visibility .3s;z-index:999;max-width:92vw;text-align:center;line-height:1.4;cursor:pointer;border:1px solid var(--border);pointer-events:none}
+.toast.show{transform:translateX(-50%) translateY(0);opacity:1;visibility:visible}
+.toast.ok{border-color:var(--green);color:var(--green)}
+.toast.err{border-color:var(--red);color:var(--red);white-space:pre-line}
+
+/* NAV */
+.fab{position:fixed;bottom:70px;right:16px;z-index:90;width:48px;height:48px;background:var(--brand);border:none;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 16px rgba(245,168,0,.4)}
+.nav-ov{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:91;opacity:0;pointer-events:none;transition:opacity .2s}
+.nav-ov.open{opacity:1;pointer-events:auto}
+.nav-pan{position:fixed;bottom:0;left:0;right:0;z-index:92;background:var(--bg2);border-radius:20px 20px 0 0;border-top:2px solid var(--brand);padding:20px 16px 40px;transform:translateY(100%);transition:transform .3s}
+.nav-pan.open{transform:translateY(0)}
+.nav-t{font-size:12px;font-weight:700;color:var(--brand);text-transform:uppercase;letter-spacing:.5px;margin-bottom:16px;text-align:center}
+.nav-g{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.ncard{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px 12px;display:flex;flex-direction:column;align-items:center;gap:8px;text-decoration:none;-webkit-tap-highlight-color:transparent}
+.ncard.cur{border-color:var(--brand);background:var(--brand-soft)}
+.nicon{font-size:28px}
+.nlbl{font-size:12px;font-weight:700;color:var(--ink);text-align:center}
+.ndesc{font-size:10px;color:var(--ink-muted);text-align:center}
+
+/* GERENCIA */
+.tabs{display:flex;gap:6px;overflow-x:auto;padding:2px 0 8px;-webkit-overflow-scrolling:touch}
+.tab{flex:0 0 auto;padding:8px 14px;border-radius:20px;border:1.5px solid var(--border);background:var(--card2);color:var(--ink-soft);font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap}
+.tab.on{background:var(--brand);color:#111;border-color:var(--brand)}
+.kpis{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.kpi{background:var(--card2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px}
+.kpi .k{font-size:11px;color:var(--ink-muted);text-transform:uppercase;letter-spacing:.4px}
+.kpi .v{font-size:20px;font-weight:700;margin-top:2px}
+.kpi .s{font-size:11px;color:var(--ink-muted);margin-top:2px}
+.kpi.big{grid-column:1/-1}
+.kpi.big .v{font-size:28px;color:var(--brand)}
+.pos{color:var(--green)} .neg{color:var(--red)}
+.bars{margin-top:4px}
+.bar{display:flex;align-items:center;gap:8px;padding:5px 0;font-size:12px}
+.bar .bl{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar .bt{width:74px;text-align:right;font-weight:700}
+.bar .bm{width:52px;text-align:right;color:var(--ink-muted);font-size:11px}
+.bar .bg{height:4px;border-radius:2px;background:var(--brand);opacity:.75}
+.bwrap{background:rgba(255,255,255,.06);border-radius:2px;height:4px;margin-top:3px}
+.dias{display:flex;align-items:flex-end;gap:3px;height:90px;margin:10px 0 4px}
+.dia{flex:1;background:var(--brand);border-radius:2px 2px 0 0;min-height:2px;opacity:.85}
+.dia.hoy{background:#fff}
+.diasx{display:flex;gap:3px;font-size:9px;color:var(--ink-muted)}
+.diasx span{flex:1;text-align:center;overflow:hidden}
+.tbl{width:100%;font-size:12px;border-collapse:collapse}
+.tbl th{text-align:left;color:var(--ink-muted);font-weight:600;font-size:10px;text-transform:uppercase;padding:6px 4px;border-bottom:1px solid var(--border)}
+.tbl td{padding:7px 4px;border-bottom:1px solid var(--border)}
+.tbl td.n{text-align:right;font-variant-numeric:tabular-nums}
+.rango{display:flex;gap:8px;align-items:center;margin-bottom:8px}
+.rango input{padding:8px}
+.aviso{font-size:11px;color:var(--ink-muted);line-height:1.5;margin-top:8px}
+.pinov{position:fixed;inset:0;z-index:9998;background:#111;display:flex;align-items:center;justify-content:center;padding:24px}
+.pinov.off{display:none}
+.pinbox{width:100%;max-width:320px;text-align:center}
+.pintit{font-size:20px;font-weight:700;margin-top:8px}
+.pinsub{font-size:12px;color:var(--ink-muted);margin:6px 0 18px;line-height:1.5}
+.pinbox input{width:100%;text-align:center;font-size:22px;letter-spacing:8px;padding:14px;margin-bottom:10px}
+.pinerr{color:var(--red);font-size:12px;min-height:18px;margin-bottom:6px}
+.pinsalir{display:block;margin-top:14px;color:var(--ink-muted);font-size:12px;text-decoration:none}
+</style>
+</head>
+<body>
+
+<header>
+  <img src="logo-header.png" alt="BoParts" class="logo">
+  <div class="hdr">
+    <h1>Gerencia</h1>
+    <p id="fechaHdr"></p>
+  </div>
+  <button onclick="salirGerencia()" title="Salir" style="background:none;border:none;color:var(--ink-muted);font-size:18px;cursor:pointer;padding:8px">⎋</button>
+</header>
+
+<div class="container">
+
+  <div class="section">
+    <div class="tabs" id="tabs">
+      <button class="tab on" data-p="hoy">Hoy</button>
+      <button class="tab" data-p="ayer">Ayer</button>
+      <button class="tab" data-p="semana">Semana</button>
+      <button class="tab" data-p="mes">Mes</button>
+      <button class="tab" data-p="mesant">Mes anterior</button>
+      <button class="tab" data-p="todo">Todo</button>
+      <button class="tab" data-p="rango">Rango...</button>
+    </div>
+    <div class="rango" id="rangoBox" style="display:none">
+      <input type="date" id="d1"><span style="color:var(--ink-muted)">a</span><input type="date" id="d2">
+      <button class="tab on" onclick="cargar()">Ver</button>
+    </div>
+    <div id="periodoLbl" style="font-size:12px;color:var(--ink-muted)"></div>
+  </div>
+
+  <div id="cuerpo"><div class="cart-empty">Cargando...</div></div>
+
+</div>
+
+<div class="pinov" id="pinov">
+  <div class="pinbox">
+    <img src="logo-header.png" alt="BoParts" style="height:52px;width:auto;margin-bottom:6px">
+    <div class="pintit">Solo socios</div>
+    <div class="pinsub">Esta seccion muestra costos, margenes y resultados.</div>
+    <input type="password" id="pinInput" inputmode="numeric" pattern="[0-9]*" maxlength="8" placeholder="PIN" autocomplete="off">
+    <div class="pinerr" id="pinErr"></div>
+    <button class="nbtn nbtn-p" onclick="validarPin()">Entrar</button>
+    <a class="pinsalir" href="index.html">Volver a la lista de precios</a>
+  </div>
+</div>
+
+<div class="toast" id="toast" onclick="this.className='toast'"></div>
+
+<!-- FAB NAV -->
+<button class="fab" onclick="toggleNav()">
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#111" stroke-width="2.5" stroke-linecap="round">
+    <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
+  </svg>
+</button>
+<div class="nav-ov" id="navOv" onclick="closeNav()"></div>
+<div class="nav-pan" id="navPan">
+  <div class="nav-t">Repuesto BoParts</div>
+  <div class="nav-g">
+    <a class="ncard" href="index.html">
+      <span class="nicon">📋</span>
+      <span class="nlbl">Lista de Precios</span>
+      <span class="ndesc">Consulta y busqueda</span>
+    </a>
+    <a class="ncard" href="boparts_ventas.html">
+      <span class="nicon">💰</span>
+      <span class="nlbl">Registrar Venta</span>
+      <span class="ndesc">Nueva venta</span>
+    </a>
+    <a class="ncard" href="boparts_fotos.html">
+      <span class="nicon">📷</span>
+      <span class="nlbl">Cargar Fotos</span>
+      <span class="ndesc">Catalogo imagenes</span>
+    </a>
+    <a class="ncard" href="boparts_demanda.html">
+      <span class="nicon">📝</span>
+      <span class="nlbl">Demanda</span>
+      <span class="ndesc">No atendida</span>
+    </a>
+    <a class="ncard" href="boparts_compras.html">
+      <span class="nicon">📦</span>
+      <span class="nlbl">Compras</span>
+      <span class="ndesc">Recibir mercancia</span>
+    </a>
+    <a class="ncard" href="boparts_gastos.html">
+      <span class="nicon">💸</span>
+      <span class="nlbl">Gastos</span>
+      <span class="ndesc">Registrar gasto</span>
+    </a>
+    <a class="ncard" href="boparts_cobros.html">
+      <span class="nicon">🧾</span>
+      <span class="nlbl">Cobros</span>
+      <span class="ndesc">Cuentas por cobrar</span>
+    </a>
+    <a class="ncard cur" href="boparts_gerencia.html">
+      <span class="nicon">📊</span>
+      <span class="nlbl">Gerencia</span>
+      <span class="ndesc">Solo socios</span>
+    </a>
+  </div>
+</div>
+
+<script>
+var SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
+var APP_VERSION = 'v1.1';
+var TASA = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
+var periodo = 'hoy', DATA = null;
+
+// ---- PIN de socios ----------------------------------------------------------
+// El PIN no se guarda en el archivo: solo este numero, que se calcula a partir de el.
+// Para cambiarlo: abre la app, escribe en la barra del navegador  javascript:alert(hash('NUEVOPIN'))
+// (o usa la consola del navegador) y pega el numero que salga aqui. Anota el PIN nuevo aparte.
+// Referencia: hash('1234')=881665, hash('0000')=845765.
+var PIN_HASH = 911136;              // PIN actual: 2610
+var PIN_HORAS = 12;                 // cuanto dura la sesion en este dispositivo
+function hash(t) {
+  var h = 5381;
+  for (var i = 0; i < t.length; i++) h = ((h * 33) ^ t.charCodeAt(i)) >>> 0;
+  return h % 1000000;
+}
+function sesionValida() {
+  try {
+    var t = parseInt(localStorage.getItem('boparts_ger_ok') || '0');
+    return t && (Date.now() - t) < PIN_HORAS * 3600000;
+  } catch (e) { return false; }
+}
+function validarPin() {
+  var v = document.getElementById('pinInput').value.trim();
+  if (hash(v) !== PIN_HASH) {
+    document.getElementById('pinErr').textContent = 'PIN incorrecto';
+    document.getElementById('pinInput').value = '';
+    return;
+  }
+  try { localStorage.setItem('boparts_ger_ok', String(Date.now())); } catch (e) {}
+  abrirGerencia();
+}
+function abrirGerencia() {
+  document.getElementById('pinov').classList.add('off');
+  cargar();
+}
+function salirGerencia() {
+  try { localStorage.removeItem('boparts_ger_ok'); } catch (e) {}
+  location.reload();
+}
+
+document.getElementById('fechaHdr').textContent = APP_VERSION + ' · ' + new Date().toLocaleDateString('es-VE', {weekday:'long', day:'numeric', month:'long'});
+
+document.getElementById('tabs').addEventListener('click', function(e) {
+  var b = e.target.closest('.tab'); if (!b) return;
+  [].forEach.call(document.querySelectorAll('#tabs .tab'), function(t) { t.classList.remove('on'); });
+  b.classList.add('on'); periodo = b.dataset.p;
+  document.getElementById('rangoBox').style.display = periodo === 'rango' ? 'flex' : 'none';
+  if (periodo !== 'rango') cargar();
+});
+
+function iso(d) { return d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate()); }
+function p2(n) { return (n < 10 ? '0' : '') + n; }
+function rango() {
+  var h = new Date(), a = new Date(h), b = new Date(h);
+  if (periodo === 'hoy') {}
+  else if (periodo === 'ayer') { a.setDate(a.getDate() - 1); b = new Date(a); }
+  else if (periodo === 'semana') { a.setDate(a.getDate() - a.getDay() + (a.getDay() === 0 ? -6 : 1)); }   // lunes
+  else if (periodo === 'mes') { a.setDate(1); }
+  else if (periodo === 'mesant') { a.setMonth(a.getMonth() - 1, 1); b = new Date(a.getFullYear(), a.getMonth() + 1, 0); }
+  else if (periodo === 'todo') { return {d1:'2026-01-01', d2:iso(h)}; }
+  else if (periodo === 'rango') {
+    return {d1:document.getElementById('d1').value || '2026-01-01', d2:document.getElementById('d2').value || iso(h)};
+  }
+  return {d1:iso(a), d2:iso(b)};
+}
+
+function cargar() {
+  var r = rango();
+  document.getElementById('cuerpo').innerHTML = '<div class="cart-empty">Cargando...</div>';
+  document.getElementById('periodoLbl').textContent = fechaES(r.d1) + ' a ' + fechaES(r.d2);
+  fetch(SCRIPT_URL + '?action=ventas&desde=' + r.d1 + '&hasta=' + r.d2 + '&t=' + Date.now())
+    .then(function(x) { return x.json(); })
+    .then(function(d) {
+      if (!d || !d.ok) throw new Error(d && d.error ? d.error : 'sin datos');
+      DATA = d; render(r);
+    })
+    .catch(function(e) {
+      document.getElementById('cuerpo').innerHTML = '<div class="section"><div class="cart-empty" style="color:var(--red)">No se pudo cargar: ' + escHtml(e.message) + '</div></div>';
+    });
+}
+
+function render(r) {
+  var L = DATA.lineas, V = DATA.ventas, G = DATA.gastos;
+  var vend = 0, costo = 0, unidades = 0;
+  L.forEach(function(l) { vend += l[9]; costo += l[10]; unidades += l[6]; });
+  var util = vend - costo, margen = vend ? util / vend * 100 : 0;
+
+  var tickets = V.length, comisionBs = 0, aliadoBs = 0, creditoUSD = 0, vendVentas = 0;
+  V.forEach(function(v) { comisionBs += v[5]; aliadoBs += v[8]; creditoUSD += v[12]; vendVentas += v[3]; });
+  var comUSD = TASA ? comisionBs / TASA : 0, aliUSD = TASA ? aliadoBs / TASA : 0;
+  var gastosUSD = 0; G.forEach(function(g) { gastosUSD += g[3]; });
+  var resultado = util - comUSD - aliUSD - gastosUSD;
+  var totalRef = vend || vendVentas;
+
+  var h = '';
+  h += '<div class="section"><div class="stitle">Resumen</div><div class="kpis">' +
+    kpi('Vendido', usd(totalRef), (TASA ? bs(totalRef * TASA) : '') + (tickets ? ' · ' + tickets + ' ventas' : ''), 'big') +
+    kpi('Utilidad bruta', usd(util), margen.toFixed(1) + '% de margen') +
+    kpi('Costo de lo vendido', usd(costo), unidades + ' unidades') +
+    kpi('Comisiones', usd(comUSD + aliUSD), 'punto ' + usd(comUSD) + ' · aliados ' + usd(aliUSD)) +
+    kpi('Gastos del periodo', usd(gastosUSD), G.length + ' registros') +
+    kpi('Resultado', usd(resultado), 'utilidad - comisiones - gastos', resultado >= 0 ? 'pos' : 'neg') +
+    kpi('Ticket promedio', tickets ? usd(totalRef / tickets) : '$0.00', unidades && tickets ? (unidades / tickets).toFixed(1) + ' items por venta' : '') +
+    '</div>';
+  if (creditoUSD > 0) {
+    h += '<div class="cominfo" style="margin-top:10px">De lo vendido, <b>' + usd(creditoUSD) + '</b> fue a credito (aun no cobrado). ' +
+      'Cobrado en el periodo: <b>' + usd(totalRef - creditoUSD) + '</b>.</div>';
+  }
+  if (!L.length && V.length) h += '<div class="aviso">Sin lineas de detalle en este periodo: el costo y el margen no se pueden calcular (ventas anteriores a la version que guarda costo).</div>';
+  h += '</div>';
+
+  // Por dia
+  var dias = {};
+  L.forEach(function(l) { dias[l[1]] = (dias[l[1]] || 0) + l[9]; });
+  if (!L.length) V.forEach(function(v) { dias[v[0]] = (dias[v[0]] || 0) + v[3]; });
+  var fechas = Object.keys(dias).sort();
+  if (fechas.length > 1) {
+    var maxd = 0; fechas.forEach(function(f) { if (dias[f] > maxd) maxd = dias[f]; });
+    var ult = fechas.slice(-31);
+    h += '<div class="section"><div class="stitle">Por dia</div><div class="dias">';
+    ult.forEach(function(f) { h += '<div class="dia" style="height:' + Math.max(2, Math.round(dias[f] / maxd * 90)) + 'px" title="' + f + ': ' + usd(dias[f]) + '"></div>'; });
+    h += '</div><div class="diasx">';
+    ult.forEach(function(f, i) { h += '<span>' + (ult.length <= 10 || i % Math.ceil(ult.length / 8) === 0 ? f.slice(8) : '') + '</span>'; });
+    h += '</div><div class="aviso">Mejor dia: ' + fechaES(mejor(dias)) + ' con ' + usd(dias[mejor(dias)]) + ' · Promedio: ' + usd(totalRef / fechas.length) + ' por dia con ventas</div></div>';
+  }
+
+  // Top productos
+  if (L.length) {
+    var pr = {};
+    L.forEach(function(l) {
+      var k = (l[4] || l[5]);
+      var o = pr[k] || (pr[k] = {n:l[5], u:0, v:0, c:0});
+      o.u += l[6]; o.v += l[9]; o.c += l[10];
+    });
+    h += '<div class="section"><div class="stitle">Productos mas vendidos</div>' + barras(pr, 12) +
+      '<div class="aviso">La barra es el monto vendido. A la derecha, el margen del producto en el periodo.</div></div>';
+
+    // Categoria no viene en el detalle: se agrupa por vendedor y canal
+    h += '<div class="section"><div class="stitle">Por vendedor</div>' + barras(agrupa(L, 2), 8) + '</div>';
+    h += '<div class="section"><div class="stitle">Por canal</div>' + barras(agrupa(L, 3), 8) + '</div>';
+  }
+
+  // Metodos de pago
+  var mp = {};
+  V.forEach(function(v) {
+    v[13].forEach(function(m) {
+      if (!m[0] || !m[2]) return;
+      var montoUSD = m[3] === 'USD' ? m[2] : (TASA ? m[2] / TASA : 0);
+      var k = m[0] + (m[1] ? ' ' + m[1] : '');
+      mp[k] = mp[k] || {n:k, u:0, v:0, c:0};
+      mp[k].v += montoUSD; mp[k].u += 1;
+    });
+  });
+  if (Object.keys(mp).length) h += '<div class="section"><div class="stitle">Como pagaron</div>' + barras(mp, 10, true) + '</div>';
+
+  // Gastos
+  if (G.length) {
+    var gc = {};
+    G.forEach(function(g) { gc[g[1]] = gc[g[1]] || {n:g[1], u:0, v:0, c:0}; gc[g[1]].v += g[3]; gc[g[1]].u += 1; });
+    h += '<div class="section"><div class="stitle">Gastos por categoria</div>' + barras(gc, 10, true) + '</div>';
+  }
+
+  document.getElementById('cuerpo').innerHTML = h;
+}
+
+function agrupa(L, idx) {
+  var o = {};
+  L.forEach(function(l) {
+    var k = l[idx] || '(sin dato)';
+    var e = o[k] || (o[k] = {n:k, u:0, v:0, c:0});
+    e.u += l[6]; e.v += l[9]; e.c += l[10];
+  });
+  return o;
+}
+
+function barras(obj, max, sinMargen) {
+  var arr = Object.keys(obj).map(function(k) { return obj[k]; }).sort(function(a, b) { return b.v - a.v; }).slice(0, max);
+  if (!arr.length) return '<div class="cart-empty">Sin datos</div>';
+  var top = arr[0].v || 1, h = '<div class="bars">';
+  arr.forEach(function(o) {
+    var m = o.v ? (o.v - o.c) / o.v * 100 : 0;
+    h += '<div><div class="bar"><span class="bl">' + escHtml(o.n) + '</span>' +
+      '<span class="bt">' + usd(o.v) + '</span>' +
+      '<span class="bm">' + (sinMargen ? (o.u + 'x') : (o.u + 'u · ' + m.toFixed(0) + '%')) + '</span></div>' +
+      '<div class="bwrap"><div class="bg" style="width:' + Math.max(2, Math.round(o.v / top * 100)) + '%"></div></div></div>';
+  });
+  return h + '</div>';
+}
+
+function kpi(k, v, s, cls) {
+  return '<div class="kpi' + (cls === 'big' ? ' big' : '') + '"><div class="k">' + k + '</div>' +
+    '<div class="v ' + (cls === 'pos' || cls === 'neg' ? cls : '') + '">' + v + '</div>' +
+    (s ? '<div class="s">' + s + '</div>' : '') + '</div>';
+}
+function mejor(d) { var k = '', m = -1; Object.keys(d).forEach(function(x) { if (d[x] > m) { m = d[x]; k = x; } }); return k; }
+function usd(n) { return '$' + (Math.round((n || 0) * 100) / 100).toFixed(2); }
+function bs(n) { return 'Bs ' + Math.round(n || 0).toLocaleString('es-VE'); }
+function fechaES(f) { var p = String(f).split('-'); return p.length === 3 ? p[2] + '/' + p[1] + '/' + p[0] : f; }
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function toast(msg, type) {
+  var el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'toast show ' + (type || '');
+  clearTimeout(el._t);
+  el._t = setTimeout(function() { el.className = 'toast'; }, type === 'err' ? 7000 : 3500);
+}
+
+function toggleNav() {
+  document.getElementById('navPan').classList.toggle('open');
+  document.getElementById('navOv').classList.toggle('open');
+}
+function closeNav() {
+  document.getElementById('navPan').classList.remove('open');
+  document.getElementById('navOv').classList.remove('open');
+}
+
+if (sesionValida()) abrirGerencia();
+else {
+  var pi = document.getElementById('pinInput');
+  pi.addEventListener('keydown', function(e) { if (e.key === 'Enter') validarPin(); });
+  setTimeout(function() { pi.focus(); }, 250);
+}
+</script>
+</body>
+</html>
