@@ -1,7 +1,9 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_gerencia.html
-  VERSION: v1.1 (2026-09-11) | requiere Apps Script v12
+  VERSION: v1.2 (2026-09-12) | requiere Apps Script v12.2
+  v1.2: todos los montos se convierten a numero antes de sumar (un valor de texto hacia que las sumas se
+        concatenaran y salieran cifras absurdas); aviso cuando una venta no trae monto en USD
   v1.1: PIN de socios al entrar (se recuerda 12 h en el dispositivo). Es una puerta con pestillo, no una cerradura:
         el archivo sigue siendo publico. La proteccion real llega con el token en Apps Script (bloque D).
   Reporte de ventas para socios: vendido, costo, utilidad y margen desde VENTAS_DETALLE; por dia, producto,
@@ -297,7 +299,7 @@ select option{background:#1E1E1E;color:var(--ink)}
 
 <script>
 var SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
-var APP_VERSION = 'v1.1';
+var APP_VERSION = 'v1.2';
 var TASA = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
 var periodo = 'hoy', DATA = null;
 
@@ -348,6 +350,19 @@ document.getElementById('tabs').addEventListener('click', function(e) {
   if (periodo !== 'rango') cargar();
 });
 
+// Si un valor llega como texto ('3.5' o '3,5'), sumarlo con + lo concatena en vez de sumarlo.
+// Todo monto pasa por aqui antes de cualquier cuenta.
+function num(v) {
+  if (typeof v === 'number') return isFinite(v) ? v : 0;
+  var t = String(v == null ? '' : v).replace(/[^0-9.,-]/g, '');
+  if (!t) return 0;
+  if (t.indexOf(',') >= 0 && t.indexOf('.') >= 0) {
+    if (t.lastIndexOf(',') > t.lastIndexOf('.')) t = t.replace(/\./g, '').replace(',', '.'); else t = t.replace(/,/g, '');
+  } else if (t.indexOf(',') >= 0) t = t.replace(',', '.');
+  var n = parseFloat(t);
+  return isFinite(n) ? n : 0;
+}
+
 function iso(d) { return d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate()); }
 function p2(n) { return (n < 10 ? '0' : '') + n; }
 function rango() {
@@ -382,13 +397,21 @@ function cargar() {
 function render(r) {
   var L = DATA.lineas, V = DATA.ventas, G = DATA.gastos;
   var vend = 0, costo = 0, unidades = 0;
-  L.forEach(function(l) { vend += l[9]; costo += l[10]; unidades += l[6]; });
+  L.forEach(function(l) {
+    l[6] = num(l[6]); l[7] = num(l[7]); l[8] = num(l[8]); l[9] = num(l[9]); l[10] = num(l[10]); l[11] = num(l[11]);
+    vend += l[9]; costo += l[10]; unidades += l[6];
+  });
   var util = vend - costo, margen = vend ? util / vend * 100 : 0;
 
-  var tickets = V.length, comisionBs = 0, aliadoBs = 0, creditoUSD = 0, vendVentas = 0;
-  V.forEach(function(v) { comisionBs += v[5]; aliadoBs += v[8]; creditoUSD += v[12]; vendVentas += v[3]; });
+  var tickets = V.length, comisionBs = 0, aliadoBs = 0, creditoUSD = 0, vendVentas = 0, sinUSD = 0;
+  V.forEach(function(v) {
+    v[3] = num(v[3]); v[4] = num(v[4]); v[5] = num(v[5]); v[8] = num(v[8]); v[12] = num(v[12]);
+    comisionBs += v[5]; aliadoBs += v[8]; creditoUSD += v[12]; vendVentas += v[3];
+    if (!v[3] && v[4]) sinUSD++;
+    v[13].forEach(function(m) { m[2] = num(m[2]); });
+  });
   var comUSD = TASA ? comisionBs / TASA : 0, aliUSD = TASA ? aliadoBs / TASA : 0;
-  var gastosUSD = 0; G.forEach(function(g) { gastosUSD += g[3]; });
+  var gastosUSD = 0; G.forEach(function(g) { g[3] = num(g[3]); g[4] = num(g[4]); gastosUSD += g[3]; });
   var resultado = util - comUSD - aliUSD - gastosUSD;
   var totalRef = vend || vendVentas;
 
@@ -407,6 +430,7 @@ function render(r) {
       'Cobrado en el periodo: <b>' + usd(totalRef - creditoUSD) + '</b>.</div>';
   }
   if (!L.length && V.length) h += '<div class="aviso">Sin lineas de detalle en este periodo: el costo y el margen no se pueden calcular (ventas anteriores a la version que guarda costo).</div>';
+  if (sinUSD) h += '<div class="aviso">' + sinUSD + ' venta(s) del periodo tienen monto en Bs pero no en USD (filas viejas importadas a mano). No suman en el total en dolares.</div>';
   h += '</div>';
 
   // Por dia
