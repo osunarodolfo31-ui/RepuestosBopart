@@ -1,7 +1,9 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — index.html
-  VERSION: v9.4 (2026-09-11) — nav con Gerencia
+  VERSION: v9.5 (2026-09-12) — nav con Gerencia
+  v9.5: el carrusel de fotos usa desplazamiento nativo con flechas, contador y puntos; antes solo respondia a
+        deslizar con el dedo (en la computadora del local no habia forma de pasar las fotos)
   v9.3: pantalla de bienvenida con el logo mientras carga; la lista aparece apenas llegan los productos
         (antes esperaba tambien a la hoja de equivalencias y se quedaba pensando); cada hoja tiene 12 s de limite
   v9.1: las fotos de Cloudinary se piden en tamano reducido (miniatura en la lista, 900px al ampliar)
@@ -146,9 +148,14 @@
 
   /* CARRUSEL DE IMÁGENES */
   .img-carousel{width:100%;margin-bottom:16px;position:relative}
-  .img-track-wrap{overflow:hidden;border-radius:12px;background:var(--card)}
-  .img-track{display:flex;transition:transform .3s ease;will-change:transform}
-  .img-slide{min-width:100%;max-height:240px;display:flex;align-items:center;justify-content:center;background:var(--card)}
+  .img-track-wrap{overflow:hidden;border-radius:12px;background:var(--card);position:relative}
+  .img-track{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;scroll-behavior:smooth;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+  .img-track::-webkit-scrollbar{display:none}
+  .img-slide{min-width:100%;scroll-snap-align:center;max-height:240px;display:flex;align-items:center;justify-content:center;background:var(--card)}
+  .img-nav{position:absolute;top:50%;transform:translateY(-50%);width:34px;height:34px;border-radius:50%;border:none;background:rgba(0,0,0,.55);color:#fff;font-size:20px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:2}
+  .img-nav:disabled{opacity:.25;cursor:default}
+  .img-nav.prev{left:8px} .img-nav.next{right:8px}
+  .img-count{position:absolute;top:8px;right:8px;background:rgba(0,0,0,.55);color:#fff;font-size:11px;padding:2px 8px;border-radius:10px;z-index:2}
   .img-slide img{width:100%;max-height:240px;object-fit:contain;display:block;border-radius:12px}
   .img-dots{display:flex;justify-content:center;gap:6px;margin-top:8px}
   .img-dot{width:6px;height:6px;border-radius:50%;background:var(--border);transition:background .2s;cursor:pointer}
@@ -499,7 +506,11 @@ function openDetail(idx) {
       `<div class="img-slide"><img src="${cldn(url, 900)}" loading="lazy" alt="foto ${i+1}" onerror="this.style.display='none'"></div>`
     ).join('');
     const dots = imgs.length > 1 ? `<div class="img-dots">${imgs.map((_,i) => `<div class="img-dot${i===0?' active':''}" onclick="goSlide(${idx},${i})"></div>`).join('')}</div>` : '';
-    imgHtml = `<div class="img-carousel" id="car-${idx}"><div class="img-track-wrap"><div class="img-track" id="track-${idx}">${slides}</div></div>${dots}</div>`;
+    const flechas = imgs.length > 1
+      ? `<button class="img-nav prev" onclick="mueveSlide(${idx},-1)" disabled>&#8249;</button>
+         <button class="img-nav next" onclick="mueveSlide(${idx},1)">&#8250;</button>
+         <div class="img-count" id="count-${idx}">1/${imgs.length}</div>` : '';
+    imgHtml = `<div class="img-carousel" id="car-${idx}"><div class="img-track-wrap"><div class="img-track" id="track-${idx}" onscroll="syncSlide(${idx})">${slides}</div>${flechas}</div>${dots}</div>`;
   } else {
     imgHtml = `<div class="sheet-img-placeholder"><span>📷</span><small>Sin imagen aún</small></div>`;
   }
@@ -580,40 +591,39 @@ function shareProduct(idx) {
   window.open(url, '_blank');
 }
 
+// El carrusel se desplaza de verdad (scroll horizontal): funciona con el dedo, con las flechas y en la PC.
 function goSlide(idx, slide) {
   const track = document.getElementById('track-' + idx);
   if (!track) return;
-  track.style.transform = `translateX(-${slide * 100}%)`;
-  document.querySelectorAll(`#car-${idx} .img-dot`).forEach((d, i) => {
-    d.classList.toggle('active', i === slide);
-  });
+  track.scrollTo({left: slide * track.clientWidth, behavior: 'smooth'});
+  marcarSlide(idx, slide);
+}
+function mueveSlide(idx, paso) {
+  const track = document.getElementById('track-' + idx);
+  if (!track) return;
+  const total = track.children.length;
+  const actual = Math.round(track.scrollLeft / Math.max(1, track.clientWidth));
+  goSlide(idx, Math.min(total - 1, Math.max(0, actual + paso)));
+}
+function syncSlide(idx) {
+  const track = document.getElementById('track-' + idx);
+  if (!track) return;
+  clearTimeout(track._t);
+  track._t = setTimeout(() => marcarSlide(idx, Math.round(track.scrollLeft / Math.max(1, track.clientWidth))), 60);
+}
+function marcarSlide(idx, slide) {
+  const car = document.getElementById('car-' + idx);
+  if (!car) return;
+  car.querySelectorAll('.img-dot').forEach((d, i) => d.classList.toggle('active', i === slide));
+  const total = car.querySelectorAll('.img-slide').length;
+  const c = document.getElementById('count-' + idx);
+  if (c) c.textContent = (slide + 1) + '/' + total;
+  const prev = car.querySelector('.img-nav.prev'), next = car.querySelector('.img-nav.next');
+  if (prev) prev.disabled = slide <= 0;
+  if (next) next.disabled = slide >= total - 1;
 }
 
-// Swipe support for carrusel — intercept touch on carousel only
-document.addEventListener('touchstart', e => {
-  const car = e.target.closest('.img-carousel');
-  if (!car) return;
-  car._startX = e.touches[0].clientX;
-  car._startY = e.touches[0].clientY;
-  const dots = car.querySelectorAll('.img-dot');
-  car._total = dots.length || 1;
-  car._slide = [...dots].findIndex(d => d.classList.contains('active'));
-  if (car._slide < 0) car._slide = 0;
-  car._idx = parseInt(car.id.split('-')[1]);
-}, { passive: true });
-
-document.addEventListener('touchend', e => {
-  const car = e.target.closest('.img-carousel');
-  if (!car || car._startX === undefined) return;
-  const dx = e.changedTouches[0].clientX - car._startX;
-  const dy = e.changedTouches[0].clientY - car._startY;
-  // Only handle horizontal swipes
-  if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 35) {
-    if (dx < 0 && car._slide < car._total - 1) goSlide(car._idx, car._slide + 1);
-    else if (dx > 0 && car._slide > 0) goSlide(car._idx, car._slide - 1);
-  }
-  car._startX = undefined;
-}, { passive: true });
+// El deslizamiento con el dedo lo maneja el navegador (scroll-snap): ya no hace falta codigo propio.
 </script>
 
 <button class="fab" id="fabBtn" onclick="toggleNav()">
