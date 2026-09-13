@@ -9,16 +9,16 @@ en el comentario del encabezado de cada HTML y en la cabecera de `Code.gs`.
 
 | Archivo                 | Versión | Requiere Apps Script |
 |-------------------------|---------|----------------------|
-| index.html              | v9.5    | v7 o superior        |
-| boparts_ventas.html     | v10.11  | **v10.5**            |
-| boparts_cobros.html     | v2.2    | **v11.3**            |
+| index.html              | v9.6    | **v13** (para la tasa) |
+| boparts_ventas.html     | v11     | **v13**              |
+| boparts_cobros.html     | v2.3    | **v13**              |
 | boparts_compras.html    | v1.4    | **v11**              |
-| boparts_gastos.html     | v1.3    | **v11.2**            |
+| boparts_gastos.html     | v1.4    | **v13**              |
 | boparts_fotos.html      | v8.3    | **v11.5**            |
 | boparts_demanda.html    | v8.4    | v7 o superior        |
-| boparts_gerencia.html   | v1.2    | **v12.2**            |
-| boparts_reportes.html   | v8      | ninguno (queda como estaba; lo reemplaza gerencia) |
-| Code.gs (Apps Script)   | v12.2   | —                    |
+| boparts_gerencia.html   | v1.3    | **v13**              |
+| boparts_reportes.html   | v8      | ninguno (lo reemplaza gerencia) |
+| Code.gs (Apps Script)   | v13     | —                    |
 
 Deployment ID (no cambia): `AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg`
 

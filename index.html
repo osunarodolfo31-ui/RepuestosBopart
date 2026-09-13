@@ -1,7 +1,8 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — index.html
-  VERSION: v9.5 (2026-09-12) — nav con Gerencia
+  VERSION: v9.6 (2026-09-12) — nav con Gerencia | tasa desde Apps Script v13
+  v9.6: la tasa se lee de CONFIG (la fijan los socios en Gerencia); ya no se edita a mano en cada telefono
   v9.5: el carrusel de fotos usa desplazamiento nativo con flechas, contador y puntos; antes solo respondia a
         deslizar con el dedo (en la computadora del local no habia forma de pasar las fotos)
   v9.3: pantalla de bienvenida con el logo mientras carga; la lista aparece apenas llegan los productos
@@ -205,7 +206,7 @@
   <div class="logo-row">
     <img src="logo-header.png" alt="Repuesto BoParts" class="logo-img">
     <div class="header-right">
-      <div class="tasa-badge" id="tasaBadge" onclick="openTasaEditor()">Bs <span id="tasaVal">…</span> ✎</div>
+      <div class="tasa-badge" id="tasaBadge" onclick="avisoTasa()">Bs <span id="tasaVal">…</span></div>
       <button class="refresh-btn" id="refreshBtn" onclick="loadData(true)" title="Actualizar">
         <svg id="refreshIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
       </button>
@@ -379,11 +380,29 @@ function aplicarDatos(text, equivText) {
 function updateTasaBadge() {
   document.getElementById('tasaVal').textContent = currentTasa.toLocaleString('es-VE');
 }
-function openTasaEditor() {
-  document.getElementById('tasaInput').value = currentTasa;
-  document.getElementById('tasaModal').classList.add('show');
-  setTimeout(() => document.getElementById('tasaInput').select(), 100);
+// La tasa ya no se edita en cada telefono: la fijan los socios en Gerencia y se sincroniza sola.
+function avisoTasa() {
+  alert('La tasa la fijan Rodolfo o Javier desde Gerencia y se actualiza sola en todos los dispositivos.' +
+        (TASA_FECHA ? '\n\nUltima vez: ' + TASA_FECHA : ''));
 }
+var TASA_FECHA = localStorage.getItem('boparts_tasa_fecha') || '';
+function sincronizarTasa() {
+  fetch(SCRIPT_URL_CONFIG + '?action=config&t=' + Date.now())
+    .then(r => r.json())
+    .then(d => {
+      if (!d || !d.ok || !(d.tasa > 0)) return;
+      TASA_FECHA = d.fecha || '';
+      try { localStorage.setItem('boparts_tasa_fecha', TASA_FECHA); } catch (e) {}
+      if (d.tasa === currentTasa) return;
+      currentTasa = d.tasa;
+      try { localStorage.setItem('motoauto_tasa', String(currentTasa)); } catch (e) {}
+      PRODUCTS.forEach(p => { p.bs = p.precio ? Math.round(p.precio * currentTasa) : 0; });
+      updateTasaBadge();
+      search();
+    })
+    .catch(() => {});
+}
+var SCRIPT_URL_CONFIG = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
 function closeTasaEditor() {
   document.getElementById('tasaModal').classList.remove('show');
 }
@@ -574,6 +593,7 @@ document.getElementById('filters').addEventListener('click', e => {
 
 updateTasaBadge();
 loadData();
+sincronizarTasa();
 
 function shareProduct(idx) {
   const p = PRODUCTS[idx];

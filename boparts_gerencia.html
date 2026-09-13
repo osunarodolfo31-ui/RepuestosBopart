@@ -1,7 +1,9 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_gerencia.html
-  VERSION: v1.2 (2026-09-12) | requiere Apps Script v12.2
+  VERSION: v1.3 (2026-09-12) | requiere Apps Script v13
+  v1.3: los socios fijan aqui la tasa BCV para todas las apps; los retiros de socios (canal SOCIO) se separan
+        de las ventas para que no ensucien el margen
   v1.2: todos los montos se convierten a numero antes de sumar (un valor de texto hacia que las sumas se
         concatenaran y salieran cifras absurdas); aviso cuando una venta no trae monto en USD
   v1.1: PIN de socios al entrar (se recuerda 12 h en el dispositivo). Es una puerta con pestillo, no una cerradura:
@@ -226,6 +228,15 @@ select option{background:#1E1E1E;color:var(--ink)}
     <div id="periodoLbl" style="font-size:12px;color:var(--ink-muted)"></div>
   </div>
 
+  <div class="section">
+    <div class="stitle">Tasa BCV</div>
+    <div class="rango">
+      <input type="number" id="tasaIn" step="0.01" placeholder="0.00" style="flex:1">
+      <button class="tab on" onclick="guardarTasa()">Fijar</button>
+    </div>
+    <div class="aviso" id="tasaInfo">Cargando tasa...</div>
+  </div>
+
   <div id="cuerpo"><div class="cart-empty">Cargando...</div></div>
 
 </div>
@@ -299,7 +310,7 @@ select option{background:#1E1E1E;color:var(--ink)}
 
 <script>
 var SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
-var APP_VERSION = 'v1.2';
+var APP_VERSION = 'v1.3';
 var TASA = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
 var periodo = 'hoy', DATA = null;
 
@@ -333,6 +344,7 @@ function validarPin() {
 }
 function abrirGerencia() {
   document.getElementById('pinov').classList.add('off');
+  cargarTasa();
   cargar();
 }
 function salirGerencia() {
@@ -379,6 +391,37 @@ function rango() {
   return {d1:iso(a), d2:iso(b)};
 }
 
+function cargarTasa() {
+  fetch(SCRIPT_URL + '?action=config&t=' + Date.now())
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (!d || !d.ok) throw new Error('sin config');
+      TASA = num(d.tasa);
+      try { localStorage.setItem('motoauto_tasa', String(TASA)); } catch (e) {}
+      document.getElementById('tasaIn').value = TASA || '';
+      var dias = d.fecha ? Math.floor((Date.now() - new Date(d.fecha.replace(' ', 'T')).getTime()) / 86400000) : -1;
+      document.getElementById('tasaInfo').innerHTML = TASA
+        ? 'Tasa en uso por todas las apps: <b>' + TASA + '</b>' + (d.fecha ? ' · fijada el ' + d.fecha + (d.quien ? ' por ' + escHtml(d.quien) : '') : '') +
+          (dias >= 3 ? ' <span style="color:var(--red)">(hace ' + dias + ' dias)</span>' : '')
+        : 'Todavia no hay tasa fijada. Escribela y toca Fijar.';
+    })
+    .catch(function() { document.getElementById('tasaInfo').textContent = 'No se pudo leer la tasa.'; });
+}
+
+function guardarTasa() {
+  var t = num(document.getElementById('tasaIn').value);
+  if (!(t > 0)) { toast('Escribe la tasa', 'err'); return; }
+  if (TASA && Math.abs(t - TASA) / TASA > 0.25 && !confirm('La tasa cambia de ' + TASA + ' a ' + t + '. Es mas del 25%. Confirmas?')) return;
+  fetch(SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body:JSON.stringify({tipo:'tasa', tasa:t, quien:'Gerencia'})})
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (!d || !d.ok) throw new Error(d && d.error ? d.error : 'no se guardo');
+      toast('Tasa fijada en ' + t + ' para todas las apps', 'ok');
+      cargarTasa(); cargar();
+    })
+    .catch(function(e) { toast('No se pudo fijar la tasa: ' + e.message, 'err'); });
+}
+
 function cargar() {
   var r = rango();
   document.getElementById('cuerpo').innerHTML = '<div class="cart-empty">Cargando...</div>';
@@ -395,7 +438,13 @@ function cargar() {
 }
 
 function render(r) {
-  var L = DATA.lineas, V = DATA.ventas, G = DATA.gastos;
+  // Los retiros de socios (canal SOCIO) van a precio de costo: no son ventas y se muestran aparte.
+  var esSocio = function(canal) { return String(canal || '').toUpperCase().indexOf('SOCIO') >= 0; };
+  var L = DATA.lineas.filter(function(l) { return !esSocio(l[3]); });
+  var V = DATA.ventas.filter(function(v) { return !esSocio(v[2]); });
+  var G = DATA.gastos;
+  var Lsoc = DATA.lineas.filter(function(l) { return esSocio(l[3]); });
+  var Vsoc = DATA.ventas.filter(function(v) { return esSocio(v[2]); });
   var vend = 0, costo = 0, unidades = 0;
   L.forEach(function(l) {
     l[6] = num(l[6]); l[7] = num(l[7]); l[8] = num(l[8]); l[9] = num(l[9]); l[10] = num(l[10]); l[11] = num(l[11]);
@@ -425,6 +474,18 @@ function render(r) {
     kpi('Resultado', usd(resultado), 'utilidad - comisiones - gastos', resultado >= 0 ? 'pos' : 'neg') +
     kpi('Ticket promedio', tickets ? usd(totalRef / tickets) : '$0.00', unidades && tickets ? (unidades / tickets).toFixed(1) + ' items por venta' : '') +
     '</div>';
+  if (Lsoc.length || Vsoc.length) {
+    var socUSD = 0, socU = 0, porSocio = {};
+    Lsoc.forEach(function(l) {
+      var v = num(l[9]); socUSD += v; socU += num(l[6]);
+      var k = l[2] || 'socio'; porSocio[k] = (porSocio[k] || 0) + v;
+    });
+    if (!Lsoc.length) Vsoc.forEach(function(v) { socUSD += num(v[3]); });
+    var detSoc = Object.keys(porSocio).map(function(k) { return escHtml(k) + ' ' + usd(porSocio[k]); }).join(' · ');
+    h += '<div class="cominfo" style="margin-top:10px">Retiros de socios a costo: <b>' + usd(socUSD) + '</b>' +
+      (socU ? ' · ' + socU + ' unidades' : '') + (detSoc ? '<br>' + detSoc : '') +
+      '<br><span style="color:var(--ink-muted)">No cuentan como ventas ni afectan el margen.</span></div>';
+  }
   if (creditoUSD > 0) {
     h += '<div class="cominfo" style="margin-top:10px">De lo vendido, <b>' + usd(creditoUSD) + '</b> fue a credito (aun no cobrado). ' +
       'Cobrado en el periodo: <b>' + usd(totalRef - creditoUSD) + '</b>.</div>';

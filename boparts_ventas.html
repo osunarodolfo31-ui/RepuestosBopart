@@ -1,7 +1,9 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_ventas.html
-  VERSION: v10.11 (2026-09-11) — nav con Gerencia | requiere Apps Script v10.5
+  VERSION: v11 (2026-09-12) | requiere Apps Script v13
+  v11: modo "venta a socio" (precio de costo, canal SOCIO, de contado o a credito) protegido con el PIN de socios;
+       la tasa se sincroniza desde CONFIG, que fijan los socios en Gerencia
   v10.10: logo sin fondo en el encabezado
   v10.8: lee precio y tasa con coma o punto decimal
   v10.7: enlace a Compras en el nav
@@ -201,6 +203,7 @@ select option{background:#1E1E1E;color:var(--ink)}
         <select id="selC">
           <option value="">Seleccionar...</option>
           <option>Presencial</option>
+        <option value="SOCIO">SOCIO (retiro a costo)</option>
           <option>WhatsApp</option>
           <option>Mercado Libre</option>
           <option>Marketplace</option>
@@ -233,6 +236,23 @@ select option{background:#1E1E1E;color:var(--ink)}
     <div class="stitle">Forma de Pago</div>
     <div id="pagosEl"></div>
     <button class="addpbtn" onclick="addPago()">+ Agregar forma de pago</button>
+  </div>
+
+  <!-- VENTA A SOCIO -->
+  <div class="section">
+    <div class="stitle">Venta a socio</div>
+    <div class="togwrap">
+      <div>
+        <div class="toglbl">Retiro de socio (a precio de costo)</div>
+        <div class="togsub" id="socioSub">Requiere PIN de socios</div>
+      </div>
+      <button class="tog" id="socioTog" onclick="toggleSocio()"></button>
+    </div>
+    <div class="asel" id="socioSel">
+      <label>Socio que se lleva la mercancia</label>
+      <select id="selSocio"><option value="">Seleccionar...</option><option>RODOLFO</option><option>JAVIER</option></select>
+      <div class="cprev">Los precios pasan a costo. Puede pagarse ahora o quedar como cuenta por cobrar del socio (metodo CREDITO).</div>
+    </div>
   </div>
 
   <!-- ALIADO -->
@@ -388,9 +408,23 @@ select option{background:#1E1E1E;color:var(--ink)}
 var CSV_URL     = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRaAnGd-Bfaxo3LjUiGeV8p0F2weaKqHGwJ0hWibSMj02-h7dRAQPDMmGL5B8-XQg66Yjd3zgOAaz8X/pub?gid=2100998338&single=true&output=csv';
 var CLIENTES_URL= 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRaAnGd-Bfaxo3LjUiGeV8p0F2weaKqHGwJ0hWibSMj02-h7dRAQPDMmGL5B8-XQg66Yjd3zgOAaz8X/pub?gid=647304383&single=true&output=csv';
 var SCRIPT_URL  = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
-var APP_VERSION = 'v10.11';
+var APP_VERSION = 'v11';
 var TASA        = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
-var TASA_ORIGEN = TASA ? 'dispositivo' : 'ninguna';
+var TASA_ORIGEN = TASA ? 'guardada' : 'ninguna';
+
+// La tasa la fijan los socios desde Gerencia y vive en CONFIG: aqui solo se lee y se guarda por si no hay senal.
+function sincronizarTasa() {
+  fetch(SCRIPT_URL + '?action=config&t=' + Date.now())
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (!d || !d.ok || !(d.tasa > 0) || d.tasa === TASA) return;
+      TASA = d.tasa; TASA_ORIGEN = 'CONFIG';
+      try { localStorage.setItem('motoauto_tasa', String(TASA)); } catch (e) {}
+      renderCart(); updateTotals();
+      toast('Tasa actualizada: ' + TASA, 'ok');
+    })
+    .catch(function() {});
+}
 var NOTA_NUM    = parseInt(localStorage.getItem('boparts_nota_num') || '0');
 
 // ============================================================
@@ -432,6 +466,7 @@ document.getElementById('fechaHdr').textContent =
   APP_VERSION + ' · ' + new Date().toLocaleDateString('es-VE', {weekday:'long', day:'numeric', month:'long'});
 
 loadProducts();
+sincronizarTasa();
 loadClientes();
 addPago();
 
@@ -613,7 +648,7 @@ function addToCart(idx) {
       renderCart(); updateTotals(); return;
     }
   }
-  cart.push({producto:p.producto, codigo:p.codigo, precio:p.precio, costo:p.costo||0, cantidad:1});
+  cart.push({producto:p.producto, codigo:p.codigo, precio:(modoSocio ? (p.costo || 0) : p.precio), costo:p.costo||0, cantidad:1});
   prodSearch.value = ''; prodDrop.classList.remove('open');
   renderCart(); updateTotals();
 }
@@ -776,6 +811,43 @@ function onMet(id) {
   }
   syncPagosDesdeDOM();
   updateTotals();
+}
+
+// ============================================================
+// VENTA A SOCIO (v11): precio de costo y canal SOCIO. Protegido con el PIN de socios
+// para que el costo no quede a la vista de cualquiera que use la app.
+// ============================================================
+var modoSocio = false;
+var PIN_HASH_SOCIOS = 911136;   // mismo PIN que Gerencia
+function hashPin(t) { var h = 5381; for (var i = 0; i < t.length; i++) h = ((h * 33) ^ t.charCodeAt(i)) >>> 0; return h % 1000000; }
+function sesionSocio() {
+  try { var t = parseInt(localStorage.getItem('boparts_ger_ok') || '0'); return t && (Date.now() - t) < 12 * 3600000; } catch (e) { return false; }
+}
+function toggleSocio() {
+  if (!modoSocio && !sesionSocio()) {
+    var pin = prompt('PIN de socios para vender a costo:');
+    if (pin === null) return;
+    if (hashPin(String(pin).trim()) !== PIN_HASH_SOCIOS) { toast('PIN incorrecto', 'err'); return; }
+    try { localStorage.setItem('boparts_ger_ok', String(Date.now())); } catch (e) {}
+  }
+  modoSocio = !modoSocio;
+  document.getElementById('socioTog').classList.toggle('on', modoSocio);
+  document.getElementById('socioSel').classList.toggle('open', modoSocio);
+  document.getElementById('socioSub').textContent = modoSocio ? 'Los precios del carrito estan a costo' : 'Requiere PIN de socios';
+  if (modoSocio) document.getElementById('selC').value = 'SOCIO';
+  aplicarCostos();
+}
+// Con el modo activo cada linea toma su costo; al desactivar vuelve al precio de lista.
+function aplicarCostos() {
+  for (var i = 0; i < cart.length; i++) {
+    var c = cart[i];
+    c.precio = modoSocio ? (parseFloat(c.costo) || 0) : precioLista(c);
+  }
+  renderCart(); updateTotals();
+}
+function precioLista(c) {
+  var p = PRODUCTS.filter(function(x) { return x.codigo === c.codigo && x.producto === c.producto; })[0];
+  return p ? (parseFloat(p.precio) || 0) : (parseFloat(c.precio) || 0);
 }
 
 // ============================================================
@@ -958,7 +1030,10 @@ function guardarVenta() {
     }
     toast('Venta ' + fmtUSD(usd) + ' / pagos ' + fmtUSD(cubierto) + ':\n' + det.join('\n') + '\n' + (cubierto < usd ? 'Faltan ' + fmtUSD(usd - cubierto) : 'Sobran ' + fmtUSD(cubierto - usd)), 'err'); return;
   }
-  if (hayCredito && !(cliSel && cliSel.credito)) { toast('Selecciona el cliente autorizado para el credito', 'err'); return; }
+  var socioSel = modoSocio ? document.getElementById('selSocio').value : '';
+  if (modoSocio && !socioSel) { toast('Indica que socio se lleva la mercancia', 'err'); return; }
+  if (hayCredito && modoSocio) cliSel = {nombre:socioSel + ' (socio)', rif:'', tel:'', dir:'', credito:true};
+  if (hayCredito && !modoSocio && !(cliSel && cliSel.credito)) { toast('Selecciona el cliente autorizado para el credito', 'err'); return; }
   creditoUSD = Math.round(creditoUSD * 100) / 100;
 
   var aComBs = aliadoSel ? Math.round(bs * aliadoSel.pct / 100) : 0;
@@ -973,7 +1048,8 @@ function guardarVenta() {
     notas:notas,
     idVenta:idVenta, tasa:TASA, lineas:lineas,
     cliente: cliSel ? {nombre:cliSel.nombre, rif:cliSel.rif || '', tel:cliSel.tel || ''} : null,
-    creditoUSD: creditoUSD
+    creditoUSD: creditoUSD,
+    socio: socioSel
   };
 
   var btn = document.getElementById('btnVenta');
@@ -1035,6 +1111,11 @@ function nuevaVenta() {
 function resetAll() {
   cart = []; pagos = []; pid = 0;
   aliadoOn = false; aliadoSel = null; cliSel = null; lastCredito = null;
+  modoSocio = false;
+  var tg = document.getElementById('socioTog'); if (tg) tg.classList.remove('on');
+  var sb = document.getElementById('socioSel'); if (sb) sb.classList.remove('open');
+  var su = document.getElementById('socioSub'); if (su) su.textContent = 'Requiere PIN de socios';
+  var sl = document.getElementById('selSocio'); if (sl) sl.value = '';
   document.getElementById('selV').value = '';
   document.getElementById('selC').value = '';
   document.getElementById('txtNotas').value = '';
