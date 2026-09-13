@@ -1,7 +1,8 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_gerencia.html
-  VERSION: v1.3 (2026-09-12) | requiere Apps Script v13
+  VERSION: v1.4 (2026-09-13) | requiere Apps Script v13
+  v1.4: el PIN se pide cada vez que se abre y al volver de otra app; no queda sesion guardada en el telefono
   v1.3: los socios fijan aqui la tasa BCV para todas las apps; los retiros de socios (canal SOCIO) se separan
         de las ventas para que no ensucien el margen
   v1.2: todos los montos se convierten a numero antes de sumar (un valor de texto hacia que las sumas se
@@ -310,7 +311,7 @@ select option{background:#1E1E1E;color:var(--ink)}
 
 <script>
 var SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
-var APP_VERSION = 'v1.3';
+var APP_VERSION = 'v1.4';
 var TASA = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
 var periodo = 'hoy', DATA = null;
 
@@ -320,18 +321,13 @@ var periodo = 'hoy', DATA = null;
 // (o usa la consola del navegador) y pega el numero que salga aqui. Anota el PIN nuevo aparte.
 // Referencia: hash('1234')=881665, hash('0000')=845765.
 var PIN_HASH = 911136;              // PIN actual: 2610
-var PIN_HORAS = 12;                 // cuanto dura la sesion en este dispositivo
+// El PIN se pide siempre: si alguien toma el telefono de un socio, no debe ver costos ni resultados.
 function hash(t) {
   var h = 5381;
   for (var i = 0; i < t.length; i++) h = ((h * 33) ^ t.charCodeAt(i)) >>> 0;
   return h % 1000000;
 }
-function sesionValida() {
-  try {
-    var t = parseInt(localStorage.getItem('boparts_ger_ok') || '0');
-    return t && (Date.now() - t) < PIN_HORAS * 3600000;
-  } catch (e) { return false; }
-}
+function sesionValida() { return false; }   // nunca se recuerda
 function validarPin() {
   var v = document.getElementById('pinInput').value.trim();
   if (hash(v) !== PIN_HASH) {
@@ -339,7 +335,6 @@ function validarPin() {
     document.getElementById('pinInput').value = '';
     return;
   }
-  try { localStorage.setItem('boparts_ger_ok', String(Date.now())); } catch (e) {}
   abrirGerencia();
 }
 function abrirGerencia() {
@@ -347,10 +342,13 @@ function abrirGerencia() {
   cargarTasa();
   cargar();
 }
-function salirGerencia() {
-  try { localStorage.removeItem('boparts_ger_ok'); } catch (e) {}
-  location.reload();
-}
+function salirGerencia() { location.reload(); }
+
+// Si la app queda en segundo plano y se vuelve a ella, pide el PIN otra vez.
+document.addEventListener('visibilitychange', function() {
+  if (document.visibilityState === 'hidden' && !document.getElementById('pinov').classList.contains('off')) return;
+  if (document.visibilityState === 'hidden') location.reload();
+});
 
 document.getElementById('fechaHdr').textContent = APP_VERSION + ' · ' + new Date().toLocaleDateString('es-VE', {weekday:'long', day:'numeric', month:'long'});
 

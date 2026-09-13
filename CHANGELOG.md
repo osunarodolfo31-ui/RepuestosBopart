@@ -10,13 +10,13 @@ en el comentario del encabezado de cada HTML y en la cabecera de `Code.gs`.
 | Archivo                 | Versión | Requiere Apps Script |
 |-------------------------|---------|----------------------|
 | index.html              | v9.6    | **v13** (para la tasa) |
-| boparts_ventas.html     | v11     | **v13**              |
+| boparts_ventas.html     | v11.1   | **v13**              |
 | boparts_cobros.html     | v2.3    | **v13**              |
 | boparts_compras.html    | v1.4    | **v11**              |
 | boparts_gastos.html     | v1.4    | **v13**              |
 | boparts_fotos.html      | v8.3    | **v11.5**            |
 | boparts_demanda.html    | v8.4    | v7 o superior        |
-| boparts_gerencia.html   | v1.3    | **v13**              |
+| boparts_gerencia.html   | v1.4    | **v13**              |
 | boparts_reportes.html   | v8      | ninguno (lo reemplaza gerencia) |
 | Code.gs (Apps Script)   | v13     | —                    |
 

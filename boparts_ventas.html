@@ -1,7 +1,9 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_ventas.html
-  VERSION: v11 (2026-09-12) | requiere Apps Script v13
+  VERSION: v11.1 (2026-09-13) | requiere Apps Script v13
+  v11.1: el canal SOCIO se pone solo con el interruptor (elegirlo a mano no bajaba los precios a costo);
+         el PIN se pide cada vez; con credito, el cliente es el propio socio
   v11: modo "venta a socio" (precio de costo, canal SOCIO, de contado o a credito) protegido con el PIN de socios;
        la tasa se sincroniza desde CONFIG, que fijan los socios en Gerencia
   v10.10: logo sin fondo en el encabezado
@@ -203,7 +205,6 @@ select option{background:#1E1E1E;color:var(--ink)}
         <select id="selC">
           <option value="">Seleccionar...</option>
           <option>Presencial</option>
-        <option value="SOCIO">SOCIO (retiro a costo)</option>
           <option>WhatsApp</option>
           <option>Mercado Libre</option>
           <option>Marketplace</option>
@@ -250,7 +251,7 @@ select option{background:#1E1E1E;color:var(--ink)}
     </div>
     <div class="asel" id="socioSel">
       <label>Socio que se lleva la mercancia</label>
-      <select id="selSocio"><option value="">Seleccionar...</option><option>RODOLFO</option><option>JAVIER</option></select>
+      <select id="selSocio" onchange="renderPagos()"><option value="">Seleccionar...</option><option>RODOLFO</option><option>JAVIER</option></select>
       <div class="cprev">Los precios pasan a costo. Puede pagarse ahora o quedar como cuenta por cobrar del socio (metodo CREDITO).</div>
     </div>
   </div>
@@ -408,7 +409,7 @@ select option{background:#1E1E1E;color:var(--ink)}
 var CSV_URL     = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRaAnGd-Bfaxo3LjUiGeV8p0F2weaKqHGwJ0hWibSMj02-h7dRAQPDMmGL5B8-XQg66Yjd3zgOAaz8X/pub?gid=2100998338&single=true&output=csv';
 var CLIENTES_URL= 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRaAnGd-Bfaxo3LjUiGeV8p0F2weaKqHGwJ0hWibSMj02-h7dRAQPDMmGL5B8-XQg66Yjd3zgOAaz8X/pub?gid=647304383&single=true&output=csv';
 var SCRIPT_URL  = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
-var APP_VERSION = 'v11';
+var APP_VERSION = 'v11.1';
 var TASA        = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
 var TASA_ORIGEN = TASA ? 'guardada' : 'ninguna';
 
@@ -820,21 +821,20 @@ function onMet(id) {
 var modoSocio = false;
 var PIN_HASH_SOCIOS = 911136;   // mismo PIN que Gerencia
 function hashPin(t) { var h = 5381; for (var i = 0; i < t.length; i++) h = ((h * 33) ^ t.charCodeAt(i)) >>> 0; return h % 1000000; }
-function sesionSocio() {
-  try { var t = parseInt(localStorage.getItem('boparts_ger_ok') || '0'); return t && (Date.now() - t) < 12 * 3600000; } catch (e) { return false; }
-}
 function toggleSocio() {
-  if (!modoSocio && !sesionSocio()) {
-    var pin = prompt('PIN de socios para vender a costo:');
+  if (!modoSocio) {
+    var pin = prompt('PIN de socios para vender a costo:');   // se pide siempre, no se recuerda
     if (pin === null) return;
     if (hashPin(String(pin).trim()) !== PIN_HASH_SOCIOS) { toast('PIN incorrecto', 'err'); return; }
-    try { localStorage.setItem('boparts_ger_ok', String(Date.now())); } catch (e) {}
   }
   modoSocio = !modoSocio;
   document.getElementById('socioTog').classList.toggle('on', modoSocio);
   document.getElementById('socioSel').classList.toggle('open', modoSocio);
   document.getElementById('socioSub').textContent = modoSocio ? 'Los precios del carrito estan a costo' : 'Requiere PIN de socios';
-  if (modoSocio) document.getElementById('selC').value = 'SOCIO';
+  var selC = document.getElementById('selC');
+  if (modoSocio) { if (!selC.querySelector('option[value="SOCIO"]')) selC.insertAdjacentHTML('beforeend', '<option value="SOCIO">SOCIO (retiro a costo)</option>'); selC.value = 'SOCIO'; }
+  else { var op = selC.querySelector('option[value="SOCIO"]'); if (op) op.remove(); selC.value = ''; }
+  renderPagos();   // el bloque de credito muestra al socio en vez del buscador de clientes
   aplicarCostos();
 }
 // Con el modo activo cada linea toma su costo; al desactivar vuelve al precio de lista.
@@ -858,7 +858,12 @@ function renderCredito(pagoId, on) {
   var box = document.getElementById('cred_' + pagoId);
   if (!box) return;
   if (!on) { box.innerHTML = ''; return; }
-  var autorizados = CLIENTES.filter(function(c) { return c.credito; });
+  if (modoSocio) {
+    var sName = document.getElementById('selSocio').value;
+    box.innerHTML = '<div class="cominfo">Queda como cuenta por cobrar del socio' + (sName ? ': <b>' + escHtml(sName) + '</b>' : '. Elige el socio arriba.') + '</div>';
+    return;
+  }
+  var autorizados = CLIENTES.filter(function(c) { return c.credito; });   // columna CREDITO = SI
   if (!autorizados.length) {
     if (!clientesListos) {
       box.innerHTML = '<div class="cominfo">Cargando clientes... <span style="color:var(--ink-muted)">' + escHtml(clientesEstado) + '</span>' +
