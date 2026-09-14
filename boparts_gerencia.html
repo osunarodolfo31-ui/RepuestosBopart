@@ -1,7 +1,9 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_gerencia.html
-  VERSION: v1.5 (2026-09-13) | requiere Apps Script v13
+  VERSION: v1.6 (2026-09-14) | requiere Apps Script v14
+  v1.6: bloque de Apartados: compromisos pendientes de entrega, anticipos recibidos y apartados vencidos.
+        El anticipo entra en caja pero NO es ingreso: la venta aparece el dia que se entrega.
   v1.5: al salir a otro modulo se ocultan los datos, pero ya no se recarga la pagina (eso cancelaba la navegacion
         y devolvia a Gerencia). El PIN se sigue pidiendo cada vez que se abre y al volver de otra app.
   v1.3: los socios fijan aqui la tasa BCV para todas las apps; los retiros de socios (canal SOCIO) se separan
@@ -239,6 +241,8 @@ select option{background:#1E1E1E;color:var(--ink)}
     <div class="aviso" id="tasaInfo">Cargando tasa...</div>
   </div>
 
+  <div id="apartadosBox"></div>
+
   <div id="cuerpo"><div class="cart-empty">Cargando...</div></div>
 
 </div>
@@ -317,7 +321,7 @@ select option{background:#1E1E1E;color:var(--ink)}
 
 <script>
 var SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
-var APP_VERSION = 'v1.5';
+var APP_VERSION = 'v1.6';
 var TASA = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
 var periodo = 'hoy', DATA = null;
 
@@ -346,6 +350,7 @@ function validarPin() {
 function abrirGerencia() {
   document.getElementById('pinov').classList.add('off');
   cargarTasa();
+  cargarApartados();
   cargar();
 }
 function salirGerencia() { location.reload(); }
@@ -430,6 +435,34 @@ function guardarTasa() {
       cargarTasa(); cargar();
     })
     .catch(function(e) { toast('No se pudo fijar la tasa: ' + e.message, 'err'); });
+}
+
+// Apartados y contra pedido: dinero recibido por mercancia que todavia no se entrega.
+// Es un compromiso de la tienda con el cliente, no una venta.
+function cargarApartados() {
+  fetch(SCRIPT_URL + '?action=apartados&t=' + Date.now())
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (!d || !d.ok) return;
+      var abiertos = (d.apartados || []).filter(function(a) { return a.estado === 'ABIERTO' || a.estado === 'LISTO'; });
+      var el = document.getElementById('apartadosBox');
+      if (!abiertos.length) { el.innerHTML = ''; return; }
+      var comprometido = 0, anticipos = 0, vencidos = 0, cp = 0;
+      abiertos.forEach(function(a) {
+        comprometido += num(a.total); anticipos += num(a.abonado);
+        if (a.vencido) vencidos++;
+        if (String(a.tipo).indexOf('PEDIDO') >= 0) cp++;
+      });
+      var h = '<div class="section"><div class="stitle">Apartados y contra pedido</div><div class="kpis">' +
+        kpi('Comprometido', usd(comprometido), abiertos.length + ' apartados por entregar' + (cp ? ' · ' + cp + ' contra pedido' : '')) +
+        kpi('Anticipos recibidos', usd(anticipos), 'dinero en caja que aun no es venta') +
+        kpi('Por cobrar al retirar', usd(comprometido - anticipos), 'lo que falta que paguen') +
+        kpi('Vencidos', String(vencidos), vencidos ? 'hay que llamar o devolver' : 'ninguno', vencidos ? 'neg' : 'pos') +
+        '</div><div class="aviso">El anticipo entra en caja pero no cuenta como ingreso: la venta, con su costo y su margen, ' +
+        'aparece el dia que el cliente retira. Si se devuelve el dinero, sale de caja sin haber sido nunca una venta.</div></div>';
+      el.innerHTML = h;
+    })
+    .catch(function() {});
 }
 
 function cargar() {

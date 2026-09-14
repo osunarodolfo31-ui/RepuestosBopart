@@ -1,7 +1,11 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_apartados.html
-  VERSION: v1 (2026-09-13) | requiere Apps Script v14
+  VERSION: v1.2 (2026-09-14) | requiere Apps Script v14
+  v1.2: el precio de cada linea se puede editar al crear el apartado (descuentos); ese precio es el que queda
+        congelado. El precio de lista se muestra al lado cuando hay diferencia.
+  v1.1: el panel de abono/entrega usaba una clase que no existe en este archivo y se dibujaba suelto al final de
+        la pagina en vez de abrirse encima; ahora es una ventana como las demas, con fondo oscuro y boton cerrar
   Apartados (producto en stock) y contra pedido (producto por encargar). El abono NO es venta: es dinero recibido
   por mercancia que todavia no se entrega. La venta nace al retirar, con los anticipos como forma de pago.
   Precio congelado al apartar. Si el cliente no retira: devolucion o credito a favor.
@@ -259,7 +263,7 @@ select option{background:#1E1E1E;color:var(--ink)}
 </div>
 
 <!-- ABONO / ENTREGA -->
-<div class="notaov" id="movOv">
+<div class="overlay" id="movOv" onclick="if(event.target===this)cerrarMov()">
   <div class="sheet">
     <div class="sheet-title" id="movTit">Abono</div>
     <div class="sheet-sub" id="movSub"></div>
@@ -270,7 +274,7 @@ select option{background:#1E1E1E;color:var(--ink)}
     <div class="field"><label>Metodo de pago</label><select id="mvMet" onchange="previewMov()"></select></div>
     <div class="cominfo" id="mvPrev"></div>
     <button class="nbtn nbtn-p" id="mvBtn" onclick="guardarMov()">Guardar</button>
-    <button class="nbtn nbtn-s" onclick="document.getElementById('movOv').classList.remove('open')">Cancelar</button>
+    <button class="nbtn nbtn-s" onclick="cerrarMov()">Cancelar</button>
   </div>
 </div>
 
@@ -338,7 +342,7 @@ select option{background:#1E1E1E;color:var(--ink)}
 var CSV_URL    = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRaAnGd-Bfaxo3LjUiGeV8p0F2weaKqHGwJ0hWibSMj02-h7dRAQPDMmGL5B8-XQg66Yjd3zgOAaz8X/pub?gid=2100998338&single=true&output=csv';
 var CLIENTES_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRaAnGd-Bfaxo3LjUiGeV8p0F2weaKqHGwJ0hWibSMj02-h7dRAQPDMmGL5B8-XQg66Yjd3zgOAaz8X/pub?gid=647304383&single=true&output=csv';
 var SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
-var APP_VERSION = 'v1';
+var APP_VERSION = 'v1.2';
 var TASA = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
 
 var METODOS = [
@@ -456,11 +460,17 @@ function addLinea(i) {
   var p = prodRes[i];
   prodDrop.classList.remove('open'); prodSearch.value = '';
   var ex = lineas.filter(function(l) { return l.codigo === p.codigo && l.producto === p.producto; })[0];
-  if (ex) ex.cantidad++; else lineas.push({codigo:p.codigo, producto:p.producto, precio:p.precio, costo:p.costo, cantidad:1});
+  if (ex) ex.cantidad++; else lineas.push({codigo:p.codigo, producto:p.producto, precio:p.precio, lista:p.precio, costo:p.costo, cantidad:1});
   renderLineas();
 }
 function setCant(i, v) { var c = parseInt(v) || 1; lineas[i].cantidad = c < 1 ? 1 : c; renderLineas(); }
 function delLinea(i) { lineas.splice(i, 1); renderLineas(); }
+// El precio se puede ajustar al apartar (descuento). Ese precio es el que queda congelado.
+function setPrecio(i, v) {
+  var p = parseFloat(String(v).replace(',', '.')) || 0;
+  lineas[i].precio = Math.round(p * 100) / 100;
+  renderLineas();
+}
 function totalNuevo() { var t = 0; lineas.forEach(function(l) { t += l.precio * l.cantidad; }); return Math.round(t * 100) / 100; }
 function renderLineas() {
   var el = document.getElementById('lineasEl');
@@ -472,7 +482,13 @@ function renderLineas() {
       '<div class="crow"><div class="qwrap"><button class="qbtn" onclick="setCant(' + i + ',' + (l.cantidad - 1) + ')">-</button>' +
       '<input class="qin" type="number" value="' + l.cantidad + '" onchange="setCant(' + i + ',this.value)">' +
       '<button class="qbtn" onclick="setCant(' + i + ',' + (l.cantidad + 1) + ')">+</button></div>' +
-      '<div class="csub">' + usd(l.precio * l.cantidad) + '</div></div></div>';
+      '<div class="csub">' + usd(l.precio * l.cantidad) + '</div></div>' +
+      '<div class="crow" style="margin-top:6px"><label style="margin:0;font-size:11px">Precio unitario</label>' +
+      '<input class="qin" style="width:88px;text-align:right" type="number" step="0.01" value="' + l.precio + '" onchange="setPrecio(' + i + ',this.value)">' +
+      (l.lista && Math.abs(l.lista - l.precio) > 0.009
+        ? '<span style="font-size:11px;color:var(--brand)">lista ' + usd(l.lista) + ' · ' + (l.precio < l.lista ? '-' : '+') + usd(Math.abs(l.lista - l.precio)) + '</span>'
+        : '<span style="font-size:11px;color:var(--ink-muted)">precio de lista</span>') +
+      '</div></div>';
   });
   el.innerHTML = h;
   previewNuevo();
@@ -556,7 +572,7 @@ function guardarNuevo() {
 function abrirMov(num, modo) {
   movAp = apPorNum(num); movModo = modo;
   if (!movAp) return;
-  document.getElementById('movTit').textContent = (modo === 'ENTREGA' ? 'Entregar ' : 'Abono a ') + num;
+  document.getElementById('movTit').textContent = (modo === 'ENTREGA' ? 'Entregar AP-' : 'Abono a AP-') + ('000' + num).slice(-4);
   document.getElementById('movSub').textContent = movAp.cliente + ' · saldo ' + usd(movAp.saldo) + ' de ' + usd(movAp.total);
   document.getElementById('mvBtn').textContent = modo === 'ENTREGA' ? 'Entregar y registrar venta' : 'Guardar abono';
   document.getElementById('mvMonto').value = modo === 'ENTREGA' ? (TASA ? Math.round(movAp.saldo * TASA) : movAp.saldo) : '';
@@ -568,6 +584,8 @@ function montoMovUSD() {
   var v = parseFloat(document.getElementById('mvMonto').value) || 0;
   return document.getElementById('mvMon').value === 'BS' ? (TASA ? v / TASA : 0) : v;
 }
+function cerrarMov() { document.getElementById('movOv').classList.remove('open'); }
+
 function previewMov() {
   if (!movAp) return;
   var u = montoMovUSD();
