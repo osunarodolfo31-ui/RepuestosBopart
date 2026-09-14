@@ -1,0 +1,746 @@
+<!DOCTYPE html>
+<!--
+  Repuesto BoParts — boparts_apartados.html
+  VERSION: v1 (2026-09-13) | requiere Apps Script v14
+  Apartados (producto en stock) y contra pedido (producto por encargar). El abono NO es venta: es dinero recibido
+  por mercancia que todavia no se entrega. La venta nace al retirar, con los anticipos como forma de pago.
+  Precio congelado al apartar. Si el cliente no retira: devolucion o credito a favor.
+-->
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>BoParts · Apartados</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --brand:#F5A800;--brand-soft:rgba(245,168,0,.15);
+  --bg:#111;--bg2:#1A1A1A;--card:#1E1E1E;--card2:#252525;--border:#2E2E2E;
+  --ink:#F0F0F0;--ink-soft:#AAA;--ink-muted:#666;
+  --green:#22C55E;--red:#EF4444;
+  --radius:14px;--radius-sm:8px;
+}
+html,body{min-height:100%;background:var(--bg);font-family:'Inter',sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased}
+header{background:var(--bg2);border-bottom:2px solid var(--brand);padding:12px 16px;display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:50}
+.logo{height:34px;width:auto}
+.hdr h1{font-size:15px;font-weight:700}
+.hdr p{font-size:11px;color:var(--ink-muted)}
+.container{padding:16px;max-width:520px;margin:0 auto;padding-bottom:100px}
+.section{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:12px}
+.stitle{font-size:12px;font-weight:700;color:var(--brand);text-transform:uppercase;letter-spacing:.5px;margin-bottom:12px}
+label{font-size:12px;color:var(--ink-soft);font-weight:600;display:block;margin-bottom:4px}
+input,select,textarea{width:100%;background:var(--card2);border:1.5px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;font-size:14px;font-family:inherit;color:var(--ink);outline:none;transition:border-color .15s}
+input:focus,select:focus,textarea:focus{border-color:var(--brand)}
+input::placeholder,textarea::placeholder{color:var(--ink-muted)}
+select option{background:#1E1E1E;color:var(--ink)}
+.field{margin-bottom:12px}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+
+/* DROPDOWN */
+.wrap{position:relative}
+.drop{background:var(--card2);border:1px solid var(--border);border-radius:var(--radius-sm);max-height:220px;overflow-y:auto;position:absolute;width:100%;z-index:80;display:none;margin-top:4px;box-shadow:0 8px 24px rgba(0,0,0,.4)}
+.drop.open{display:block}
+.ditem{padding:10px 12px;font-size:13px;cursor:pointer;border-bottom:1px solid var(--border);color:var(--ink)}
+.ditem:last-child{border-bottom:none}
+.ditem:active,.ditem:hover{background:var(--brand-soft)}
+.ditem-meta{font-size:10px;color:var(--ink-muted);margin-top:2px}
+.ditem-price{font-size:11px;color:var(--brand);font-weight:600;float:right}
+
+/* CART */
+.cart-empty{text-align:center;padding:20px;color:var(--ink-muted);font-size:13px}
+.citem{background:var(--card2);border-radius:var(--radius-sm);padding:12px;margin-bottom:8px;border:1px solid var(--border)}
+.ctop{display:flex;align-items:flex-start;gap:8px}
+.cname{font-size:13px;font-weight:600;flex:1;line-height:1.3}
+.cdel{background:none;border:none;color:var(--red);cursor:pointer;font-size:20px;line-height:1;padding:0;flex-shrink:0}
+.cbot{display:grid;grid-template-columns:90px 1fr 1fr;gap:8px;margin-top:8px;align-items:center}
+.qwrap{display:flex;align-items:center;gap:6px}
+.qbtn{background:var(--card);border:1px solid var(--border);border-radius:6px;width:28px;height:28px;color:var(--ink);font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.qin{width:36px;text-align:center;padding:4px;font-size:14px;font-weight:700;background:var(--card);border:1px solid var(--border);border-radius:6px}
+.csub{text-align:right;font-size:14px;font-weight:700;color:var(--brand)}
+
+/* TOTALS */
+.tbar{background:var(--card2);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;margin-bottom:12px;display:none}
+.trow{display:flex;justify-content:space-between;margin-bottom:4px}
+.trow:last-child{margin-bottom:0}
+.tlbl{font-size:12px;color:var(--ink-soft)}
+.tval{font-size:14px;font-weight:700}
+.tval.big{font-size:18px;color:var(--brand)}
+.tval.red{color:var(--red)}
+
+/* PAYMENT */
+.pblock{background:var(--card2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;margin-bottom:8px;position:relative}
+.pdel{position:absolute;top:10px;right:10px;background:none;border:none;color:var(--red);cursor:pointer;font-size:16px}
+.addpbtn{width:100%;padding:10px;background:none;border:1.5px dashed var(--border);border-radius:var(--radius-sm);color:var(--ink-muted);font-size:13px;cursor:pointer;font-family:inherit;transition:border-color .15s}
+.addpbtn:hover{border-color:var(--brand);color:var(--brand)}
+.cominfo{font-size:11px;color:var(--ink-muted);margin-top:6px;padding:6px 8px;background:rgba(245,168,0,.08);border-radius:6px;border-left:2px solid var(--brand)}
+
+/* ALIADO */
+.togwrap{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border);margin-bottom:10px}
+.toglbl{font-size:13px;font-weight:600}
+.togsub{font-size:11px;color:var(--ink-muted);margin-top:2px}
+.tog{width:44px;height:24px;background:var(--border);border-radius:12px;cursor:pointer;position:relative;transition:background .2s;border:none;flex-shrink:0}
+.tog.on{background:var(--brand)}
+.tog::after{content:'';position:absolute;width:18px;height:18px;background:#fff;border-radius:50%;top:3px;left:3px;transition:left .2s}
+.tog.on::after{left:23px}
+.asel{display:none;margin-top:10px}
+.asel.open{display:block}
+.acard{background:var(--card2);border:1.5px solid var(--border);border-radius:var(--radius-sm);padding:12px;cursor:pointer;margin-bottom:8px;transition:border-color .15s}
+.acard.sel{border-color:var(--brand);background:var(--brand-soft)}
+.aname{font-size:13px;font-weight:700}
+.aneg{font-size:11px;color:var(--ink-muted)}
+.acom{font-size:11px;color:var(--brand);font-weight:600;float:right}
+.cprev{background:rgba(245,168,0,.1);border:1px solid rgba(245,168,0,.3);border-radius:var(--radius-sm);padding:10px 12px;margin-top:10px;font-size:12px;color:var(--ink-soft);display:none}
+.cprev.open{display:block}
+
+/* SUBMIT */
+.subbtn{width:100%;padding:16px;background:var(--brand);color:#111;border:none;border-radius:var(--radius);font-size:16px;font-weight:700;cursor:pointer;font-family:inherit;position:fixed;bottom:0;left:0;right:0;max-width:520px;margin:0 auto}
+.subbtn:disabled{opacity:.5}
+.botbar{position:fixed;bottom:0;left:0;right:0;display:flex;gap:8px;padding:10px 12px;background:var(--bg);border-top:1px solid var(--border);z-index:100;max-width:520px;margin:0 auto}
+.botbar .subbtn{position:static;flex:1;padding:14px}
+.botbar .cotbtn{flex:0 0 36%;background:var(--card2);color:var(--brand);border:1.5px solid var(--brand)}
+.nbtn-p:disabled{opacity:.5}
+
+/* MODALS */
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:200;display:none;align-items:flex-end}
+.overlay.open{display:flex}
+.sheet{background:var(--bg2);border-radius:20px 20px 0 0;border-top:2px solid var(--brand);padding:20px 16px 40px;width:100%;max-height:90vh;overflow-y:auto}
+.sheet-title{font-size:16px;font-weight:700;margin-bottom:4px}
+.sheet-sub{font-size:12px;color:var(--ink-muted);margin-bottom:16px}
+
+/* SUCCESS */
+.success{display:none;position:fixed;inset:0;background:var(--bg);z-index:300;flex-direction:column;align-items:center;justify-content:center;padding:24px;text-align:center}
+.success.open{display:flex}
+.sicon{font-size:64px;margin-bottom:16px}
+.success h2{font-size:22px;font-weight:700;margin-bottom:8px}
+.success p{font-size:14px;color:var(--ink-muted);margin-bottom:24px;line-height:1.6;white-space:pre-line}
+.sbtn{width:100%;padding:14px;border:none;border-radius:var(--radius);font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;margin-bottom:10px}
+.sbtn-y{background:var(--brand);color:#111}
+.sbtn-n{background:var(--card2);color:var(--ink-soft);border:1px solid var(--border)}
+
+/* NOTA BUTTONS */
+.nbtn{width:100%;padding:13px;border-radius:var(--radius);font-size:14px;font-weight:700;border:none;cursor:pointer;font-family:inherit;margin-bottom:8px}
+.nbtn-p{background:var(--brand);color:#111}
+.nbtn-w{background:#25D366;color:#fff;display:none}
+.nbtn-s{background:var(--card2);color:var(--ink-soft);border:1px solid var(--border)}
+
+/* CLIENTE CARD */
+.cli-result{background:var(--brand-soft);border:1.5px solid var(--brand);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between}
+.cli-info{font-size:13px;font-weight:600}
+.cli-sub{font-size:11px;color:var(--ink-muted)}
+.cli-clear{background:none;border:none;color:var(--ink-muted);cursor:pointer;font-size:18px}
+.cli-new-btn{width:100%;padding:10px;background:none;border:1.5px dashed var(--brand);border-radius:var(--radius-sm);color:var(--brand);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;margin-top:8px}
+
+/* TOAST */
+.toast{position:fixed;bottom:90px;left:50%;transform:translateX(-50%) translateY(40px);opacity:0;visibility:hidden;background:#222;color:#fff;padding:12px 20px;border-radius:18px;font-size:13px;font-weight:600;transition:transform .3s,opacity .3s,visibility .3s;z-index:999;max-width:92vw;text-align:center;line-height:1.4;cursor:pointer;border:1px solid var(--border);pointer-events:none}
+.toast.show{transform:translateX(-50%) translateY(0);opacity:1;visibility:visible}
+.toast.ok{border-color:var(--green);color:var(--green)}
+.toast.err{border-color:var(--red);color:var(--red);white-space:pre-line}
+
+/* NAV */
+.fab{position:fixed;bottom:70px;right:16px;z-index:90;width:48px;height:48px;background:var(--brand);border:none;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 16px rgba(245,168,0,.4)}
+.nav-ov{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:91;opacity:0;pointer-events:none;transition:opacity .2s}
+.nav-ov.open{opacity:1;pointer-events:auto}
+.nav-pan{position:fixed;bottom:0;left:0;right:0;z-index:92;background:var(--bg2);border-radius:20px 20px 0 0;border-top:2px solid var(--brand);padding:20px 16px 40px;transform:translateY(100%);transition:transform .3s}
+.nav-pan.open{transform:translateY(0)}
+.nav-t{font-size:12px;font-weight:700;color:var(--brand);text-transform:uppercase;letter-spacing:.5px;margin-bottom:16px;text-align:center}
+.nav-g{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.ncard{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px 12px;display:flex;flex-direction:column;align-items:center;gap:8px;text-decoration:none;-webkit-tap-highlight-color:transparent}
+.ncard.cur{border-color:var(--brand);background:var(--brand-soft)}
+.nicon{font-size:28px}
+.nlbl{font-size:12px;font-weight:700;color:var(--ink);text-align:center}
+.ndesc{font-size:10px;color:var(--ink-muted);text-align:center}
+
+/* COMPRAS */
+.linea{background:var(--card2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:8px}
+.linea .ltop{display:flex;gap:8px;align-items:flex-start}
+.linea .lname{flex:1;font-size:13px;font-weight:600;line-height:1.3}
+.linea .lmeta{font-size:11px;color:var(--ink-muted);margin-top:2px}
+.linea .lbot{display:flex;align-items:center;gap:10px;margin-top:8px}
+.tagnuevo{font-size:10px;font-weight:700;background:var(--brand-soft);color:var(--brand);padding:2px 8px;border-radius:10px}
+.fotobox{border:1.5px dashed var(--border);border-radius:var(--radius-sm);padding:14px;text-align:center;color:var(--ink-muted);font-size:13px;cursor:pointer;position:relative}
+.fotobox input{position:absolute;inset:0;opacity:0;cursor:pointer}
+.fotobox.ok{border-color:var(--green);color:var(--green)}
+.resumen{display:flex;justify-content:space-between;font-size:13px;color:var(--ink-soft);padding:8px 0}
+
+/* APARTADOS */
+.apcard{background:var(--card2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;margin-bottom:8px}
+.apcard.venc{border-color:var(--red)}
+.aptop{display:flex;justify-content:space-between;gap:8px;align-items:flex-start}
+.apnum{font-size:12px;color:var(--ink-muted);font-weight:600}
+.apcli{font-size:14px;font-weight:700;margin-top:1px}
+.approd{font-size:11px;color:var(--ink-soft);margin-top:4px;line-height:1.4}
+.apsaldo{text-align:right;white-space:nowrap}
+.apsaldo b{font-size:17px;color:var(--brand)}
+.apsaldo small{display:block;font-size:10px;color:var(--ink-muted)}
+.apbar{height:5px;border-radius:3px;background:rgba(255,255,255,.08);margin-top:8px;overflow:hidden}
+.apbar span{display:block;height:100%;background:var(--green)}
+.apacc{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}
+.apacc button{flex:1;min-width:88px;padding:8px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--ink);font-size:12px;font-weight:600;cursor:pointer;font-family:inherit}
+.apacc button.p{background:var(--brand);color:#111;border-color:var(--brand)}
+.apacc button.w{background:#25D366;color:#fff;border-color:#25D366}
+.tag{font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;background:var(--brand-soft);color:var(--brand)}
+.tag.cp{background:rgba(96,165,250,.15);color:#60a5fa}
+.tag.venc{background:rgba(239,68,68,.15);color:var(--red)}
+.tag.listo{background:rgba(34,197,94,.15);color:var(--green)}
+</style>
+</head>
+<body>
+
+<header>
+  <img src="logo-header.png" alt="BoParts" class="logo">
+  <div class="hdr">
+    <h1>Apartados</h1>
+    <p id="fechaHdr"></p>
+  </div>
+</header>
+
+<div class="container">
+
+  <div class="section">
+    <div class="stitle">Abiertos <span id="resumenTop" style="float:right;font-weight:500;text-transform:none;color:var(--ink-muted)"></span></div>
+    <div id="lista"><div class="cart-empty">Cargando...</div></div>
+    <button class="nbtn nbtn-p" onclick="abrirNuevo()">+ Nuevo apartado</button>
+  </div>
+
+  <!-- NUEVO -->
+  <div id="nuevo" style="display:none">
+    <div class="section">
+      <div class="stitle">Nuevo apartado</div>
+      <div class="row2">
+        <div class="field"><label>Tipo *</label>
+          <select id="npTipo" onchange="avisoTipo()">
+            <option value="APARTADO">Apartado (hay en stock)</option>
+            <option value="CONTRA_PEDIDO">Contra pedido (hay que encargarlo)</option>
+          </select>
+        </div>
+        <div class="field"><label>Vendedor *</label>
+          <select id="npVend"><option value="">Seleccionar...</option><option>Rodolfo Osuna</option><option>Javier Boves</option><option>Reinaldo Cuicas</option></select>
+        </div>
+      </div>
+      <div class="cominfo" id="tipoInfo">El producto queda reservado para el cliente hasta la fecha limite.</div>
+
+      <div class="field wrap" style="margin-top:10px"><label>Buscar producto</label>
+        <input type="search" id="prodSearch" placeholder="Nombre, codigo o marca..." autocomplete="off">
+        <div class="drop" id="prodDrop"></div>
+      </div>
+      <div id="lineasEl"><div class="cart-empty">Sin productos</div></div>
+
+      <div class="field wrap" style="margin-top:10px"><label>Cliente *</label>
+        <input type="search" id="cliSearch" placeholder="Nombre o telefono..." autocomplete="off">
+        <div class="drop" id="cliDrop"></div>
+      </div>
+      <div id="cliSel" style="display:none"></div>
+      <div id="cliNuevo" style="display:none">
+        <div class="row2">
+          <div class="field"><label>Nombre *</label><input type="text" id="cnNombre"></div>
+          <div class="field"><label>Telefono *</label><input type="tel" id="cnTel" placeholder="0414-0000000"></div>
+        </div>
+        <div class="cominfo">El telefono hace falta para avisarle cuando llegue o cuando venza.</div>
+      </div>
+
+      <div class="row2" style="margin-top:10px">
+        <div class="field"><label>Plazo</label>
+          <select id="npPlazo"><option value="15">15 dias</option><option value="21">21 dias</option><option value="30" selected>30 dias</option></select>
+        </div>
+        <div class="field"><label>Abono inicial</label><input type="number" id="npAbono" step="0.01" placeholder="0.00" oninput="previewNuevo()"></div>
+      </div>
+      <div class="row2">
+        <div class="field"><label>Moneda del abono</label><select id="npMon" onchange="previewNuevo()"><option value="BS">Bs</option><option value="USD">USD</option></select></div>
+        <div class="field"><label>Metodo</label><select id="npMet"></select></div>
+      </div>
+      <div class="cominfo" id="npPrev">El total y el abono se calculan al agregar productos.</div>
+      <div class="field" style="margin-top:8px"><label>Notas</label><input type="text" id="npNotas" placeholder="Opcional"></div>
+      <button class="nbtn nbtn-p" onclick="guardarNuevo()">Registrar apartado</button>
+      <button class="nbtn nbtn-s" onclick="cerrarNuevo()">Cancelar</button>
+    </div>
+  </div>
+
+</div>
+
+<!-- ABONO / ENTREGA -->
+<div class="notaov" id="movOv">
+  <div class="sheet">
+    <div class="sheet-title" id="movTit">Abono</div>
+    <div class="sheet-sub" id="movSub"></div>
+    <div class="row2">
+      <div class="field"><label>Monto</label><input type="number" id="mvMonto" step="0.01" oninput="previewMov()"></div>
+      <div class="field"><label>Moneda</label><select id="mvMon" onchange="previewMov()"><option value="BS">Bs</option><option value="USD">USD</option></select></div>
+    </div>
+    <div class="field"><label>Metodo de pago</label><select id="mvMet" onchange="previewMov()"></select></div>
+    <div class="cominfo" id="mvPrev"></div>
+    <button class="nbtn nbtn-p" id="mvBtn" onclick="guardarMov()">Guardar</button>
+    <button class="nbtn nbtn-s" onclick="document.getElementById('movOv').classList.remove('open')">Cancelar</button>
+  </div>
+</div>
+
+<div class="toast" id="toast" onclick="this.className='toast'"></div>
+
+<!-- FAB NAV -->
+<button class="fab" onclick="toggleNav()">
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#111" stroke-width="2.5" stroke-linecap="round">
+    <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
+  </svg>
+</button>
+<div class="nav-ov" id="navOv" onclick="closeNav()"></div>
+<div class="nav-pan" id="navPan">
+  <div class="nav-t">Repuesto BoParts</div>
+  <div class="nav-g">
+    <a class="ncard" href="index.html">
+      <span class="nicon">📋</span>
+      <span class="nlbl">Lista de Precios</span>
+      <span class="ndesc">Consulta y busqueda</span>
+    </a>
+    <a class="ncard" href="boparts_ventas.html">
+      <span class="nicon">💰</span>
+      <span class="nlbl">Registrar Venta</span>
+      <span class="ndesc">Nueva venta</span>
+    </a>
+    <a class="ncard" href="boparts_fotos.html">
+      <span class="nicon">📷</span>
+      <span class="nlbl">Cargar Fotos</span>
+      <span class="ndesc">Catalogo imagenes</span>
+    </a>
+    <a class="ncard" href="boparts_demanda.html">
+      <span class="nicon">📝</span>
+      <span class="nlbl">Demanda</span>
+      <span class="ndesc">No atendida</span>
+    </a>
+    <a class="ncard" href="boparts_compras.html">
+      <span class="nicon">📦</span>
+      <span class="nlbl">Compras</span>
+      <span class="ndesc">Recibir mercancia</span>
+    </a>
+    <a class="ncard" href="boparts_gastos.html">
+      <span class="nicon">💸</span>
+      <span class="nlbl">Gastos</span>
+      <span class="ndesc">Registrar gasto</span>
+    </a>
+    <a class="ncard cur" href="boparts_apartados.html">
+      <span class="nicon">🔖</span>
+      <span class="nlbl">Apartados</span>
+      <span class="ndesc">Y contra pedido</span>
+    </a>
+    <a class="ncard" href="boparts_cobros.html">
+      <span class="nicon">🧾</span>
+      <span class="nlbl">Cobros</span>
+      <span class="ndesc">Cuentas por cobrar</span>
+    </a>
+    <a class="ncard" href="boparts_gerencia.html">
+      <span class="nicon">📊</span>
+      <span class="nlbl">Gerencia</span>
+      <span class="ndesc">Solo socios</span>
+    </a>
+  </div>
+</div>
+
+<script>
+var CSV_URL    = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRaAnGd-Bfaxo3LjUiGeV8p0F2weaKqHGwJ0hWibSMj02-h7dRAQPDMmGL5B8-XQg66Yjd3zgOAaz8X/pub?gid=2100998338&single=true&output=csv';
+var CLIENTES_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRaAnGd-Bfaxo3LjUiGeV8p0F2weaKqHGwJ0hWibSMj02-h7dRAQPDMmGL5B8-XQg66Yjd3zgOAaz8X/pub?gid=647304383&single=true&output=csv';
+var SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
+var APP_VERSION = 'v1';
+var TASA = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
+
+var METODOS = [
+  {label:'Efectivo USD',        metodo:'Efectivo',        banco:'',                     moneda:'USD', fijo:0,    pct:0  },
+  {label:'Efectivo Bs',         metodo:'Efectivo',        banco:'',                     moneda:'BS',  fijo:0,    pct:0  },
+  {label:'Pago Movil Banesco',  metodo:'Pago Movil',      banco:'Banesco',               moneda:'BS',  fijo:0,    pct:0  },
+  {label:'Pago Movil Bancrecer',metodo:'Pago Movil',      banco:'Bancrecer',             moneda:'BS',  fijo:0,    pct:0  },
+  {label:'Punto Bancamiga',     metodo:'Punto de Venta',  banco:'Bancamiga',             moneda:'BS',  fijo:1000, pct:1.5},
+  {label:'Punto Bancrecer Emp.',metodo:'Punto de Venta',  banco:'Bancrecer Empresarial', moneda:'BS',  fijo:0,    pct:0  },
+  {label:'Cashea Bancrecer',    metodo:'Cashea',          banco:'Bancrecer Empresarial', moneda:'BS',  fijo:0,    pct:0  },
+  {label:'CREDITO (cuenta por cobrar)', metodo:'Credito', banco:'',                     moneda:'USD', fijo:0,    pct:0, credito:true }
+];
+
+var PRODUCTS = [], CLIENTES = [], APARTADOS = [];
+var lineas = [], cliente = null, movAp = null, movModo = 'ABONO';
+
+document.getElementById('fechaHdr').textContent = APP_VERSION + ' · ' + new Date().toLocaleDateString('es-VE', {weekday:'long', day:'numeric', month:'long'});
+(function() {
+  var h = '<option value="">Seleccionar...</option>';
+  for (var i = 0; i < METODOS.length; i++) if (!METODOS[i].credito) h += '<option value="' + i + '">' + escHtml(METODOS[i].label) + '</option>';
+  document.getElementById('npMet').innerHTML = h;
+  document.getElementById('mvMet').innerHTML = h;
+})();
+
+fetch(SCRIPT_URL + '?action=config&t=' + Date.now()).then(function(r) { return r.json(); })
+  .then(function(d) { if (d && d.ok && d.tasa > 0) { TASA = d.tasa; try { localStorage.setItem('motoauto_tasa', String(TASA)); } catch (e) {} } })
+  .catch(function() {});
+
+fetch(CSV_URL + '&t=' + Date.now()).then(function(r) { return r.text(); }).then(function(txt) {
+  if (!isValidCSV(txt)) return;
+  var rows = parseCSV(txt);
+  for (var i = 2; i < rows.length; i++) {
+    var r = rows[i], prod = (r[2] || '').trim();
+    if (!prod) continue;
+    PRODUCTS.push({codigo:(r[0] || '').trim(), marca:(r[1] || '').trim(), producto:prod,
+                   precio:parseNum(r[8]), costo:parseNum(r[7])});
+  }
+}).catch(function() { toast('No cargo la lista de productos', 'err'); });
+
+fetch(CLIENTES_URL + '&t=' + Date.now()).then(function(r) { return r.text(); }).then(function(txt) {
+  if (!isValidCSV(txt)) return;
+  var rows = parseCSV(txt);
+  for (var i = 1; i < rows.length; i++) {
+    var r = rows[i];
+    if (r[0] && r[0].trim()) CLIENTES.push({nombre:r[0].trim(), rif:(r[1] || '').trim(), tel:(r[2] || '').trim()});
+  }
+}).catch(function() {});
+
+// ---------- lista ----------
+function cargar() {
+  fetch(SCRIPT_URL + '?action=apartados&t=' + Date.now())
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (!d || !d.ok) throw new Error('sin datos');
+      APARTADOS = d.apartados || [];
+      render();
+    })
+    .catch(function(e) { document.getElementById('lista').innerHTML = '<div class="cart-empty" style="color:var(--red)">No se pudo cargar (' + escHtml(e.message) + ')</div>'; });
+}
+
+function render() {
+  var abiertos = APARTADOS.filter(function(a) { return a.estado === 'ABIERTO' || a.estado === 'LISTO'; });
+  var saldo = 0, anticipos = 0;
+  abiertos.forEach(function(a) { saldo += a.saldo; anticipos += a.abonado; });
+  document.getElementById('resumenTop').textContent = abiertos.length + ' · anticipos ' + usd(anticipos) + ' · por cobrar ' + usd(saldo);
+  if (!abiertos.length) { document.getElementById('lista').innerHTML = '<div class="cart-empty">No hay apartados abiertos</div>'; return; }
+  var h = '';
+  abiertos.forEach(function(a) {
+    var pct = a.total ? Math.min(100, Math.round(a.abonado / a.total * 100)) : 0;
+    h += '<div class="apcard' + (a.vencido ? ' venc' : '') + '">' +
+      '<div class="aptop"><div><div class="apnum">' + escHtml(a.num) + ' · ' + fechaES(a.fecha) +
+        ' <span class="tag ' + (a.tipo === 'CONTRA_PEDIDO' ? 'cp' : '') + '">' + (a.tipo === 'CONTRA_PEDIDO' ? 'CONTRA PEDIDO' : 'APARTADO') + '</span>' +
+        (a.estado === 'LISTO' ? ' <span class="tag listo">LISTO</span>' : '') +
+        (a.vencido ? ' <span class="tag venc">VENCIDO</span>' : '') + '</div>' +
+        '<div class="apcli">' + escHtml(a.cliente) + '</div>' +
+        '<div class="approd">' + escHtml(a.productos) + '</div></div>' +
+      '<div class="apsaldo"><b>' + usd(a.saldo) + '</b><small>de ' + usd(a.total) + '</small>' +
+        '<small>abonado ' + usd(a.abonado) + '</small></div></div>' +
+      '<div class="apbar"><span style="width:' + pct + '%"></span></div>' +
+      '<div class="apacc">' +
+        '<button onclick="abrirMov(\'' + a.num + '\',\'ABONO\')">Abonar</button>' +
+        (a.tipo === 'CONTRA_PEDIDO' && a.estado === 'ABIERTO' ? '<button onclick="marcarListo(\'' + a.num + '\')">Ya llego</button>' : '') +
+        '<button class="p" onclick="abrirMov(\'' + a.num + '\',\'ENTREGA\')">Entregar</button>' +
+        '<button class="w" onclick="avisar(\'' + a.num + '\')">WhatsApp</button>' +
+        '<button onclick="cerrar(\'' + a.num + '\')">Cerrar</button>' +
+      '</div></div>';
+  });
+  document.getElementById('lista').innerHTML = h;
+}
+
+function apPorNum(n) { return APARTADOS.filter(function(a) { return a.num === n; })[0]; }
+
+// ---------- nuevo ----------
+function abrirNuevo() { document.getElementById('nuevo').style.display = 'block'; document.getElementById('nuevo').scrollIntoView({behavior:'smooth'}); }
+function cerrarNuevo() { document.getElementById('nuevo').style.display = 'none'; lineas = []; cliente = null; renderLineas(); }
+function avisoTipo() {
+  var cp = document.getElementById('npTipo').value === 'CONTRA_PEDIDO';
+  document.getElementById('tipoInfo').innerHTML = cp
+    ? 'El producto no esta en tienda: hay que encargarlo. Cuando llegue, se marca <b>Ya llego</b> y se le avisa al cliente.'
+    : 'El producto queda reservado para el cliente hasta la fecha limite.';
+}
+
+var prodSearch = document.getElementById('prodSearch'), prodDrop = document.getElementById('prodDrop'), prodRes = [];
+prodSearch.addEventListener('input', function() {
+  var q = norm(prodSearch.value).trim();
+  if (q.length < 2) { prodDrop.classList.remove('open'); return; }
+  var terms = q.split(/\s+/);
+  prodRes = PRODUCTS.filter(function(p) { var hay = norm(p.producto + ' ' + p.codigo + ' ' + p.marca); return terms.every(function(t) { return hay.indexOf(t) >= 0; }); }).slice(0, 10);
+  var h = '';
+  for (var i = 0; i < prodRes.length; i++) h += '<div class="ditem" onclick="addLinea(' + i + ')">' + escHtml(prodRes[i].producto) + '<div class="ditem-meta">' + escHtml(prodRes[i].codigo) + ' · ' + usd(prodRes[i].precio) + '</div></div>';
+  prodDrop.innerHTML = h || '<div class="ditem">Sin resultados</div>';
+  prodDrop.classList.add('open');
+});
+function addLinea(i) {
+  var p = prodRes[i];
+  prodDrop.classList.remove('open'); prodSearch.value = '';
+  var ex = lineas.filter(function(l) { return l.codigo === p.codigo && l.producto === p.producto; })[0];
+  if (ex) ex.cantidad++; else lineas.push({codigo:p.codigo, producto:p.producto, precio:p.precio, costo:p.costo, cantidad:1});
+  renderLineas();
+}
+function setCant(i, v) { var c = parseInt(v) || 1; lineas[i].cantidad = c < 1 ? 1 : c; renderLineas(); }
+function delLinea(i) { lineas.splice(i, 1); renderLineas(); }
+function totalNuevo() { var t = 0; lineas.forEach(function(l) { t += l.precio * l.cantidad; }); return Math.round(t * 100) / 100; }
+function renderLineas() {
+  var el = document.getElementById('lineasEl');
+  if (!lineas.length) { el.innerHTML = '<div class="cart-empty">Sin productos</div>'; previewNuevo(); return; }
+  var h = '';
+  lineas.forEach(function(l, i) {
+    h += '<div class="citem"><div class="citem-top"><div class="cname">' + escHtml(l.producto) + '</div>' +
+      '<button class="cdel" onclick="delLinea(' + i + ')">&#x2715;</button></div>' +
+      '<div class="crow"><div class="qwrap"><button class="qbtn" onclick="setCant(' + i + ',' + (l.cantidad - 1) + ')">-</button>' +
+      '<input class="qin" type="number" value="' + l.cantidad + '" onchange="setCant(' + i + ',this.value)">' +
+      '<button class="qbtn" onclick="setCant(' + i + ',' + (l.cantidad + 1) + ')">+</button></div>' +
+      '<div class="csub">' + usd(l.precio * l.cantidad) + '</div></div></div>';
+  });
+  el.innerHTML = h;
+  previewNuevo();
+}
+
+var cliSearch = document.getElementById('cliSearch'), cliDrop = document.getElementById('cliDrop'), cliRes = [];
+cliSearch.addEventListener('input', function() {
+  var q = norm(cliSearch.value).trim();
+  cliRes = CLIENTES.filter(function(c) { return !q || norm(c.nombre + ' ' + c.tel + ' ' + c.rif).indexOf(q) >= 0; }).slice(0, 8);
+  var h = '';
+  for (var i = 0; i < cliRes.length; i++) h += '<div class="ditem" onclick="selCli(' + i + ')">' + escHtml(cliRes[i].nombre) + '<div class="ditem-meta">' + escHtml(cliRes[i].tel || '') + '</div></div>';
+  h += '<div class="ditem" onclick="nuevoCli()" style="color:var(--brand);font-weight:600">+ Cliente nuevo</div>';
+  cliDrop.innerHTML = h; cliDrop.classList.add('open');
+});
+function selCli(i) {
+  cliente = cliRes[i]; cliDrop.classList.remove('open'); cliSearch.value = '';
+  document.getElementById('cliNuevo').style.display = 'none';
+  var el = document.getElementById('cliSel');
+  el.innerHTML = '<div class="cli-result"><div><div class="cli-info">' + escHtml(cliente.nombre) + '</div><div class="cli-sub">' + escHtml(cliente.tel || 'sin telefono') + '</div></div>' +
+    '<button class="cli-clear" onclick="cliente=null;document.getElementById(\'cliSel\').style.display=\'none\'">&#x2715;</button></div>';
+  el.style.display = 'block';
+}
+function nuevoCli() {
+  cliDrop.classList.remove('open');
+  document.getElementById('cnNombre').value = cliSearch.value.trim();
+  document.getElementById('cliNuevo').style.display = 'block';
+  document.getElementById('cliSel').style.display = 'none';
+  cliente = null;
+}
+function previewNuevo() {
+  var t = totalNuevo();
+  var ab = parseFloat(document.getElementById('npAbono').value) || 0;
+  var abUSD = document.getElementById('npMon').value === 'BS' ? (TASA ? ab / TASA : 0) : ab;
+  var pct = t ? Math.round(abUSD / t * 100) : 0;
+  document.getElementById('npPrev').innerHTML = t
+    ? 'Total <b>' + usd(t) + '</b>' + (TASA ? ' (' + bs(t * TASA) + ')' : '') +
+      (ab ? ' · abona <b>' + usd(abUSD) + '</b> (' + pct + '%) · queda debiendo <b>' + usd(Math.max(0, t - abUSD)) + '</b>' : '') +
+      (ab && pct < 50 ? '<br><span style="color:var(--brand)">El abono esta por debajo del 50% de referencia.</span>' : '')
+    : 'El total y el abono se calculan al agregar productos.';
+}
+
+function guardarNuevo() {
+  var vend = document.getElementById('npVend').value;
+  if (!vend) { toast('Indica el vendedor', 'err'); return; }
+  if (!lineas.length) { toast('Agrega los productos', 'err'); return; }
+  if (!cliente) {
+    var n = document.getElementById('cnNombre').value.trim(), t = document.getElementById('cnTel').value.trim();
+    if (!n || !t) { toast('Indica el cliente y su telefono', 'err'); return; }
+    cliente = {nombre:n, tel:t, rif:''};
+  }
+  var ab = parseFloat(document.getElementById('npAbono').value) || 0;
+  var mon = document.getElementById('npMon').value;
+  var mi = parseInt(document.getElementById('npMet').value), m = isNaN(mi) ? null : METODOS[mi];
+  if (ab > 0 && !m) { toast('Indica con que metodo abono', 'err'); return; }
+  if (ab > 0 && mon === 'BS' && !TASA) { toast('No hay tasa cargada', 'err'); return; }
+  var abUSD = mon === 'BS' ? ab / TASA : ab;
+  var total = totalNuevo();
+  if (abUSD > total + 0.05) { toast('El abono supera el total', 'err'); return; }
+
+  var now = new Date(), vence = new Date();
+  vence.setDate(vence.getDate() + parseInt(document.getElementById('npPlazo').value));
+  var bsMonto = mon === 'BS' ? ab : ab * TASA;
+  var payload = {
+    tipo:'apartado', tipo2:document.getElementById('npTipo').value,
+    fecha:fmtFechaVE(now), hora:now.toLocaleTimeString('es-VE', {hour:'2-digit', minute:'2-digit'}),
+    cliente:cliente.nombre, rif:cliente.rif || '', tel:cliente.tel || '',
+    vendedor:vend, vence:fmtFechaVE(vence), tasa:TASA, notas:document.getElementById('npNotas').value.trim(),
+    abonoUSD:Math.round(abUSD * 100) / 100, moneda:mon, montoPagado:ab,
+    metodo:m ? m.metodo : '', banco:m ? m.banco : '', comision:m ? Math.round(m.fijo + bsMonto * m.pct / 100) : 0,
+    lineas:lineas.map(function(l) { return {codigo:l.codigo, producto:l.producto, cantidad:l.cantidad, precio:l.precio, costo:l.costo}; })
+  };
+  post(payload, function(d) {
+    toast('Apartado ' + d.num + ' registrado', 'ok');
+    cerrarNuevo();
+    document.getElementById('npAbono').value = '';
+    cargar();
+  });
+}
+
+// ---------- abono / entrega ----------
+function abrirMov(num, modo) {
+  movAp = apPorNum(num); movModo = modo;
+  if (!movAp) return;
+  document.getElementById('movTit').textContent = (modo === 'ENTREGA' ? 'Entregar ' : 'Abono a ') + num;
+  document.getElementById('movSub').textContent = movAp.cliente + ' · saldo ' + usd(movAp.saldo) + ' de ' + usd(movAp.total);
+  document.getElementById('mvBtn').textContent = modo === 'ENTREGA' ? 'Entregar y registrar venta' : 'Guardar abono';
+  document.getElementById('mvMonto').value = modo === 'ENTREGA' ? (TASA ? Math.round(movAp.saldo * TASA) : movAp.saldo) : '';
+  document.getElementById('mvMon').value = 'BS';
+  previewMov();
+  document.getElementById('movOv').classList.add('open');
+}
+function montoMovUSD() {
+  var v = parseFloat(document.getElementById('mvMonto').value) || 0;
+  return document.getElementById('mvMon').value === 'BS' ? (TASA ? v / TASA : 0) : v;
+}
+function previewMov() {
+  if (!movAp) return;
+  var u = montoMovUSD();
+  var resta = Math.max(0, Math.round((movAp.saldo - u) * 100) / 100);
+  document.getElementById('mvPrev').innerHTML = movModo === 'ENTREGA'
+    ? (resta > 0.05 ? '<span style="color:var(--red)">Faltan ' + usd(resta) + ' para poder entregar.</span>'
+                    : 'Al entregar se registra la venta por <b>' + usd(movAp.total) + '</b> y se descuenta del inventario.')
+    : 'Abona <b>' + usd(u) + '</b> · quedaria debiendo <b>' + usd(resta) + '</b>';
+}
+function guardarMov() {
+  if (!movAp) return;
+  var u = Math.round(montoMovUSD() * 100) / 100;
+  var mi = parseInt(document.getElementById('mvMet').value), m = isNaN(mi) ? null : METODOS[mi];
+  if (u > 0 && !m) { toast('Indica el metodo de pago', 'err'); return; }
+  if (movModo !== 'ENTREGA' && u <= 0) { toast('Indica el monto', 'err'); return; }
+  var now = new Date(), mon = document.getElementById('mvMon').value;
+  var bsMonto = mon === 'BS' ? (parseFloat(document.getElementById('mvMonto').value) || 0) : u * TASA;
+  var base = {
+    num:movAp.num, fecha:fmtFechaVE(now), hora:now.toLocaleTimeString('es-VE', {hour:'2-digit', minute:'2-digit'}),
+    moneda:mon, montoPagado:parseFloat(document.getElementById('mvMonto').value) || 0, tasa:TASA,
+    metodo:m ? m.metodo : '', banco:m ? m.banco : '', comision:m ? Math.round(m.fijo + bsMonto * m.pct / 100) : 0,
+    registradoPor:document.getElementById('npVend').value || '', vendedor:document.getElementById('npVend').value || movAp.vendedor
+  };
+  if (movModo === 'ENTREGA') {
+    base.tipo = 'apartado_entregar'; base.pagoFinalUSD = u;
+    base.pago2 = m ? {metodo:m.metodo, banco:m.banco, monto:Math.round(bsMonto), moneda:mon} : {};
+    post(base, function(d) {
+      document.getElementById('movOv').classList.remove('open');
+      toast('Entregado · nota ' + (d.numNota || '') + ' registrada', 'ok');
+      cargar();
+    });
+  } else {
+    base.tipo = 'apartado_abono'; base.montoUSD = u;
+    post(base, function(d) {
+      document.getElementById('movOv').classList.remove('open');
+      toast('Abono guardado · saldo ' + usd(d.saldo), 'ok');
+      cargar();
+    });
+  }
+}
+
+function marcarListo(num) {
+  var a = apPorNum(num);
+  if (!a || !confirm('Marcar ' + num + ' como listo para retirar y avisar al cliente?')) return;
+  post({tipo:'apartado_cerrar', num:num, modo:'LISTO', fecha:fmtFechaVE(new Date())}, function() {
+    cargar();
+    setTimeout(function() { avisar(num, true); }, 300);
+  });
+}
+
+function cerrar(num) {
+  var a = apPorNum(num);
+  if (!a) return;
+  var modo = prompt('Cerrar ' + num + ' sin entregar.\n\nEscribe 1 para DEVOLVER el dinero (' + usd(a.abonado) + ')\nEscribe 2 para dejarlo como CREDITO A FAVOR del cliente', '1');
+  if (modo === null) return;
+  var m = String(modo).trim() === '2' ? 'CREDITO_A_FAVOR' : 'DEVOLUCION';
+  if (!confirm(m === 'DEVOLUCION' ? 'Se devuelven ' + usd(a.abonado) + ' al cliente. Confirmas?' : 'Quedan ' + usd(a.abonado) + ' a favor del cliente. Confirmas?')) return;
+  post({tipo:'apartado_cerrar', num:num, modo:m, fecha:fmtFechaVE(new Date()), tasa:TASA,
+        registradoPor:document.getElementById('npVend').value || ''}, function() {
+    toast(m === 'DEVOLUCION' ? 'Devolucion registrada' : 'Credito a favor registrado', 'ok');
+    cargar();
+  });
+}
+
+function avisar(num, llego) {
+  var a = apPorNum(num);
+  if (!a) return;
+  var msg;
+  if (llego || a.estado === 'LISTO') {
+    msg = 'Hola ' + primerNombre(a.cliente) + ', le saluda Repuesto BoParts. Buenas noticias: ya llego su pedido.' +
+      '\n\n' + a.productos +
+      '\n\nAbonado: ' + usd(a.abonado) + '\nPor cancelar al retirar: *' + usd(a.saldo) + '*' + (TASA ? ' (' + bs(a.saldo * TASA) + ')' : '') +
+      '\n\nLo esperamos cuando guste. Quedamos a la orden.\nRepuesto BoParts\n0412-3185778 / 0414-9536708';
+  } else {
+    msg = 'Hola ' + primerNombre(a.cliente) + ', le saluda Repuesto BoParts.' +
+      '\n\nLe recordamos su ' + (a.tipo === 'CONTRA_PEDIDO' ? 'pedido' : 'apartado') + ' ' + a.num + ':' +
+      '\n' + a.productos +
+      '\n\nTotal: ' + usd(a.total) + '\nAbonado: ' + usd(a.abonado) + '\nPendiente: *' + usd(a.saldo) + '*' + (TASA ? ' (' + bs(a.saldo * TASA) + ')' : '') +
+      (a.vence ? '\nFecha limite: ' + fechaES(a.vence) : '') +
+      '\n\nCuando pueda nos indica como le queda mejor completar el pago y con gusto lo coordinamos.' +
+      '\n\nQuedamos a la orden.\nRepuesto BoParts\n0412-3185778 / 0414-9536708';
+  }
+  window.open('https://wa.me/' + waTel(a.tel) + '?text=' + encodeURIComponent(msg), '_blank');
+}
+function waTel(t) {
+  var d = String(t || '').replace(/[^0-9]/g, '');
+  if (!d) return '';
+  if (d.indexOf('58') === 0 && d.length >= 12) return d;
+  if (d.indexOf('0') === 0) d = d.slice(1);
+  return d.length === 10 ? '58' + d : '';
+}
+function primerNombre(n) {
+  var t = String(n || '').trim();
+  if (!t) return '';
+  if (/taller|repuesto|inversiones|c\.a|comercial|distribuidora|servicio|auto|moto|s\.a/i.test(t)) return t;
+  var p = t.split(/\s+/)[0];
+  return p.charAt(0).toUpperCase() + p.slice(1).toLowerCase();
+}
+
+function post(payload, ok) {
+  fetch(SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body:JSON.stringify(payload)})
+    .then(function(r) { return r.text(); })
+    .then(function(t) { var d; try { d = JSON.parse(t); } catch (e) { throw new Error('El script respondio: ' + t.replace(/<[^>]+>/g, ' ').slice(0, 90)); } 
+      if (!d || d.ok !== true) throw new Error(d && d.error ? d.error : 'respuesta inesperada');
+      ok(d); })
+    .catch(function(e) { toast('No se guardo: ' + e.message, 'err'); });
+}
+
+function usd(n) { return '$' + (Math.round((n || 0) * 100) / 100).toFixed(2); }
+function bs(n) { return 'Bs ' + Math.round(n || 0).toLocaleString('es-VE'); }
+function fechaES(f) { var p = String(f).split('-'); return p.length === 3 ? p[2] + '/' + p[1] + '/' + p[0] : f; }
+function fmtFechaVE(d) { return d.getDate() + '/' + (d.getMonth() + 1) + '/' + d.getFullYear(); }
+function parseNum(v) {
+  if (typeof v === 'number') return v;
+  var t = String(v == null ? '' : v).replace(/[^0-9.,-]/g, '');
+  if (!t) return 0;
+  if (t.indexOf(',') >= 0 && t.indexOf('.') >= 0) {
+    if (t.lastIndexOf(',') > t.lastIndexOf('.')) t = t.replace(/\./g, '').replace(',', '.'); else t = t.replace(/,/g, '');
+  } else if (t.indexOf(',') >= 0) t = t.replace(',', '.');
+  var n = parseFloat(t);
+  return isNaN(n) ? 0 : n;
+}
+function parseCSV(txt) {
+  var rows = [];
+  var lines = txt.split(/\r?\n/);
+  for (var i = 0; i < lines.length; i++) {
+    var row = [], cur = '', q = false;
+    for (var c = 0; c < lines[i].length; c++) {
+      var ch = lines[i][c];
+      if (ch === '"') { q = !q; }
+      else if (ch === ',' && !q) { row.push(cur.trim()); cur = ''; }
+      else { cur += ch; }
+    }
+    row.push(cur.trim());
+    rows.push(row);
+  }
+  return rows;
+}
+
+function isValidCSV(txt) {
+  if (!txt) return false;
+  var t = txt.trim().substring(0, 10).toLowerCase();
+  return !(t.indexOf('<!doc') === 0 || t.indexOf('<html') === 0 ||
+           t.indexOf('function') === 0 || t.indexOf('var ') === 0);
+}
+
+function norm(s) {
+  return (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function toast(msg, type) {
+  var el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'toast show ' + (type || '');
+  clearTimeout(el._t);
+  el._t = setTimeout(function() { el.className = 'toast'; }, type === 'err' ? 7000 : 3500);
+}
+
+function toggleNav() {
+  document.getElementById('navPan').classList.toggle('open');
+  document.getElementById('navOv').classList.toggle('open');
+}
+function closeNav() {
+  document.getElementById('navPan').classList.remove('open');
+  document.getElementById('navOv').classList.remove('open');
+}
+
+document.addEventListener('click', function(e) { if (!e.target.closest('.wrap')) { prodDrop.classList.remove('open'); cliDrop.classList.remove('open'); } });
+cargar();
+</script>
+</body>
+</html>
