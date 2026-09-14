@@ -1,7 +1,9 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_cobros.html
-  VERSION: v2.3 (2026-09-12) — nav con Gerencia | requiere Apps Script v11.3
+  VERSION: v2.4 (2026-09-13) | requiere Apps Script v13
+  v2.4: boton Cobrar en cada cliente y en su detalle: manda el estado de cuenta por WhatsApp al chat del cliente
+        (usa el telefono de la hoja CLIENTES) sin tener que registrar un abono antes
   v2.1: cada nota muestra los productos que se debe; fechas cortas dd/mm/aaaa; logo sin fondo en el encabezado
   v1.1: enlace a Compras en el nav
   Cuentas por cobrar: saldo por cliente en USD, notas pendientes (abonos a las mas viejas primero),
@@ -155,6 +157,9 @@ select option{background:#1E1E1E;color:var(--ink)}
 .ccard .cr{font-size:11px;color:var(--ink-muted)}
 .ccard .cs{font-size:15px;font-weight:700;color:var(--brand);text-align:right}
 .ccard .cs small{display:block;font-size:10px;color:var(--ink-muted);font-weight:500}
+.cobrar{background:#25D366;color:#fff;border:none;border-radius:20px;padding:7px 14px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap}
+.cobrar.big{width:100%;padding:12px;font-size:14px;margin-top:10px}
+.ccard .right{display:flex;align-items:center;gap:10px}
 .nrow{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:12px}
 .nrow:last-child{border-bottom:none}
 .badge{font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px}
@@ -206,6 +211,7 @@ select option{background:#1E1E1E;color:var(--ink)}
         <label>Ultimos abonos</label>
         <div id="detAbonos"></div>
       </div>
+      <button class="cobrar big" onclick="cobrar(sel ? sel.cliente : '')">Cobrar por WhatsApp</button>
     </div>
 
     <div class="section">
@@ -304,9 +310,58 @@ var METODOS = [
 
 var CLIENTES = [];   // estado de cuenta por cliente (viene de Apps Script)
 var sel = null;
+var TELS = {};   // nombre del cliente -> telefono, para abrir su chat directo
+
+try { TELS = JSON.parse(localStorage.getItem('boparts_tels') || '{}'); } catch (e) {}
+fetch(SCRIPT_URL + '?action=clientes&t=' + Date.now())
+  .then(function(r) { return r.json(); })
+  .then(function(d) {
+    if (!d || !d.ok || !d.clientes) return;
+    d.clientes.forEach(function(c) { if (c[0] && c[2]) TELS[String(c[0]).trim().toUpperCase()] = String(c[2]).trim(); });
+    try { localStorage.setItem('boparts_tels', JSON.stringify(TELS)); } catch (e) {}
+  })
+  .catch(function() {});
+
+// 0414-9876543 -> 584149876543 (formato que entiende WhatsApp)
+function waTel(nombre) {
+  var t = TELS[String(nombre || '').trim().toUpperCase()] || '';
+  var d = t.replace(/[^0-9]/g, '');
+  if (!d) return '';
+  if (d.indexOf('58') === 0 && d.length >= 12) return d;
+  if (d.indexOf('0') === 0) d = d.slice(1);
+  return d.length === 10 ? '58' + d : '';
+}
+
+// Recordatorio de cobro: directo con el monto, pero cordial. No requiere registrar ningun abono.
+function cobrar(nombre) {
+  var c = CLIENTES.filter(function(x) { return x.cliente === nombre; })[0];
+  if (!c) { toast('No se encontro el cliente', 'err'); return; }
+  var lineas = '';
+  c.notas.filter(function(n) { return n.estado !== 'PAGADA'; }).forEach(function(n) {
+    lineas += '\n\n' + (n.nota ? 'Nota ' + ('000' + n.nota).slice(-4) : 'Entrega') + ' del ' + fechaCorta(n.fecha) + ' - ' + fmtUSD(n.pendienteUSD) +
+      (n.estado === 'PARCIAL' ? ' (queda pendiente de un abono parcial)' : '') +
+      (n.productos ? '\n' + limpiarProductos(n.productos) : '');
+  });
+  var saldoBs = TASA ? ' (' + fmtBS(c.saldoUSD * TASA) + ' a tasa ' + TASA + ')' : '';
+  var msg = 'Hola ' + primerNombre(c.cliente) + ', le saluda Repuesto BoParts. Gracias por confiar en nosotros.' +
+    '\n\nLe escribimos para recordarle que tiene un saldo pendiente de *' + fmtUSD(c.saldoUSD) + '*' + saldoBs + ', correspondiente a:' + lineas +
+    '\n\nCuando pueda nos indica como le queda mejor cancelar y lo coordinamos con gusto. Si ya realizo el pago, por favor haga caso omiso a este mensaje y nos comparte el comprobante.' +
+    '\n\nQuedamos a la orden.\nRepuesto BoParts\n0412-3185778 / 0414-9536708';
+  var tel = waTel(c.cliente);
+  window.open('https://wa.me/' + tel + '?text=' + encodeURIComponent(msg), '_blank');
+  if (!tel) toast('Sin telefono en CLIENTES: elige el contacto en WhatsApp', 'err');
+}
+// "Taller Diesel Luis" -> "Taller Diesel Luis"; "Jose Perez" -> "Jose". Con nombres de negocio se usa completo.
+function primerNombre(n) {
+  var t = String(n || '').trim();
+  if (!t) return '';
+  if (/taller|repuesto|inversiones|c\.a|comercial|distribuidora|servicio|auto|moto|c\.a\.|s\.a/i.test(t)) return t;
+  var p = t.split(/\s+/)[0];
+  return p.charAt(0).toUpperCase() + p.slice(1).toLowerCase();
+}
 var ultimo = null;   // ultimo abono registrado (para el mensaje de WhatsApp)
 
-var APP_VERSION = 'v2.3';
+var APP_VERSION = 'v2.4';
 document.getElementById('fechaHdr').textContent = APP_VERSION + ' · ' + new Date().toLocaleDateString('es-VE', {weekday:'long', day:'numeric', month:'long'});
 
 // Metodos de pago (sin CREDITO)
@@ -340,7 +395,8 @@ function renderLista() {
     var pend = c.notas.filter(function(n) { return n.estado !== 'PAGADA'; }).length;
     h += '<div class="ccard' + (sel && sel.cliente === c.cliente ? ' sel' : '') + '" onclick="elegir(\'' + escAttr(c.cliente) + '\')">' +
       '<div><div class="cn">' + escHtml(c.cliente) + '</div><div class="cr">' + pend + ' nota' + (pend === 1 ? '' : 's') + ' pendiente' + (pend === 1 ? '' : 's') + (c.rif ? ' · ' + escHtml(c.rif) : '') + '</div></div>' +
-      '<div class="cs">' + fmtUSD(c.saldoUSD) + '<small>' + (TASA ? fmtBS(c.saldoUSD * TASA) : '') + '</small></div></div>';
+      '<div class="right"><div class="cs">' + fmtUSD(c.saldoUSD) + '<small>' + (TASA ? fmtBS(c.saldoUSD * TASA) : '') + '</small></div>' +
+      '<button class="cobrar" onclick="event.stopPropagation();cobrar(\'' + escAttr(c.cliente) + '\')">Cobrar</button></div></div>';
   });
   document.getElementById('cliList').innerHTML = h;
 }

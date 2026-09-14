@@ -11,7 +11,7 @@ en el comentario del encabezado de cada HTML y en la cabecera de `Code.gs`.
 |-------------------------|---------|----------------------|
 | index.html              | v9.6    | **v13** (para la tasa) |
 | boparts_ventas.html     | v11.1   | **v13**              |
-| boparts_cobros.html     | v2.3    | **v13**              |
+| boparts_cobros.html     | v2.4    | **v13**              |
 | boparts_compras.html    | v1.4    | **v11**              |
 | boparts_gastos.html     | v1.4    | **v13**              |
 | boparts_fotos.html      | v8.3    | **v11.5**            |
