@@ -1,7 +1,9 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_gerencia.html
-  VERSION: v1.6 (2026-09-14) | requiere Apps Script v14
+  VERSION: v1.7 (2026-09-14) | requiere Apps Script v16
+  v1.7: pantalla de clientes: metricas por cliente (compras, frecuencia, total, margen, productos) y desde ahi se
+        autoriza el credito, se pone el limite y el plazo
   v1.6: bloque de Apartados: compromisos pendientes de entrega, anticipos recibidos y apartados vencidos.
         El anticipo entra en caja pero NO es ingreso: la venta aparece el dia que se entrega.
   v1.5: al salir a otro modulo se ocultan los datos, pero ya no se recarga la pagina (eso cancelaba la navegacion
@@ -192,6 +194,23 @@ select option{background:#1E1E1E;color:var(--ink)}
 .rango{display:flex;gap:8px;align-items:center;margin-bottom:8px}
 .rango input{padding:8px}
 .aviso{font-size:11px;color:var(--ink-muted);line-height:1.5;margin-top:8px}
+.cli{background:var(--card2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:11px 12px;margin-bottom:8px}
+.cli .h{display:flex;justify-content:space-between;gap:8px;align-items:flex-start;cursor:pointer}
+.cli .nm{font-size:13px;font-weight:700;line-height:1.3}
+.cli .sb{font-size:11px;color:var(--ink-muted);margin-top:2px}
+.cli .rt{text-align:right;font-size:14px;font-weight:700;white-space:nowrap}
+.cli .rt small{display:block;font-size:10px;color:var(--ink-muted);font-weight:500}
+.cli .det{display:none;margin-top:10px;border-top:1px solid var(--border);padding-top:10px}
+.cli.open .det{display:block}
+.chip{display:inline-block;font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;margin-right:4px}
+.chip.cr{background:var(--brand-soft);color:var(--brand)}
+.chip.no{background:rgba(255,255,255,.07);color:var(--ink-muted)}
+.chip.al{background:rgba(239,68,68,.15);color:var(--red)}
+.cli .gr{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px}
+.cli .gr div{font-size:11px;color:var(--ink-muted)}
+.cli .gr b{display:block;font-size:14px;color:var(--ink);font-weight:700}
+.cfg{display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end}
+.cfg input,.cfg select{padding:8px}
 .pinov{position:fixed;inset:0;z-index:9998;background:#111;display:flex;align-items:center;justify-content:center;padding:24px}
 .pinov.off{display:none}
 .pinbox{width:100%;max-width:320px;text-align:center}
@@ -242,6 +261,19 @@ select option{background:#1E1E1E;color:var(--ink)}
   </div>
 
   <div id="apartadosBox"></div>
+
+  <div class="section">
+    <div class="stitle">Clientes <span style="float:right;font-weight:500;text-transform:none;color:var(--ink-muted)" id="cliCount"></span></div>
+    <div class="tabs" id="cliTabs">
+      <button class="tab on" data-o="total">Los que mas compran</button>
+      <button class="tab" data-o="reciente">Ultima compra</button>
+      <button class="tab" data-o="dormidos">Sin venir</button>
+      <button class="tab" data-o="credito">Con credito</button>
+      <button class="tab" data-o="margen">Mejor margen</button>
+    </div>
+    <input type="search" id="cliBuscar" placeholder="Buscar por nombre, cedula o telefono..." oninput="pintarClientes()" style="margin-bottom:8px">
+    <div id="clientesBox"><div class="cart-empty">Cargando...</div></div>
+  </div>
 
   <div id="cuerpo"><div class="cart-empty">Cargando...</div></div>
 
@@ -326,7 +358,7 @@ select option{background:#1E1E1E;color:var(--ink)}
 
 <script>
 var SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
-var APP_VERSION = 'v1.6';
+var APP_VERSION = 'v1.7';
 var TASA = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
 var periodo = 'hoy', DATA = null;
 
@@ -356,6 +388,7 @@ function abrirGerencia() {
   document.getElementById('pinov').classList.add('off');
   cargarTasa();
   cargarApartados();
+  cargarClientes();
   cargar();
 }
 function salirGerencia() { location.reload(); }
@@ -469,6 +502,111 @@ function cargarApartados() {
     })
     .catch(function() {});
 }
+
+// ---- CLIENTES -------------------------------------------------------------
+var CLIENTES = [], STATS = {}, ordenCli = 'total', cliAbierto = '';
+
+document.getElementById('cliTabs').addEventListener('click', function(e) {
+  var b = e.target.closest('.tab'); if (!b) return;
+  [].forEach.call(document.querySelectorAll('#cliTabs .tab'), function(t) { t.classList.remove('on'); });
+  b.classList.add('on'); ordenCli = b.dataset.o; pintarClientes();
+});
+
+function cargarClientes() {
+  Promise.all([
+    fetch(SCRIPT_URL + '?action=clientes&t=' + Date.now()).then(function(r) { return r.json(); }),
+    fetch(SCRIPT_URL + '?action=cliente_stats&t=' + Date.now()).then(function(r) { return r.json(); })
+  ]).then(function(res) {
+    var c = res[0], st = res[1];
+    CLIENTES = (c && c.clientes ? c.clientes : []).map(function(r) {
+      return {nombre:r[0] || '', ced:r[1] || '', tel:r[2] || '', credito:String(r[6] || '').toUpperCase() === 'SI',
+              limite:num(r[7]), dias:num(r[8])};
+    }).filter(function(x) { return x.nombre; });
+    STATS = {};
+    (st && st.clientes ? st.clientes : []).forEach(function(s) { STATS[s.cliente.trim().toUpperCase()] = s; });
+    // Clientes que aparecen en ventas pero no estan en la hoja CLIENTES
+    (st && st.clientes ? st.clientes : []).forEach(function(s) {
+      var existe = CLIENTES.some(function(x) { return x.nombre.trim().toUpperCase() === s.cliente.trim().toUpperCase(); });
+      if (!existe) CLIENTES.push({nombre:s.cliente, ced:'', tel:'', credito:false, limite:0, dias:0, suelto:true});
+    });
+    pintarClientes();
+  }).catch(function(e) {
+    document.getElementById('clientesBox').innerHTML = '<div class="cart-empty" style="color:var(--red)">No se pudieron cargar los clientes</div>';
+  });
+}
+
+function stat(c) { return STATS[c.nombre.trim().toUpperCase()] || {compras:0, totalUSD:0, utilidadUSD:0, margen:0, ticket:0, ultima:'', diasSinComprar:null, top:[]}; }
+
+function pintarClientes() {
+  var q = norm(document.getElementById('cliBuscar').value).trim();
+  var lista = CLIENTES.filter(function(c) { return !q || norm(c.nombre + ' ' + c.ced + ' ' + c.tel).indexOf(q) >= 0; });
+  if (ordenCli === 'credito') lista = lista.filter(function(c) { return c.credito; });
+  if (ordenCli === 'dormidos') lista = lista.filter(function(c) { return stat(c).compras > 0; });
+  lista.sort(function(a, b) {
+    var sa = stat(a), sb = stat(b);
+    if (ordenCli === 'reciente') return String(sb.ultima || '').localeCompare(String(sa.ultima || ''));
+    if (ordenCli === 'dormidos') return (sb.diasSinComprar || 0) - (sa.diasSinComprar || 0);
+    if (ordenCli === 'margen') return sb.margen - sa.margen;
+    return sb.totalUSD - sa.totalUSD;
+  });
+  document.getElementById('cliCount').textContent = lista.length + ' de ' + CLIENTES.length;
+  if (!lista.length) { document.getElementById('clientesBox').innerHTML = '<div class="cart-empty">Sin clientes</div>'; return; }
+
+  var h = '';
+  lista.slice(0, 60).forEach(function(c) {
+    var s = stat(c), id = escAttr(c.nombre);
+    var dormido = s.diasSinComprar !== null && s.diasSinComprar >= 45;
+    h += '<div class="cli' + (cliAbierto === c.nombre ? ' open' : '') + '" id="cli-' + idSafe(c.nombre) + '">' +
+      '<div class="h" onclick="abrirCli(\'' + id + '\')"><div><div class="nm">' + escHtml(c.nombre) + '</div>' +
+      '<div class="sb">' + (c.ced ? escHtml(c.ced) : 'sin cedula') + (c.tel ? ' · ' + escHtml(c.tel) : ' · sin telefono') + '</div>' +
+      '<div style="margin-top:6px">' +
+        (c.credito ? '<span class="chip cr">CREDITO' + (c.limite ? ' ' + usd(c.limite) : '') + '</span>' : '<span class="chip no">contado</span>') +
+        (dormido ? '<span class="chip al">' + s.diasSinComprar + ' dias sin venir</span>' : '') +
+        (c.suelto ? '<span class="chip al">sin ficha</span>' : '') +
+      '</div></div>' +
+      '<div class="rt">' + usd(s.totalUSD) + '<small>' + s.compras + ' compra' + (s.compras === 1 ? '' : 's') + '</small></div></div>' +
+      '<div class="det">' +
+        '<div class="gr"><div>Ticket<b>' + usd(s.ticket) + '</b></div>' +
+        '<div>Margen que deja<b>' + (s.margen ? s.margen.toFixed(0) + '%' : '-') + '</b></div>' +
+        '<div>Ultima compra<b style="font-size:12px">' + (s.ultima ? fechaES(s.ultima) : 'nunca') + '</b></div></div>' +
+        (s.top && s.top.length ? '<div class="aviso" style="margin:0 0 10px">Se lleva: ' + s.top.map(function(t) { return escHtml(t.producto) + ' (' + t.unidades + ')'; }).join(' · ') + '</div>' : '') +
+        '<div class="cfg">' +
+          '<div><label style="font-size:11px">Credito</label><select id="cr-' + idSafe(c.nombre) + '"><option value="NO"' + (c.credito ? '' : ' selected') + '>No</option><option value="SI"' + (c.credito ? ' selected' : '') + '>Si</option></select></div>' +
+          '<div><label style="font-size:11px">Limite USD</label><input type="number" step="1" id="lm-' + idSafe(c.nombre) + '" value="' + (c.limite || '') + '" placeholder="0"></div>' +
+          '<div><label style="font-size:11px">Dias</label><input type="number" step="1" id="di-' + idSafe(c.nombre) + '" value="' + (c.dias || '') + '" placeholder="0" style="width:64px"></div>' +
+        '</div>' +
+        '<button class="tab on" style="width:100%;margin-top:10px;padding:10px" onclick="guardarCli(\'' + id + '\')">Guardar</button>' +
+      '</div></div>';
+  });
+  document.getElementById('clientesBox').innerHTML = h;
+}
+
+function idSafe(n) { return String(n).replace(/[^a-zA-Z0-9]/g, ''); }
+function abrirCli(n) { cliAbierto = (cliAbierto === n) ? '' : n; pintarClientes(); }
+
+function guardarCli(nombre) {
+  var c = CLIENTES.filter(function(x) { return x.nombre === nombre; })[0];
+  if (!c) return;
+  var id = idSafe(nombre);
+  var cred = document.getElementById('cr-' + id).value === 'SI';
+  var lim = num(document.getElementById('lm-' + id).value);
+  var dias = num(document.getElementById('di-' + id).value);
+  if (cred && !c.ced && !c.tel) { toast('Este cliente no tiene cedula ni telefono: completalos en la hoja antes de darle credito', 'err'); return; }
+  if (cred && !lim) { toast('Ponle un limite: sin tope, el credito no tiene freno', 'err'); return; }
+  fetch(SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'},
+    body:JSON.stringify({tipo:'cliente', nombre:c.nombre, rif:c.ced, tel:c.tel, credito:cred, limite:lim, dias:dias, fecha:new Date().toLocaleDateString('es-VE')})})
+    .then(function(r) { return r.text(); })
+    .then(function(t) { var d; try { d = JSON.parse(t); } catch (e) { throw new Error('respuesta rara'); }
+      if (!d || !d.ok) throw new Error(d && d.error ? d.error : 'no se guardo');
+      c.credito = cred; c.limite = lim; c.dias = dias; c.suelto = false;
+      toast(c.nombre + ': ' + (cred ? 'credito hasta ' + usd(lim) + (dias ? ' a ' + dias + ' dias' : '') : 'solo contado'), 'ok');
+      pintarClientes();
+    })
+    .catch(function(e) { toast('No se guardo: ' + e.message, 'err'); });
+}
+
+function norm(s) { return String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''); }
+function escAttr(s) { return String(s || '').split('\\').join('').split("'").join("\\'").split('"').join('&quot;'); }
 
 function cargar() {
   var r = rango();
