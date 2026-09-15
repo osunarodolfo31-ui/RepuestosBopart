@@ -1,7 +1,9 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_gerencia.html
-  VERSION: v1.8 (2026-09-15) | requiere Apps Script v16
+  VERSION: v1.9 (2026-09-15) | requiere Apps Script v17
+  v1.9: alertas de conteo: diferencias de inventario pendientes de revisar, con su valor al costo, para determinar
+        la causa y, si aplica, la penalidad sobre comisiones
   v1.8: la tasa pasa al engranaje del encabezado (ya no ocupa una seccion); se llama solo "tasa", sin BCV;
         orden de la pantalla: ventas, apartados, clientes
   v1.7: pantalla de clientes: metricas por cliente (compras, frecuencia, total, margen, productos) y desde ahi se
@@ -267,6 +269,8 @@ select option{background:#1E1E1E;color:var(--ink)}
 
   <div id="cuerpo"><div class="cart-empty">Cargando...</div></div>
 
+  <div id="conteosBox"></div>
+
   <div id="apartadosBox"></div>
 
   <div class="section">
@@ -361,12 +365,17 @@ select option{background:#1E1E1E;color:var(--ink)}
       <span class="nlbl">Devoluciones</span>
       <span class="ndesc">Y cambios</span>
     </a>
+    <a class="ncard" href="boparts_inventario.html">
+      <span class="nicon">🧮</span>
+      <span class="nlbl">Inventario</span>
+      <span class="ndesc">Conteo de stock</span>
+    </a>
   </div>
 </div>
 
 <script>
 var SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
-var APP_VERSION = 'v1.8';
+var APP_VERSION = 'v1.9';
 var TASA = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
 var periodo = 'hoy', DATA = null;
 
@@ -396,6 +405,7 @@ function abrirGerencia() {
   document.getElementById('pinov').classList.add('off');
   cargarTasa();
   cargarApartados();
+  cargarConteos();
   cargarClientes();
   cargar();
 }
@@ -516,6 +526,54 @@ function cargarApartados() {
       el.innerHTML = h;
     })
     .catch(function() {});
+}
+
+// ---- DIFERENCIAS DE INVENTARIO -------------------------------------------
+var CONTEOS = [];
+function cargarConteos() {
+  fetch(SCRIPT_URL + '?action=conteos&t=' + Date.now())
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      CONTEOS = (d && d.conteos) ? d.conteos : [];
+      pintarConteos();
+    })
+    .catch(function() {});
+}
+function pintarConteos() {
+  var el = document.getElementById('conteosBox');
+  if (!CONTEOS.length) { el.innerHTML = ''; return; }
+  var h = '<div class="section" style="border:1.5px solid var(--red)"><div class="stitle" style="color:var(--red)">' +
+    'Diferencias de inventario · ' + CONTEOS.length + ' por revisar</div>';
+  CONTEOS.forEach(function(c) {
+    h += '<div class="cli open" style="margin-bottom:10px"><div class="h" style="cursor:default"><div>' +
+      '<div class="nm">' + escHtml(c.producto) + '</div>' +
+      '<div class="sb">' + escHtml(c.codigo) + ' · conto ' + escHtml(c.contadoPor) + ' el ' + c.fecha + '</div></div>' +
+      '<div class="rt" style="color:' + (c.diferencia < 0 ? 'var(--red)' : 'var(--brand)') + '">' +
+      (c.diferencia > 0 ? '+' + c.diferencia : c.diferencia) + '<small>habia ' + c.contado + ', esperado ' + c.esperado + '</small></div></div>' +
+      '<div class="det" style="display:block">' +
+      '<div class="cfg"><div><label style="font-size:11px">Causa</label><select id="cz-' + c.fila + '">' +
+        '<option value="">Seleccionar...</option><option>ERROR DE REGISTRO</option><option>MERMA O DANO</option>' +
+        '<option>PRODUCTO MAL UBICADO</option><option>FALTANTE SIN EXPLICACION</option><option>SOBRANTE POR COMPRA NO REGISTRADA</option></select></div>' +
+      '<div><label style="font-size:11px">Penalidad USD</label><input type="number" step="0.01" id="pn-' + c.fila + '" placeholder="0" value=""></div>' +
+      '<div><label style="font-size:11px">&nbsp;</label><button class="tab on" style="padding:9px 14px" onclick="resolverConteo(' + c.fila + ')">Cerrar</button></div></div>' +
+      '<div class="aviso">La penalidad se descuenta de las comisiones del periodo. Dejala en 0 si no aplica.</div>' +
+      '</div></div>';
+  });
+  el.innerHTML = h + '</div>';
+}
+function resolverConteo(fila) {
+  var causa = document.getElementById('cz-' + fila).value;
+  var pen = num(document.getElementById('pn-' + fila).value);
+  if (!causa) { toast('Indica la causa de la diferencia', 'err'); return; }
+  fetch(SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'},
+    body:JSON.stringify({tipo:'conteo_revision', fila:fila, causa:causa, penalidad:pen, revisadoPor:'Gerencia'})})
+    .then(function(r) { return r.text(); })
+    .then(function(t) { var d; try { d = JSON.parse(t); } catch (e) { throw new Error('respuesta rara'); }
+      if (!d || !d.ok) throw new Error('no se guardo');
+      toast('Diferencia revisada' + (pen ? ' · penalidad ' + usd(pen) : ''), 'ok');
+      cargarConteos();
+    })
+    .catch(function(e) { toast('No se pudo cerrar: ' + e.message, 'err'); });
 }
 
 // ---- CLIENTES -------------------------------------------------------------
