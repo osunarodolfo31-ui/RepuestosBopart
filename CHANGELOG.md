@@ -10,7 +10,7 @@ en el comentario del encabezado de cada HTML y en la cabecera de `Code.gs`.
 | Archivo                 | Versión | Requiere Apps Script |
 |-------------------------|---------|----------------------|
 | index.html              | v9.6    | **v13** (para la tasa) |
-| boparts_ventas.html     | v11.1   | **v13**              |
+| boparts_ventas.html     | v12     | **v16**              |
 | boparts_cobros.html     | v2.4    | **v13**              |
 | boparts_compras.html    | v1.4    | **v11**              |
 | boparts_gastos.html     | v1.4    | **v13**              |
@@ -20,7 +20,7 @@ en el comentario del encabezado de cada HTML y en la cabecera de `Code.gs`.
 | boparts_apartados.html  | v1.2    | **v14**              |
 | boparts_devoluciones.html| v1     | **v15**              |
 | boparts_reportes.html   | v8      | ninguno (lo reemplaza gerencia) |
-| Code.gs (Apps Script)   | v15     | —                    |
+| Code.gs (Apps Script)   | v16     | —                    |
 
 Deployment ID (no cambia): `AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg`
 

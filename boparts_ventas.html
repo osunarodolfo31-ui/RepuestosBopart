@@ -1,7 +1,9 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_ventas.html
-  VERSION: v11.1 (2026-09-13) | requiere Apps Script v13
+  VERSION: v12 (2026-09-14) | requiere Apps Script v16
+  v12: toda venta pide cliente (busqueda por telefono, cedula o nombre; alta rapida con nombre, cedula y telefono).
+       El credito respeta el limite del cliente: pasarse requiere PIN de socios.
   v11.1: el canal SOCIO se pone solo con el interruptor (elegirlo a mano no bajaba los precios a costo);
          el PIN se pide cada vez; con credito, el cliente es el propio socio
   v11: modo "venta a socio" (precio de costo, canal SOCIO, de contado o a credito) protegido con el PIN de socios;
@@ -213,6 +215,26 @@ select option{background:#1E1E1E;color:var(--ink)}
     </div>
   </div>
 
+  <!-- CLIENTE -->
+  <div class="section" id="secCliente">
+    <div class="stitle">Cliente</div>
+    <div class="field wrap" id="cliVtaWrap">
+      <label>Telefono, cedula o nombre *</label>
+      <input type="search" id="cliVta" placeholder="0414... / V-12345678 / Nombre" autocomplete="off">
+      <div class="drop" id="cliVtaDrop"></div>
+    </div>
+    <div id="cliVtaSel" style="display:none"></div>
+    <div id="cliVtaForm" style="display:none">
+      <div class="field"><label>Nombre y apellido *</label><input type="text" id="nvNombre"></div>
+      <div class="row2">
+        <div class="field"><label>Cedula / RIF *</label><input type="text" id="nvCed" placeholder="V-12345678"></div>
+        <div class="field"><label>Telefono *</label><input type="tel" id="nvTel" placeholder="0414-1234567"></div>
+      </div>
+      <button class="nbtn nbtn-p" onclick="crearClienteVenta()">Guardar cliente</button>
+      <button class="nbtn nbtn-s" onclick="document.getElementById('cliVtaForm').style.display='none'">Cancelar</button>
+    </div>
+  </div>
+
   <!-- PRODUCTOS -->
   <div class="section">
     <div class="stitle">Productos</div>
@@ -419,7 +441,7 @@ select option{background:#1E1E1E;color:var(--ink)}
 var CSV_URL     = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRaAnGd-Bfaxo3LjUiGeV8p0F2weaKqHGwJ0hWibSMj02-h7dRAQPDMmGL5B8-XQg66Yjd3zgOAaz8X/pub?gid=2100998338&single=true&output=csv';
 var CLIENTES_URL= 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRaAnGd-Bfaxo3LjUiGeV8p0F2weaKqHGwJ0hWibSMj02-h7dRAQPDMmGL5B8-XQg66Yjd3zgOAaz8X/pub?gid=647304383&single=true&output=csv';
 var SCRIPT_URL  = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
-var APP_VERSION = 'v11.1';
+var APP_VERSION = 'v12';
 var TASA        = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
 var TASA_ORIGEN = TASA ? 'guardada' : 'ninguna';
 
@@ -561,7 +583,9 @@ var clientesIntentos = 0;
 function filaCliente(r) {
   return {
     nombre: (r[0] || '').trim(), rif: (r[1] || '').trim(), tel: (r[2] || '').trim(), dir: (r[3] || '').trim(), nota: (r[4] || '').trim(),
-    credito: (r[6] || '').trim().toUpperCase() === 'SI'   // col G de CLIENTES, la marcan Rodolfo/Javier
+    credito: (r[6] || '').trim().toUpperCase() === 'SI',  // col G de CLIENTES, la marcan Rodolfo/Javier
+    limite:  parseNum(r[7]),                              // col H: tope de deuda en USD (0 = sin tope definido)
+    dias:    parseNum(r[8])                               // col I: plazo acordado
   };
 }
 function clientesCargados(loaded, origen) {
@@ -825,6 +849,89 @@ function onMet(id) {
 }
 
 // ============================================================
+// CLIENTE DE LA VENTA (v12): toda venta lleva cliente. Se busca por telefono, cedula o nombre.
+// ============================================================
+var clienteVenta = null, cliVtaRes = [];
+var cliVtaEl = document.getElementById('cliVta'), cliVtaDrop = document.getElementById('cliVtaDrop');
+cliVtaEl.addEventListener('input', function() {
+  var q = norm(cliVtaEl.value).trim(), qd = cliVtaEl.value.replace(/[^0-9]/g, '');
+  if (!q) { cliVtaDrop.classList.remove('open'); return; }
+  cliVtaRes = CLIENTES.filter(function(c) {
+    if (qd.length >= 4) return (c.tel || '').replace(/[^0-9]/g, '').indexOf(qd) >= 0 || (c.rif || '').replace(/[^0-9]/g, '').indexOf(qd) >= 0;
+    return norm(c.nombre + ' ' + c.rif + ' ' + c.tel).indexOf(q) >= 0;
+  }).slice(0, 8);
+  var h = '';
+  cliVtaRes.forEach(function(c, i) {
+    h += '<div class="ditem" onclick="selClienteVenta(' + i + ')">' + escHtml(c.nombre) +
+      '<div class="ditem-meta">' + escHtml(c.rif || 'sin cedula') + (c.tel ? ' · ' + escHtml(c.tel) : '') + (c.credito ? ' · CREDITO' : '') + '</div></div>';
+  });
+  h += '<div class="ditem" onclick="nuevoClienteVenta()" style="color:var(--brand);font-weight:600">+ Cliente nuevo</div>';
+  cliVtaDrop.innerHTML = h; cliVtaDrop.classList.add('open');
+});
+function selClienteVenta(i) {
+  clienteVenta = cliVtaRes[i];
+  cliVtaDrop.classList.remove('open'); cliVtaEl.value = '';
+  pintarClienteVenta();
+}
+var saldoCliente = 0;
+// Cuanto debe hoy el cliente elegido, para comparar con su limite antes de dar mas credito.
+function cargarSaldoCliente() {
+  saldoCliente = 0;
+  if (!clienteVenta) return;
+  fetch(SCRIPT_URL + '?action=cxc&cliente=' + encodeURIComponent(clienteVenta.nombre) + '&t=' + Date.now())
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (!d || !d.ok || !d.clientes || !d.clientes.length) return;
+      saldoCliente = parseNum(d.clientes[0].saldoUSD);
+      renderPagos();
+    })
+    .catch(function() {});
+}
+
+function irACliente() {
+  var el = document.getElementById('secCliente');
+  if (el && el.scrollIntoView) el.scrollIntoView({behavior:'smooth'});
+}
+function pintarClienteVenta() {
+  var el = document.getElementById('cliVtaSel');
+  if (!clienteVenta) { el.style.display = 'none'; document.getElementById('cliVtaWrap').style.display = 'block'; return; }
+  var extra = clienteVenta.credito ? ' · credito' + (clienteVenta.limite ? ' hasta ' + fmtUSD(clienteVenta.limite) : '') : '';
+  el.innerHTML = '<div class="cli-result"><div><div class="cli-info">' + escHtml(clienteVenta.nombre) + '</div>' +
+    '<div class="cli-sub">' + escHtml(clienteVenta.rif || 'sin cedula') + (clienteVenta.tel ? ' · ' + escHtml(clienteVenta.tel) : '') + extra + '</div></div>' +
+    '<button class="cli-clear" onclick="clienteVenta=null;pintarClienteVenta();renderPagos()">&#x2715;</button></div>';
+  el.style.display = 'block';
+  document.getElementById('cliVtaWrap').style.display = 'none';
+  cargarSaldoCliente();
+  renderPagos();
+}
+function nuevoClienteVenta() {
+  cliVtaDrop.classList.remove('open');
+  var v = cliVtaEl.value.trim(), d = v.replace(/[^0-9]/g, '');
+  document.getElementById('nvNombre').value = d ? '' : v;
+  document.getElementById('nvTel').value = (d.length >= 10) ? v : '';
+  document.getElementById('nvCed').value = (d.length && d.length < 10) ? v : '';
+  document.getElementById('cliVtaForm').style.display = 'block';
+}
+function crearClienteVenta() {
+  var c = {nombre:document.getElementById('nvNombre').value.trim(), rif:document.getElementById('nvCed').value.trim(),
+           tel:document.getElementById('nvTel').value.trim(), dir:'', nota:'', credito:false, limite:0, dias:0};
+  if (!c.nombre) { toast('Escribe el nombre y apellido', 'err'); return; }
+  if (!c.rif && !c.tel) { toast('Hace falta la cedula o el telefono', 'err'); return; }
+  var dupe = CLIENTES.filter(function(x) {
+    var a = (x.tel || '').replace(/[^0-9]/g, ''), b = (c.tel || '').replace(/[^0-9]/g, '');
+    var e = (x.rif || '').replace(/[^0-9]/g, ''), f = (c.rif || '').replace(/[^0-9]/g, '');
+    return (b && a === b) || (f && e === f);
+  })[0];
+  if (dupe) { toast('Ese telefono o cedula ya es de ' + dupe.nombre, 'err'); clienteVenta = dupe; document.getElementById('cliVtaForm').style.display = 'none'; pintarClienteVenta(); return; }
+  CLIENTES.push(c); clienteVenta = c;
+  document.getElementById('cliVtaForm').style.display = 'none';
+  pintarClienteVenta();
+  postScript({tipo:'cliente', nombre:c.nombre, rif:c.rif, tel:c.tel, fecha:new Date().toLocaleDateString('es-VE')})
+    .then(function(d) { toast(d && d.ok ? 'Cliente guardado' : 'Cliente NO guardado en la hoja', d && d.ok ? 'ok' : 'err'); })
+    .catch(function() { toast('Cliente NO guardado (sin conexion)', 'err'); });
+}
+
+// ============================================================
 // VENTA A SOCIO (v11): precio de costo y canal SOCIO. Protegido con el PIN de socios
 // para que el costo no quede a la vista de cualquiera que use la app.
 // ============================================================
@@ -873,6 +980,23 @@ function renderCredito(pagoId, on) {
     box.innerHTML = '<div class="cominfo">Queda como cuenta por cobrar del socio' + (sName ? ': <b>' + escHtml(sName) + '</b>' : '. Elige el socio arriba.') + '</div>';
     return;
   }
+  // v12: el credito va al cliente de la venta, que ya se eligio arriba
+  if (clienteVenta) {
+    if (!clienteVenta.credito) {
+      box.innerHTML = '<div class="cominfo" style="border-left-color:var(--red)">' + escHtml(clienteVenta.nombre) +
+        ' no esta autorizado para credito. Un socio lo autoriza desde Gerencia.</div>';
+    } else {
+      var lim2 = parseNum(clienteVenta.limite);
+      var pasa = lim2 > 0 && saldoCliente >= lim2;
+      box.innerHTML = '<div class="cominfo"' + (pasa ? ' style="border-left-color:var(--red)"' : '') + '>Cuenta por cobrar de <b>' + escHtml(clienteVenta.nombre) + '</b>' +
+        (saldoCliente ? ' · ya debe ' + fmtUSD(saldoCliente) : '') +
+        (lim2 ? ' · limite ' + fmtUSD(lim2) : ' · sin limite definido') +
+        (clienteVenta.dias ? ' · ' + clienteVenta.dias + ' dias' : '') +
+        (pasa ? '<br>Ya alcanzo su limite: hara falta el PIN de un socio.' : '') + '</div>';
+    }
+    return;
+  }
+  box.innerHTML = '<div class="cominfo" style="border-left-color:var(--red)">Elige primero el cliente, arriba.</div>';
   var autorizados = CLIENTES.filter(function(c) { return c.credito; });   // columna CREDITO = SI
   if (!autorizados.length) {
     if (!clientesListos) {
@@ -1020,7 +1144,9 @@ function guardarVenta() {
     pagoData.push({metodo:metNom, banco:banNom, monto:monto, moneda:moneda, label:(!isNaN(metIdx) && METODOS[metIdx]) ? METODOS[metIdx].label : ''});
   }
 
-  // Validaciones de pago
+  // Validaciones: primero el cliente, que es obligatorio en toda venta
+  if (!modoSocio && !clienteVenta) { toast('Toda venta lleva cliente: buscalo o registralo arriba', 'err'); irACliente(); return; }
+
   var creditoUSD = 0, hayCredito = false;
   for (var i = 0; i < pagos.length; i++) {
     var p = pagos[i];
@@ -1048,7 +1174,18 @@ function guardarVenta() {
   var socioSel = modoSocio ? document.getElementById('selSocio').value : '';
   if (modoSocio && !socioSel) { toast('Indica que socio se lleva la mercancia', 'err'); return; }
   if (hayCredito && modoSocio) cliSel = {nombre:socioSel + ' (socio)', rif:'', tel:'', dir:'', credito:true};
-  if (hayCredito && !modoSocio && !(cliSel && cliSel.credito)) { toast('Selecciona el cliente autorizado para el credito', 'err'); return; }
+  if (hayCredito && !modoSocio) {
+    if (!clienteVenta.credito) { toast(clienteVenta.nombre + ' no esta autorizado para credito', 'err'); return; }
+    var lim = parseNum(clienteVenta.limite);
+    if (lim > 0 && (saldoCliente + creditoUSD) > lim + 0.009) {
+      var pin = prompt('Con esta venta ' + clienteVenta.nombre + ' quedaria en ' + fmtUSD(saldoCliente + creditoUSD) +
+        ' y su limite es ' + fmtUSD(lim) + '.\nPIN de socios para autorizar:');
+      if (pin === null) return;
+      if (hashPin(String(pin).trim()) !== PIN_HASH_SOCIOS) { toast('PIN incorrecto: la venta no se registro', 'err'); return; }
+    }
+    cliSel = clienteVenta;
+  }
+  if (!modoSocio && !cliSel) cliSel = clienteVenta;
   creditoUSD = Math.round(creditoUSD * 100) / 100;
 
   var aComBs = aliadoSel ? Math.round(bs * aliadoSel.pct / 100) : 0;
@@ -1126,6 +1263,8 @@ function nuevaVenta() {
 function resetAll() {
   cart = []; pagos = []; pid = 0;
   aliadoOn = false; aliadoSel = null; cliSel = null; lastCredito = null;
+  clienteVenta = null; saldoCliente = 0; pintarClienteVenta();
+  var cf = document.getElementById('cliVtaForm'); if (cf) cf.style.display = 'none';
   modoSocio = false;
   var tg = document.getElementById('socioTog'); if (tg) tg.classList.remove('on');
   var sb = document.getElementById('socioSel'); if (sb) sb.classList.remove('open');
@@ -1283,7 +1422,7 @@ function abrirDoc(modo) {
   if (esCot) document.getElementById('selCotMon').value = localStorage.getItem('boparts_cot_mon') || 'BS';
   document.getElementById('docListo').style.display = 'none';
   document.getElementById('btnDoc').style.display = 'block';
-  var pre = (!esCot && lastCredito) ? lastCredito.cliente : null;
+  var pre = (!esCot && lastCredito) ? lastCredito.cliente : (!esCot && clienteVenta ? clienteVenta : null);
   cliSel = null;
   document.getElementById('cliSearch').value = '';
   document.getElementById('cliSelected').style.display = 'none';
