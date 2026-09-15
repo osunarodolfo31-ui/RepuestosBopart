@@ -1,7 +1,8 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_inventario.html
-  VERSION: v1 (2026-09-15) | requiere Apps Script v17
+  VERSION: v1.1 (2026-09-15) | requiere Apps Script v17.1
+  v1.1: si el script responde sin los datos del conteo, lo avisa en vez de mostrar 'undefined'
   Conteo de inventario. Cada producto empieza a llevar stock el dia que se cuenta por primera vez; desde ahi se
   suman las compras y se restan ventas, devoluciones y cambios.
   El conteo es a ciegas: la app NO muestra lo que el sistema espera hasta despues de guardar. Si hay diferencia,
@@ -304,7 +305,7 @@ select option{background:#1E1E1E;color:var(--ink)}
 
 <script>
 var SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
-var APP_VERSION = 'v1';
+var APP_VERSION = 'v1.1';
 var STOCK = [], filtro = 'sin', actual = null;
 
 document.getElementById('fechaHdr').textContent = APP_VERSION + ' · ' + new Date().toLocaleDateString('es-VE', {weekday:'long', day:'numeric', month:'long'});
@@ -389,6 +390,7 @@ function guardarConteo() {
     .then(function(r) { return r.text(); })
     .then(function(t) { var d; try { d = JSON.parse(t); } catch (e) { throw new Error('El script respondio: ' + t.replace(/<[^>]+>/g, ' ').slice(0, 80)); }
       if (!d || !d.ok) throw new Error(d && d.error ? d.error : 'no se guardo');
+      if (d.contado === undefined || d.tipo !== 'conteo') throw new Error('El script no guardo el conteo (respondio "' + (d.tipo || 'sin tipo') + '"). Actualiza Apps Script a v17.1.');
       btn.disabled = false; btn.textContent = 'Guardar conteo';
       mostrarResultado(d);
       cargar();
