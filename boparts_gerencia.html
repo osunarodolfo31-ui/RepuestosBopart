@@ -1,7 +1,9 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_gerencia.html
-  VERSION: v1.7 (2026-09-14) | requiere Apps Script v16
+  VERSION: v1.8 (2026-09-15) | requiere Apps Script v16
+  v1.8: la tasa pasa al engranaje del encabezado (ya no ocupa una seccion); se llama solo "tasa", sin BCV;
+        orden de la pantalla: ventas, apartados, clientes
   v1.7: pantalla de clientes: metricas por cliente (compras, frecuencia, total, margen, productos) y desde ahi se
         autoriza el credito, se pone el limite y el plazo
   v1.6: bloque de Apartados: compromisos pendientes de entrega, anticipos recibidos y apartados vencidos.
@@ -211,6 +213,8 @@ select option{background:#1E1E1E;color:var(--ink)}
 .cli .gr b{display:block;font-size:14px;color:var(--ink);font-weight:700}
 .cfg{display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end}
 .cfg input,.cfg select{padding:8px}
+.cfgpan{display:none;position:sticky;top:0;z-index:50;background:var(--card);border-bottom:1.5px solid var(--brand);padding:14px 16px}
+.cfgpan.open{display:block}
 .pinov{position:fixed;inset:0;z-index:9998;background:#111;display:flex;align-items:center;justify-content:center;padding:24px}
 .pinov.off{display:none}
 .pinbox{width:100%;max-width:320px;text-align:center}
@@ -229,8 +233,18 @@ select option{background:#1E1E1E;color:var(--ink)}
     <h1>Gerencia</h1>
     <p id="fechaHdr"></p>
   </div>
+  <button onclick="toggleConfig()" title="Configuracion" style="background:none;border:none;color:var(--ink-muted);font-size:20px;cursor:pointer;padding:8px">⚙</button>
   <button onclick="salirGerencia()" title="Salir" style="background:none;border:none;color:var(--ink-muted);font-size:18px;cursor:pointer;padding:8px">⎋</button>
 </header>
+
+<div class="cfgpan" id="cfgPan">
+  <div class="stitle">Tasa de trabajo</div>
+  <div class="rango">
+    <input type="number" id="tasaIn" step="0.01" placeholder="0.00" style="flex:1">
+    <button class="tab on" onclick="guardarTasa()">Fijar</button>
+  </div>
+  <div class="aviso" id="tasaInfo">Cargando tasa...</div>
+</div>
 
 <div class="container">
 
@@ -251,14 +265,7 @@ select option{background:#1E1E1E;color:var(--ink)}
     <div id="periodoLbl" style="font-size:12px;color:var(--ink-muted)"></div>
   </div>
 
-  <div class="section">
-    <div class="stitle">Tasa BCV</div>
-    <div class="rango">
-      <input type="number" id="tasaIn" step="0.01" placeholder="0.00" style="flex:1">
-      <button class="tab on" onclick="guardarTasa()">Fijar</button>
-    </div>
-    <div class="aviso" id="tasaInfo">Cargando tasa...</div>
-  </div>
+  <div id="cuerpo"><div class="cart-empty">Cargando...</div></div>
 
   <div id="apartadosBox"></div>
 
@@ -275,7 +282,8 @@ select option{background:#1E1E1E;color:var(--ink)}
     <div id="clientesBox"><div class="cart-empty">Cargando...</div></div>
   </div>
 
-  <div id="cuerpo"><div class="cart-empty">Cargando...</div></div>
+
+
 
 </div>
 
@@ -358,7 +366,7 @@ select option{background:#1E1E1E;color:var(--ink)}
 
 <script>
 var SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
-var APP_VERSION = 'v1.7';
+var APP_VERSION = 'v1.8';
 var TASA = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
 var periodo = 'hoy', DATA = null;
 
@@ -444,6 +452,12 @@ function rango() {
   return {d1:iso(a), d2:iso(b)};
 }
 
+function toggleConfig() {
+  var p = document.getElementById('cfgPan');
+  p.classList.toggle('open');
+  if (p.classList.contains('open')) { cargarTasa(); document.getElementById('tasaIn').focus(); }
+}
+
 function cargarTasa() {
   fetch(SCRIPT_URL + '?action=config&t=' + Date.now())
     .then(function(r) { return r.json(); })
@@ -454,7 +468,7 @@ function cargarTasa() {
       document.getElementById('tasaIn').value = TASA || '';
       var dias = d.fecha ? Math.floor((Date.now() - new Date(d.fecha.replace(' ', 'T')).getTime()) / 86400000) : -1;
       document.getElementById('tasaInfo').innerHTML = TASA
-        ? 'Tasa en uso por todas las apps: <b>' + TASA + '</b>' + (d.fecha ? ' · fijada el ' + d.fecha + (d.quien ? ' por ' + escHtml(d.quien) : '') : '') +
+        ? 'Tasa que usan todas las apps: <b>' + TASA + '</b>' + (d.fecha ? ' · fijada el ' + d.fecha + (d.quien ? ' por ' + escHtml(d.quien) : '') : '') +
           (dias >= 3 ? ' <span style="color:var(--red)">(hace ' + dias + ' dias)</span>' : '')
         : 'Todavia no hay tasa fijada. Escribela y toca Fijar.';
     })
@@ -470,6 +484,7 @@ function guardarTasa() {
     .then(function(d) {
       if (!d || !d.ok) throw new Error(d && d.error ? d.error : 'no se guardo');
       toast('Tasa fijada en ' + t + ' para todas las apps', 'ok');
+      document.getElementById('cfgPan').classList.remove('open');
       cargarTasa(); cargar();
     })
     .catch(function(e) { toast('No se pudo fijar la tasa: ' + e.message, 'err'); });

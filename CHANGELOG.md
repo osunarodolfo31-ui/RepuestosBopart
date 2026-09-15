@@ -16,7 +16,7 @@ en el comentario del encabezado de cada HTML y en la cabecera de `Code.gs`.
 | boparts_gastos.html     | v1.4    | **v13**              |
 | boparts_fotos.html      | v8.3    | **v11.5**            |
 | boparts_demanda.html    | v8.4    | v7 o superior        |
-| boparts_gerencia.html   | v1.7    | **v16**              |
+| boparts_gerencia.html   | v1.8    | **v16**              |
 | boparts_apartados.html  | v1.2    | **v14**              |
 | boparts_devoluciones.html| v1     | **v15**              |
 | boparts_reportes.html   | v8      | ninguno (lo reemplaza gerencia) |
