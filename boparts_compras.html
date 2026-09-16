@@ -1,7 +1,9 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_compras.html
-  VERSION: v2 (2026-09-15) | requiere Apps Script v18
+  VERSION: v2.1 (2026-09-16) | requiere Apps Script v19.1
+  v2.1: en el costeo tambien se fija el precio de venta. Se propone costo + 50% y se puede ajustar linea por linea
+        o cambiar el margen de toda la compra. El precio queda escrito en la lista y el producto sale listo para vender.
   v2: pestana "Por costear": con el PIN de socios se abren las recepciones pendientes, se pone el costo de cada
       linea con la foto de la factura al lado, y se define contado o credito con sus dias. El costo del producto
       se actualiza por promedio ponderado y, si es a credito, nace la cuenta por pagar.
@@ -352,7 +354,7 @@ select option{background:#1E1E1E;color:var(--ink)}
 var CSV_URL    = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRaAnGd-Bfaxo3LjUiGeV8p0F2weaKqHGwJ0hWibSMj02-h7dRAQPDMmGL5B8-XQg66Yjd3zgOAaz8X/pub?gid=2100998338&single=true&output=csv';
 var SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
 var CLOUD = 'c7jufi9v', PRESET = 'boparts_productos';
-var APP_VERSION = 'v2';
+var APP_VERSION = 'v2.1';
 
 var PRODUCTS = [], PROVEEDORES = [], lineas = [], provSel = null, fotoUrl = '';
 document.getElementById('fechaHdr').textContent = APP_VERSION + ' · ' + new Date().toLocaleDateString('es-VE', {weekday:'long', day:'numeric', month:'long'});
@@ -523,6 +525,7 @@ function renderLineas() {
 var PIN_HASH_SOCIOS = 911136;
 function hashPin(t) { var h = 5381; for (var i = 0; i < t.length; i++) h = ((h * 33) ^ t.charCodeAt(i)) >>> 0; return h % 1000000; }
 var PENDIENTES = [], costeando = null, DIAS_PROV = {};
+var MARGEN = 50;   // % sobre el costo que se propone por defecto
 
 function verTab(t) {
   var cos = t === 'costear';
@@ -575,11 +578,20 @@ function pintarCosteo() {
     (c.foto ? '<a href="' + c.foto + '" target="_blank" style="font-size:12px;color:var(--brand)">Abrir foto de la factura</a>' : '<span class="m">Sin foto de factura</span>') +
     '<div style="margin-top:10px">';
   c.productos.forEach(function(l, i) {
-    h += '<div class="lrow"><div class="ln">' + escHtml(l.producto) + '<div class="m">' + escHtml(l.codigo) + ' · ' + l.cantidad + ' und' + (l.nuevo ? ' · NUEVO' : '') + '</div></div>' +
-      '<input type="number" step="0.01" placeholder="costo" value="' + (l.costo || '') + '" onchange="setCosto(' + i + ',this.value)"></div>';
+    var costo = parseNumC(l.costo), precio = parseNumC(l.precio);
+    var mg = (costo > 0 && precio > 0) ? Math.round((precio / costo - 1) * 100) : 0;
+    h += '<div class="lrow"><div class="ln">' + escHtml(l.producto) + '<div class="m">' + escHtml(l.codigo) + ' · ' + l.cantidad + ' und' + (l.nuevo ? ' · NUEVO' : '') +
+      (costo > 0 && precio > 0 ? ' · margen ' + mg + '%' : '') + '</div></div>' +
+      '<div><label style="font-size:10px;color:var(--ink-muted)">Costo</label>' +
+      '<input type="number" step="0.01" placeholder="0.00" value="' + (costo || '') + '" onchange="setCosto(' + i + ',this.value)"></div>' +
+      '<div><label style="font-size:10px;color:var(--ink-muted)">Precio venta</label>' +
+      '<input type="number" step="0.01" placeholder="0.00" value="' + (precio || '') + '" onchange="setPrecio(' + i + ',this.value)"></div></div>';
   });
   var total = c.productos.reduce(function(a, l) { return a + (parseNumC(l.costo) * l.cantidad); }, 0);
-  h += '</div><div class="tot"><span>Total de la compra</span><span>' + usdC(total) + '</span></div>' +
+  h += '</div><div class="field" style="margin-top:8px"><label>Margen sobre el costo (%)</label>' +
+    '<input type="number" step="1" value="' + MARGEN + '" onchange="setMargen(this.value)">' +
+    '<div class="cominfo">Propone el precio de venta de cada linea. Puedes cambiar el precio de una linea sin tocar las demas.</div></div>' +
+    '<div class="tot"><span>Total de la compra</span><span>' + usdC(total) + '</span></div>' +
     '<div class="field"><label>Condicion *</label><select id="csCond" onchange="pintarCosteo2()">' +
       '<option value="CONTADO">Pagada de contado</option><option value="CREDITO">A credito</option></select></div>' +
     '<div id="csExtra"></div>' +
@@ -604,7 +616,27 @@ function pintarCosteo2() {
       '<option>Transferencia</option><option>Zelle</option><option>Binance</option><option>Otro</option></select></div>';
   }
 }
-function setCosto(i, v) { costeando.productos[i].costo = parseNumC(v); pintarCosteo(); }
+// Al poner el costo se propone el precio con el margen; si ya se escribio un precio a mano, no se toca.
+function setCosto(i, v) {
+  var l = costeando.productos[i];
+  l.costo = parseNumC(v);
+  if (!l.precioManual) l.precio = Math.round(l.costo * (1 + MARGEN / 100) * 100) / 100;
+  pintarCosteo();
+}
+function setPrecio(i, v) {
+  var l = costeando.productos[i];
+  l.precio = parseNumC(v);
+  l.precioManual = true;
+  pintarCosteo();
+}
+// Cambia el margen de toda la compra y recalcula los precios que no se hayan tocado a mano
+function setMargen(v) {
+  MARGEN = parseNumC(v) || 0;
+  costeando.productos.forEach(function(l) {
+    if (!l.precioManual && parseNumC(l.costo) > 0) l.precio = Math.round(parseNumC(l.costo) * (1 + MARGEN / 100) * 100) / 100;
+  });
+  pintarCosteo();
+}
 
 function guardarCosteo() {
   var c = costeando;
@@ -612,6 +644,10 @@ function guardarCosteo() {
   if (!quien) { toast('Indica quien costea', 'err'); return; }
   var sinCosto = c.productos.filter(function(l) { return !parseNumC(l.costo); });
   if (sinCosto.length) { toast(sinCosto.length + ' producto(s) sin costo', 'err'); return; }
+  var sinPrecio = c.productos.filter(function(l) { return !parseNumC(l.precio); });
+  if (sinPrecio.length && !confirm(sinPrecio.length + ' producto(s) quedaran sin precio de venta y no se podran vender. Continuar igual?')) return;
+  var bajo = c.productos.filter(function(l) { return parseNumC(l.precio) > 0 && parseNumC(l.precio) <= parseNumC(l.costo); });
+  if (bajo.length && !confirm(bajo.length + ' producto(s) tienen precio igual o menor al costo. Continuar igual?')) return;
   var cond = document.getElementById('csCond').value;
   var dias = cond === 'CREDITO' ? (parseInt(document.getElementById('csDias').value) || 0) : 0;
   if (cond === 'CREDITO' && dias <= 0) { toast('Indica los dias de credito', 'err'); return; }
@@ -621,7 +657,7 @@ function guardarCosteo() {
   postScript({tipo:'costeo', id:c.id, fila:c.fila, proveedor:c.proveedor, factura:c.factura,
     fecha:now.toLocaleDateString('es-VE'), hora:now.toLocaleTimeString('es-VE', {hour:'2-digit', minute:'2-digit'}),
     condicion:cond, dias:dias, metodo:met, banco:'', costeadoPor:quien,
-    lineas:c.productos.map(function(l) { return {codigo:l.codigo, cantidad:l.cantidad, costo:parseNumC(l.costo)}; })})
+    lineas:c.productos.map(function(l) { return {codigo:l.codigo, cantidad:l.cantidad, costo:parseNumC(l.costo), precio:parseNumC(l.precio)}; })})
     .then(function(d) {
       if (!d || !d.ok) throw new Error(d && d.error ? d.error : 'no se guardo');
       if (dias) DIAS_PROV[c.proveedor] = dias;

@@ -12,7 +12,7 @@ en el comentario del encabezado de cada HTML y en la cabecera de `Code.gs`.
 | index.html              | v9.6    | **v13** (para la tasa) |
 | boparts_ventas.html     | v13.1   | **v19**              |
 | boparts_cobros.html     | v2.4    | **v13**              |
-| boparts_compras.html    | v2      | **v18**              |
+| boparts_compras.html    | v2.1    | **v19.1**            |
 | boparts_gastos.html     | v1.4    | **v13**              |
 | boparts_fotos.html      | v8.3    | **v11.5**            |
 | boparts_demanda.html    | v8.4    | v7 o superior        |
@@ -21,7 +21,7 @@ en el comentario del encabezado de cada HTML y en la cabecera de `Code.gs`.
 | boparts_devoluciones.html| v1     | **v15**              |
 | boparts_inventario.html | v1.1    | **v17.1**            |
 | boparts_reportes.html   | v8      | ninguno (lo reemplaza gerencia) |
-| Code.gs (Apps Script)   | v19     | —                    |
+| Code.gs (Apps Script)   | v19.1   | —                    |
 
 Deployment ID (no cambia): `AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg`
 
