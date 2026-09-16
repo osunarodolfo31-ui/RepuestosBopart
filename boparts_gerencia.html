@@ -1,7 +1,9 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_gerencia.html
-  VERSION: v1.9 (2026-09-15) | requiere Apps Script v17
+  VERSION: v2 (2026-09-15) | requiere Apps Script v18
+  v2: cuentas por pagar a proveedores (saldo, facturas por vencer y vencidas, abonos) y aviso de recepciones
+      pendientes de costear
   v1.9: alertas de conteo: diferencias de inventario pendientes de revisar, con su valor al costo, para determinar
         la causa y, si aplica, la penalidad sobre comisiones
   v1.8: la tasa pasa al engranaje del encabezado (ya no ocupa una seccion); se llama solo "tasa", sin BCV;
@@ -269,6 +271,8 @@ select option{background:#1E1E1E;color:var(--ink)}
 
   <div id="cuerpo"><div class="cart-empty">Cargando...</div></div>
 
+  <div id="pagarBox"></div>
+
   <div id="conteosBox"></div>
 
   <div id="apartadosBox"></div>
@@ -375,7 +379,7 @@ select option{background:#1E1E1E;color:var(--ink)}
 
 <script>
 var SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
-var APP_VERSION = 'v1.9';
+var APP_VERSION = 'v2';
 var TASA = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
 var periodo = 'hoy', DATA = null;
 
@@ -405,6 +409,7 @@ function abrirGerencia() {
   document.getElementById('pinov').classList.add('off');
   cargarTasa();
   cargarApartados();
+  cargarPagar();
   cargarConteos();
   cargarClientes();
   cargar();
@@ -526,6 +531,82 @@ function cargarApartados() {
       el.innerHTML = h;
     })
     .catch(function() {});
+}
+
+// ---- CUENTAS POR PAGAR A PROVEEDORES ---------------------------------------
+var CXP = [];
+function cargarPagar() {
+  Promise.all([
+    fetch(SCRIPT_URL + '?action=cxp&t=' + Date.now()).then(function(r) { return r.json(); }),
+    fetch(SCRIPT_URL + '?action=compras&estado=PENDIENTE%20COSTO&t=' + Date.now()).then(function(r) { return r.json(); })
+  ]).then(function(res) {
+    CXP = (res[0] && res[0].proveedores ? res[0].proveedores : []).filter(function(p) { return p.saldoUSD > 0.009; });
+    pintarPagar((res[1] && res[1].compras) ? res[1].compras.length : 0);
+  }).catch(function() {});
+}
+
+function pintarPagar(sinCostear) {
+  var el = document.getElementById('pagarBox');
+  var h = '';
+  if (sinCostear) {
+    h += '<div class="section" style="border:1.5px solid var(--brand)"><div class="stitle" style="color:var(--brand)">' +
+      sinCostear + ' recepcion(es) sin costear</div>' +
+      '<div class="aviso">Hasta que se costeen, esa mercancia no tiene costo real ni genera cuenta por pagar. ' +
+      'Se costean en Compras, pestana "Por costear".</div></div>';
+  }
+  if (CXP.length) {
+    var total = 0, vencido = 0;
+    CXP.forEach(function(p) { total += num(p.saldoUSD); vencido += num(p.vencido); });
+    h += '<div class="section"><div class="stitle">Cuentas por pagar</div><div class="kpis">' +
+      kpi('Debemos', usd(total), CXP.length + ' proveedor' + (CXP.length === 1 ? '' : 'es'), 'big') +
+      kpi('Vencido', usd(vencido), vencido ? 'hay que pagar ya' : 'nada vencido', vencido ? 'neg' : 'pos') +
+      kpi('Por vencer', usd(total - vencido), 'dentro del plazo') +
+      '</div>';
+    CXP.forEach(function(p) {
+      h += '<div class="cli" style="margin-top:10px"><div class="h" style="cursor:default"><div>' +
+        '<div class="nm">' + escHtml(p.proveedor) + '</div>' +
+        '<div class="sb">' + p.facturas.filter(function(f) { return f.estado !== 'PAGADA'; }).length + ' factura(s) pendiente(s)' +
+        (p.vencido > 0.009 ? ' · <span style="color:var(--red)">vencido ' + usd(p.vencido) + '</span>' : '') + '</div></div>' +
+        '<div class="rt">' + usd(p.saldoUSD) + '</div></div><div class="det" style="display:block">';
+      p.facturas.filter(function(f) { return f.estado !== 'PAGADA'; }).forEach(function(f) {
+        h += '<div style="display:flex;justify-content:space-between;font-size:12px;padding:6px 0;border-bottom:1px solid var(--border)">' +
+          '<span>' + (f.factura ? escHtml(f.factura) : f.id) + ' · ' + f.fecha + (f.vence ? ' · vence ' + fechaES(f.vence) : '') + '</span>' +
+          '<b style="color:' + (f.vencida ? 'var(--red)' : 'inherit') + '">' + usd(f.pendienteUSD) + (f.estado === 'PARCIAL' ? ' (parcial)' : '') + '</b></div>';
+      });
+      h += '<div class="cfg" style="margin-top:10px"><div><label style="font-size:11px">Abono USD</label>' +
+        '<input type="number" step="0.01" id="pg-' + idSafe(p.proveedor) + '" placeholder="0"></div>' +
+        '<div><label style="font-size:11px">Metodo</label><select id="pm-' + idSafe(p.proveedor) + '">' +
+        '<option>Efectivo USD</option><option>Pago Movil</option><option>Transferencia</option><option>Zelle</option><option>Binance</option><option>Otro</option></select></div>' +
+        '<div><label style="font-size:11px">&nbsp;</label><button class="tab on" style="padding:9px 14px" onclick="pagarProveedor(\'' + escAttr(p.proveedor) + '\')">Pagar</button></div></div>' +
+        '</div></div>';
+    });
+    h += '</div>';
+  }
+  el.innerHTML = h;
+}
+
+function pagarProveedor(prov) {
+  var id = idSafe(prov);
+  var monto = num(document.getElementById('pg-' + id).value);
+  var met = document.getElementById('pm-' + id).value;
+  if (!(monto > 0)) { toast('Indica el monto del abono', 'err'); return; }
+  var p = CXP.filter(function(x) { return x.proveedor === prov; })[0];
+  if (p && monto > p.saldoUSD + 0.05) { toast('El abono supera lo que se le debe (' + usd(p.saldoUSD) + ')', 'err'); return; }
+  // Se aplica a la factura mas proxima a vencer
+  var pend = p ? p.facturas.filter(function(f) { return f.estado !== 'PAGADA'; })[0] : null;
+  var now = new Date();
+  fetch(SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'},
+    body:JSON.stringify({tipo:'cxp_abono', proveedor:prov, montoUSD:monto, metodo:met,
+      id:pend ? pend.id : '', factura:pend ? pend.factura : '',
+      fecha:now.toLocaleDateString('es-VE'), hora:now.toLocaleTimeString('es-VE', {hour:'2-digit', minute:'2-digit'}),
+      registradoPor:'Gerencia'})})
+    .then(function(r) { return r.text(); })
+    .then(function(t) { var d; try { d = JSON.parse(t); } catch (e) { throw new Error('respuesta rara'); }
+      if (!d || !d.ok) throw new Error('no se guardo');
+      toast('Pagado ' + usd(monto) + ' a ' + prov, 'ok');
+      cargarPagar();
+    })
+    .catch(function(e) { toast('No se registro el pago: ' + e.message, 'err'); });
 }
 
 // ---- DIFERENCIAS DE INVENTARIO -------------------------------------------

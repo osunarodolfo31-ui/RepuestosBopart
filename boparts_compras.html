@@ -1,7 +1,10 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_compras.html
-  VERSION: v1.4 (2026-09-11) — nav con Gerencia | requiere Apps Script v11
+  VERSION: v2 (2026-09-15) | requiere Apps Script v18
+  v2: pestana "Por costear": con el PIN de socios se abren las recepciones pendientes, se pone el costo de cada
+      linea con la foto de la factura al lado, y se define contado o credito con sus dias. El costo del producto
+      se actualiza por promedio ponderado y, si es a credito, nace la cuenta por pagar.
   v1.3: logo sin fondo en el encabezado
   v1.1: marca con lista de las marcas existentes; modo 'Pegar lista' para recepciones grandes (codigo + cantidad por linea)
   Recepcion de mercancia (camino B): proveedor, factura, foto, lineas con cantidad. Sin costos: los completan los socios.
@@ -163,6 +166,17 @@ select option{background:#1E1E1E;color:var(--ink)}
 .fotobox input{position:absolute;inset:0;opacity:0;cursor:pointer}
 .fotobox.ok{border-color:var(--green);color:var(--green)}
 .resumen{display:flex;justify-content:space-between;font-size:13px;color:var(--ink-soft);padding:8px 0}
+.tabs{display:flex;gap:6px;margin-bottom:12px}
+.tab{flex:1;padding:10px;border-radius:20px;border:1.5px solid var(--border);background:var(--card2);color:var(--ink-soft);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit}
+.tab.on{background:var(--brand);color:#111;border-color:var(--brand)}
+.ccost{background:var(--card2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;margin-bottom:8px}
+.ccost .t{font-size:13px;font-weight:700}
+.ccost .m{font-size:11px;color:var(--ink-muted);margin-top:2px}
+.lrow{display:flex;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)}
+.lrow:last-child{border:none}
+.lrow .ln{flex:1;font-size:12px;line-height:1.3}
+.lrow input{width:92px;text-align:right;padding:8px}
+.tot{display:flex;justify-content:space-between;font-size:15px;font-weight:700;padding:10px 0}
 </style>
 </head>
 <body>
@@ -176,6 +190,20 @@ select option{background:#1E1E1E;color:var(--ink)}
 </header>
 
 <div class="container">
+
+  <div class="tabs">
+    <button class="tab on" id="tabRec" onclick="verTab('recibir')">Recibir</button>
+    <button class="tab" id="tabCos" onclick="verTab('costear')">Por costear <span id="pendNum"></span></button>
+  </div>
+
+  <div id="paneCostear" style="display:none">
+    <div class="section">
+      <div class="stitle">Recepciones pendientes de costo</div>
+      <div id="listaCostear"><div class="cart-empty">Cargando...</div></div>
+    </div>
+  </div>
+
+  <div id="paneRecibir">
 
   <div class="section">
     <div class="stitle">Recepcion</div>
@@ -235,6 +263,8 @@ select option{background:#1E1E1E;color:var(--ink)}
   <div class="section">
     <div class="stitle">Notas</div>
     <textarea id="txtNotas" rows="2" placeholder="Faltantes, danos, diferencias con el pedido..."></textarea>
+  </div>
+
   </div>
 
 </div>
@@ -322,7 +352,7 @@ select option{background:#1E1E1E;color:var(--ink)}
 var CSV_URL    = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRaAnGd-Bfaxo3LjUiGeV8p0F2weaKqHGwJ0hWibSMj02-h7dRAQPDMmGL5B8-XQg66Yjd3zgOAaz8X/pub?gid=2100998338&single=true&output=csv';
 var SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
 var CLOUD = 'c7jufi9v', PRESET = 'boparts_productos';
-var APP_VERSION = 'v1.4';
+var APP_VERSION = 'v2';
 
 var PRODUCTS = [], PROVEEDORES = [], lineas = [], provSel = null, fotoUrl = '';
 document.getElementById('fechaHdr').textContent = APP_VERSION + ' · ' + new Date().toLocaleDateString('es-VE', {weekday:'long', day:'numeric', month:'long'});
@@ -487,6 +517,132 @@ function renderLineas() {
 }
 
 // ---- guardar ----
+// ============================================================
+// COSTEO (v2): solo socios. Aqui se ponen los costos y se define como se paga.
+// ============================================================
+var PIN_HASH_SOCIOS = 911136;
+function hashPin(t) { var h = 5381; for (var i = 0; i < t.length; i++) h = ((h * 33) ^ t.charCodeAt(i)) >>> 0; return h % 1000000; }
+var PENDIENTES = [], costeando = null, DIAS_PROV = {};
+
+function verTab(t) {
+  var cos = t === 'costear';
+  if (cos) {
+    var pin = prompt('PIN de socios para ver y poner costos:');
+    if (pin === null) return;
+    if (hashPin(String(pin).trim()) !== PIN_HASH_SOCIOS) { toast('PIN incorrecto', 'err'); return; }
+  }
+  document.getElementById('tabRec').classList.toggle('on', !cos);
+  document.getElementById('tabCos').classList.toggle('on', cos);
+  document.getElementById('paneRecibir').style.display = cos ? 'none' : 'block';
+  document.getElementById('paneCostear').style.display = cos ? 'block' : 'none';
+  document.getElementById('btnGuardar').style.display = cos ? 'none' : 'block';
+  if (cos) cargarPendientes();
+}
+
+function cargarPendientes() {
+  document.getElementById('listaCostear').innerHTML = '<div class="cart-empty">Cargando...</div>';
+  fetch(SCRIPT_URL + '?action=compras&estado=PENDIENTE%20COSTO&t=' + Date.now())
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      PENDIENTES = (d && d.compras) ? d.compras : [];
+      document.getElementById('pendNum').textContent = PENDIENTES.length ? '(' + PENDIENTES.length + ')' : '';
+      pintarPendientes();
+    })
+    .catch(function() { document.getElementById('listaCostear').innerHTML = '<div class="cart-empty" style="color:var(--red)">No se pudo cargar</div>'; });
+}
+
+function pintarPendientes() {
+  var el = document.getElementById('listaCostear');
+  if (!PENDIENTES.length) { el.innerHTML = '<div class="cart-empty">Todo costeado</div>'; return; }
+  el.innerHTML = PENDIENTES.map(function(c, i) {
+    return '<div class="ccost"><div class="t">' + escHtml(c.proveedor) + '</div>' +
+      '<div class="m">' + c.fecha + (c.factura ? ' · factura ' + escHtml(c.factura) : ' · sin numero de factura') +
+      ' · ' + c.lineas + ' productos, ' + c.unidades + ' unidades · recibio ' + escHtml(c.recibidoPor) + '</div>' +
+      '<button class="tab on" style="margin-top:8px;padding:8px 14px" onclick="abrirCosteo(' + i + ')">Poner costos</button></div>';
+  }).join('');
+}
+
+function abrirCosteo(i) {
+  costeando = PENDIENTES[i];
+  costeando.productos.forEach(function(l) { if (!l.costo) l.costo = 0; });
+  pintarCosteo();
+}
+
+function pintarCosteo() {
+  var c = costeando;
+  var h = '<div class="ccost"><div class="t">' + escHtml(c.proveedor) + '</div>' +
+    '<div class="m">' + c.fecha + (c.factura ? ' · factura ' + escHtml(c.factura) : '') + '</div>' +
+    (c.foto ? '<a href="' + c.foto + '" target="_blank" style="font-size:12px;color:var(--brand)">Abrir foto de la factura</a>' : '<span class="m">Sin foto de factura</span>') +
+    '<div style="margin-top:10px">';
+  c.productos.forEach(function(l, i) {
+    h += '<div class="lrow"><div class="ln">' + escHtml(l.producto) + '<div class="m">' + escHtml(l.codigo) + ' · ' + l.cantidad + ' und' + (l.nuevo ? ' · NUEVO' : '') + '</div></div>' +
+      '<input type="number" step="0.01" placeholder="costo" value="' + (l.costo || '') + '" onchange="setCosto(' + i + ',this.value)"></div>';
+  });
+  var total = c.productos.reduce(function(a, l) { return a + (parseNumC(l.costo) * l.cantidad); }, 0);
+  h += '</div><div class="tot"><span>Total de la compra</span><span>' + usdC(total) + '</span></div>' +
+    '<div class="field"><label>Condicion *</label><select id="csCond" onchange="pintarCosteo2()">' +
+      '<option value="CONTADO">Pagada de contado</option><option value="CREDITO">A credito</option></select></div>' +
+    '<div id="csExtra"></div>' +
+    '<div class="field"><label>Quien costea *</label><select id="csQuien"><option value="">Seleccionar...</option><option>Rodolfo Osuna</option><option>Javier Boves</option></select></div>' +
+    '<button class="nbtn nbtn-p" onclick="guardarCosteo()">Cerrar costeo</button>' +
+    '<button class="nbtn nbtn-s" onclick="costeando=null;pintarPendientes()">Volver</button></div>';
+  document.getElementById('listaCostear').innerHTML = h;
+  pintarCosteo2();
+}
+
+function pintarCosteo2() {
+  var sel = document.getElementById('csCond');
+  var ex = document.getElementById('csExtra');
+  if (!sel || !ex) return;
+  if (sel.value === 'CREDITO') {
+    var dias = DIAS_PROV[costeando.proveedor] || 15;
+    ex.innerHTML = '<div class="field"><label>Dias de credito *</label><input type="number" id="csDias" value="' + dias + '" step="1"></div>' +
+      '<div class="cominfo">Se guardan como los dias de este proveedor y se proponen la proxima vez; se pueden cambiar cuando se acuerde otra cosa.</div>';
+  } else {
+    ex.innerHTML = '<div class="field"><label>Metodo de pago</label><select id="csMet">' +
+      '<option value="">Seleccionar...</option><option>Efectivo USD</option><option>Pago Movil</option>' +
+      '<option>Transferencia</option><option>Zelle</option><option>Binance</option><option>Otro</option></select></div>';
+  }
+}
+function setCosto(i, v) { costeando.productos[i].costo = parseNumC(v); pintarCosteo(); }
+
+function guardarCosteo() {
+  var c = costeando;
+  var quien = document.getElementById('csQuien').value;
+  if (!quien) { toast('Indica quien costea', 'err'); return; }
+  var sinCosto = c.productos.filter(function(l) { return !parseNumC(l.costo); });
+  if (sinCosto.length) { toast(sinCosto.length + ' producto(s) sin costo', 'err'); return; }
+  var cond = document.getElementById('csCond').value;
+  var dias = cond === 'CREDITO' ? (parseInt(document.getElementById('csDias').value) || 0) : 0;
+  if (cond === 'CREDITO' && dias <= 0) { toast('Indica los dias de credito', 'err'); return; }
+  var metEl = document.getElementById('csMet');
+  var met = (cond === 'CONTADO' && metEl) ? metEl.value : '';
+  var now = new Date();
+  postScript({tipo:'costeo', id:c.id, fila:c.fila, proveedor:c.proveedor, factura:c.factura,
+    fecha:now.toLocaleDateString('es-VE'), hora:now.toLocaleTimeString('es-VE', {hour:'2-digit', minute:'2-digit'}),
+    condicion:cond, dias:dias, metodo:met, banco:'', costeadoPor:quien,
+    lineas:c.productos.map(function(l) { return {codigo:l.codigo, cantidad:l.cantidad, costo:parseNumC(l.costo)}; })})
+    .then(function(d) {
+      if (!d || !d.ok) throw new Error(d && d.error ? d.error : 'no se guardo');
+      if (dias) DIAS_PROV[c.proveedor] = dias;
+      toast('Costeada: ' + usdC(d.total) + (d.condicion === 'CREDITO' ? ' a credito, vence ' + d.vence : ' de contado'), 'ok');
+      costeando = null; cargarPendientes();
+    })
+    .catch(function(e) { toast('No se pudo costear: ' + e.message, 'err'); });
+}
+
+function parseNumC(v) {
+  if (typeof v === 'number') return v;
+  var t = String(v == null ? '' : v).replace(/[^0-9.,-]/g, '');
+  if (!t) return 0;
+  if (t.indexOf(',') >= 0 && t.indexOf('.') >= 0) {
+    if (t.lastIndexOf(',') > t.lastIndexOf('.')) t = t.replace(/\./g, '').replace(',', '.'); else t = t.replace(/,/g, '');
+  } else if (t.indexOf(',') >= 0) t = t.replace(',', '.');
+  var n = parseFloat(t);
+  return isFinite(n) ? n : 0;
+}
+function usdC(n) { return '$' + (Math.round((n || 0) * 100) / 100).toFixed(2); }
+
 function guardarCompra() {
   var quien = document.getElementById('selV').value;
   if (!quien) { toast('Selecciona quien recibe', 'err'); return; }
