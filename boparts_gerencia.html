@@ -1,7 +1,8 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_gerencia.html
-  VERSION: v2 (2026-09-15) | requiere Apps Script v18
+  VERSION: v2.1 (2026-09-16) | requiere Apps Script v19
+  v2.1: el engranaje ahora tiene tasa de trabajo, tasa BCV (para las facturas) y el estado de la numeracion fiscal
   v2: cuentas por pagar a proveedores (saldo, facturas por vencer y vencidas, abonos) y aviso de recepciones
       pendientes de costear
   v1.9: alertas de conteo: diferencias de inventario pendientes de revisar, con su valor al costo, para determinar
@@ -248,6 +249,16 @@ select option{background:#1E1E1E;color:var(--ink)}
     <button class="tab on" onclick="guardarTasa()">Fijar</button>
   </div>
   <div class="aviso" id="tasaInfo">Cargando tasa...</div>
+
+  <div class="stitle" style="margin-top:14px">Tasa BCV (para las facturas)</div>
+  <div class="rango">
+    <input type="number" id="bcvIn" step="0.01" placeholder="0.00" style="flex:1">
+    <button class="tab on" onclick="guardarBCV()">Fijar</button>
+  </div>
+  <div class="aviso" id="bcvInfo"></div>
+
+  <div class="stitle" style="margin-top:14px">Numeracion fiscal</div>
+  <div class="aviso" id="factInfo"></div>
 </div>
 
 <div class="container">
@@ -379,7 +390,7 @@ select option{background:#1E1E1E;color:var(--ink)}
 
 <script>
 var SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
-var APP_VERSION = 'v2';
+var APP_VERSION = 'v2.1';
 var TASA = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
 var periodo = 'hoy', DATA = null;
 
@@ -481,6 +492,18 @@ function cargarTasa() {
       TASA = num(d.tasa);
       try { localStorage.setItem('motoauto_tasa', String(TASA)); } catch (e) {}
       document.getElementById('tasaIn').value = TASA || '';
+      var bcv = num(d.bcv);
+      document.getElementById('bcvIn').value = bcv || '';
+      var hoyISO = new Date().toISOString().slice(0, 10);
+      var vieja = d.bcvFecha && d.bcvFecha < hoyISO;
+      document.getElementById('bcvInfo').innerHTML = bcv
+        ? 'Las facturas se expresan a <b>' + bcv + '</b>' + (d.bcvFecha ? ' · cargada el ' + fechaES(d.bcvFecha) : '') +
+          (vieja ? ' <span style="color:var(--red)">(no es la de hoy)</span>' : '')
+        : '<span style="color:var(--red)">Sin tasa BCV: no se pueden emitir facturas.</span>';
+      document.getElementById('factInfo').innerHTML = d.control
+        ? 'Proxima factura <b>F-' + ('00000' + (num(d.factura) + 1)).slice(-6) + '</b> · proximo control <b>' + (num(d.control) + 1) + '</b>' +
+          (d.controlHasta ? ' · rango hasta ' + d.controlHasta + (num(d.controlRestantes) < 50 ? ' <span style="color:var(--red)">(quedan ' + d.controlRestantes + ')</span>' : ' (quedan ' + d.controlRestantes + ')') : ' · sin rango tope definido')
+        : 'Sin numeracion configurada. Escribe en CONFIG: B12 el ultimo numero de factura usado, B13 el ultimo numero de control usado y B14 el ultimo del rango que autorizo la imprenta.';
       var dias = d.fecha ? Math.floor((Date.now() - new Date(d.fecha.replace(' ', 'T')).getTime()) / 86400000) : -1;
       document.getElementById('tasaInfo').innerHTML = TASA
         ? 'Tasa que usan todas las apps: <b>' + TASA + '</b>' + (d.fecha ? ' · fijada el ' + d.fecha + (d.quien ? ' por ' + escHtml(d.quien) : '') : '') +
@@ -488,6 +511,20 @@ function cargarTasa() {
         : 'Todavia no hay tasa fijada. Escribela y toca Fijar.';
     })
     .catch(function() { document.getElementById('tasaInfo').textContent = 'No se pudo leer la tasa.'; });
+}
+
+function guardarBCV() {
+  var t = num(document.getElementById('bcvIn').value);
+  if (!(t > 0)) { toast('Escribe la tasa BCV', 'err'); return; }
+  fetch(SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'},
+    body:JSON.stringify({tipo:'tasa', cual:'BCV', tasa:t, quien:'Gerencia'})})
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (!d || !d.ok) throw new Error(d && d.error ? d.error : 'no se guardo');
+      toast('Tasa BCV del dia: ' + t, 'ok');
+      cargarTasa();
+    })
+    .catch(function(e) { toast('No se pudo fijar la tasa BCV: ' + e.message, 'err'); });
 }
 
 function guardarTasa() {

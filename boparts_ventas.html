@@ -1,7 +1,9 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_ventas.html
-  VERSION: v12 (2026-09-14) | requiere Apps Script v16
+  VERSION: v13 (2026-09-16) | requiere Apps Script v19
+  v13: IVA 16% discriminado, tasa BCV para la factura, metodo Cashea con su desglose (inicial, financiado,
+       comision 4% + 4%, neto) y FACTURA como segundo documento junto a la nota de entrega
   v12: toda venta pide cliente (busqueda por telefono, cedula o nombre; alta rapida con nombre, cedula y telefono).
        El credito respeta el limite del cliente: pasarse requiere PIN de socios.
   v11.1: el canal SOCIO se pone solo con el interruptor (elegirlo a mano no bajaba los precios a costo);
@@ -248,6 +250,8 @@ select option{background:#1E1E1E;color:var(--ink)}
 
   <!-- TOTALES -->
   <div class="tbar" id="tbar">
+    <div class="trow"><span class="tlbl">Base imponible</span><span class="tval" id="tBase">$0.00</span></div>
+    <div class="trow"><span class="tlbl">IVA 16%</span><span class="tval" id="tIVA">$0.00</span></div>
     <div class="trow"><span class="tlbl">Total USD</span><span class="tval" id="tUSD">$0.00</span></div>
     <div class="trow"><span class="tlbl">Total Bs</span><span class="tval big" id="tBS">Bs 0</span></div>
     <div class="trow" id="tComRow" style="display:none"><span class="tlbl">Comision punto</span><span class="tval red" id="tCom"></span></div>
@@ -356,6 +360,7 @@ select option{background:#1E1E1E;color:var(--ink)}
     <!-- BOTONES NOTA -->
     <div id="notaBtns" style="display:none">
       <button class="nbtn nbtn-p" id="btnDoc" onclick="generarDoc()">Generar y Compartir PDF</button>
+      <button class="nbtn nbtn-p" id="btnFactura" onclick="generarFactura()" style="background:var(--card2);color:var(--brand);border:1.5px solid var(--brand);display:none">Generar FACTURA fiscal</button>
       <div id="docListo" style="display:none">
         <button class="nbtn nbtn-w" id="btnCompartir" onclick="compartirPDF()" style="display:block">Compartir PDF (Gmail, WhatsApp...)</button>
         <button class="nbtn nbtn-s" onclick="verPDF()">Ver / Descargar PDF</button>
@@ -446,16 +451,25 @@ select option{background:#1E1E1E;color:var(--ink)}
 var CSV_URL     = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRaAnGd-Bfaxo3LjUiGeV8p0F2weaKqHGwJ0hWibSMj02-h7dRAQPDMmGL5B8-XQg66Yjd3zgOAaz8X/pub?gid=2100998338&single=true&output=csv';
 var CLIENTES_URL= 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRaAnGd-Bfaxo3LjUiGeV8p0F2weaKqHGwJ0hWibSMj02-h7dRAQPDMmGL5B8-XQg66Yjd3zgOAaz8X/pub?gid=647304383&single=true&output=csv';
 var SCRIPT_URL  = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
-var APP_VERSION = 'v12';
+var APP_VERSION = 'v13';
 var TASA        = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
 var TASA_ORIGEN = TASA ? 'guardada' : 'ninguna';
+
+var IVA_PCT   = 16;                       // alicuota general; todo el catalogo es gravado
+var TASA_BCV  = parseFloat(localStorage.getItem('boparts_bcv') || '0');
+var BCV_FECHA = localStorage.getItem('boparts_bcv_fecha') || '';
 
 // La tasa la fijan los socios desde Gerencia y vive en CONFIG: aqui solo se lee y se guarda por si no hay senal.
 function sincronizarTasa() {
   fetch(SCRIPT_URL + '?action=config&t=' + Date.now())
     .then(function(r) { return r.json(); })
     .then(function(d) {
-      if (!d || !d.ok || !(d.tasa > 0) || d.tasa === TASA) return;
+      if (!d || !d.ok) return;
+      if (d.bcv > 0) {
+        TASA_BCV = d.bcv; BCV_FECHA = d.bcvFecha || '';
+        try { localStorage.setItem('boparts_bcv', String(TASA_BCV)); localStorage.setItem('boparts_bcv_fecha', BCV_FECHA); } catch (e) {}
+      }
+      if (!(d.tasa > 0) || d.tasa === TASA) { updateTotals(); return; }
       TASA = d.tasa; TASA_ORIGEN = 'CONFIG';
       try { localStorage.setItem('motoauto_tasa', String(TASA)); } catch (e) {}
       renderCart(); updateTotals();
@@ -738,9 +752,15 @@ function renderCart() {
 // TOTALS
 // ============================================================
 function updateTotals() {
-  var usd = 0;
-  for (var i = 0; i < cart.length; i++) usd += cart[i].precio * cart[i].cantidad;
+  // Los precios de la lista son SIN IVA: la base es la suma del carrito y el IVA se agrega encima.
+  var base = 0;
+  for (var i = 0; i < cart.length; i++) base += cart[i].precio * cart[i].cantidad;
+  base = Math.round(base * 100) / 100;
+  var iva = Math.round(base * IVA_PCT) / 100;
+  var usd = Math.round((base + iva) * 100) / 100;
   var bs = Math.round(usd * TASA);
+  document.getElementById('tBase').textContent = fmtUSD(base);
+  document.getElementById('tIVA').textContent  = fmtUSD(iva);
   document.getElementById('tUSD').textContent = fmtUSD(usd);
   document.getElementById('tBS').textContent  = fmtBS(bs);
 
@@ -785,10 +805,15 @@ function syncPagosDesdeDOM() {
     if (monEl) p.moneda = monEl.value;
   }
 }
+function baseCarritoUSD() {
+  var b = 0;
+  for (var i = 0; i < cart.length; i++) b += cart[i].precio * cart[i].cantidad;
+  return Math.round(b * 100) / 100;
+}
+// Lo que el cliente paga: base + IVA
 function totalCarritoUSD() {
-  var usd = 0;
-  for (var i = 0; i < cart.length; i++) usd += cart[i].precio * cart[i].cantidad;
-  return usd;
+  var b = baseCarritoUSD();
+  return Math.round((b + b * IVA_PCT / 100) * 100) / 100;
 }
 
 function renderPagos() {
@@ -1092,8 +1117,9 @@ function selAliado(id) {
 function updateComPrev() {
   var el = document.getElementById('comPrev');
   if (!aliadoSel || !cart.length) { el.classList.remove('open'); return; }
-  var usd = 0;
-  for (var i = 0; i < cart.length; i++) usd += cart[i].precio * cart[i].cantidad;
+  var base = baseCarritoUSD();
+  var ivaUSD = Math.round(base * IVA_PCT) / 100;
+  var usd = Math.round((base + ivaUSD) * 100) / 100;
   var bs = Math.round(usd * TASA);
   var cBs  = Math.round(bs * aliadoSel.pct / 100);
   var cUsd = (usd * aliadoSel.pct / 100).toFixed(2);
@@ -1110,13 +1136,14 @@ function guardarVenta() {
   if (!vendedor) { toast('Selecciona el vendedor', 'err'); return; }
   if (!canal)    { toast('Selecciona el canal', 'err'); return; }
   if (!cart.length) { toast('Agrega al menos un producto', 'err'); return; }
-  if (!TASA || TASA < 1) { toast('No hay tasa BCV cargada. Abre Lista de Precios y fijala primero.', 'err'); return; }
+  if (!TASA || TASA < 1) { toast('No hay tasa de trabajo cargada. La fijan los socios en Gerencia.', 'err'); return; }
 
   var now  = new Date();
   var fecha = now.toLocaleDateString('es-VE');
   var hora  = now.toLocaleTimeString('es-VE', {hour:'2-digit', minute:'2-digit'});
-  var usd   = 0;
-  for (var i = 0; i < cart.length; i++) usd += cart[i].precio * cart[i].cantidad;
+  var baseUSD = baseCarritoUSD();
+  var ivaUSD  = Math.round(baseUSD * IVA_PCT) / 100;
+  var usd     = Math.round((baseUSD + ivaUSD) * 100) / 100;
   var bs    = Math.round(usd * TASA);
   var prods = cart.map(function(c) { return c.producto + ' x' + c.cantidad + ' (' + fmtUSD(c.precio) + ')'; }).join(' | ');
   var notas = document.getElementById('txtNotas').value;
@@ -1193,6 +1220,23 @@ function guardarVenta() {
   if (!modoSocio && !cliSel) cliSel = clienteVenta;
   creditoUSD = Math.round(creditoUSD * 100) / 100;
 
+  // Cashea: el cliente paga la inicial en tienda y Cashea liquida el resto.
+  // Comision: 4% del total de la venta + 4% del monto financiado.
+  var cashea = {inicial:0, financiado:0, comision:0, neto:0};
+  for (var ci = 0; ci < pagos.length; ci++) {
+    var cp = pagos[ci];
+    if (!cp.metodoData || String(cp.metodoData.metodo).toUpperCase().indexOf('CASHEA') < 0) continue;
+    var cEl = document.getElementById('monto_' + cp.id), coEl = document.getElementById('mon_' + cp.id);
+    var cm = cEl ? parseFloat(cEl.value) || 0 : 0;
+    cashea.financiado += (coEl && coEl.value === 'BS') ? cm / TASA : cm;
+  }
+  if (cashea.financiado > 0) {
+    cashea.financiado = Math.round(cashea.financiado * 100) / 100;
+    cashea.inicial = Math.round((usd - cashea.financiado) * 100) / 100;
+    cashea.comision = Math.round((usd * 0.04 + cashea.financiado * 0.04) * 100) / 100;
+    cashea.neto = Math.round((cashea.financiado - cashea.comision) * 100) / 100;
+  }
+
   var aComBs = aliadoSel ? Math.round(bs * aliadoSel.pct / 100) : 0;
 
   var payload = {
@@ -1204,6 +1248,9 @@ function guardarVenta() {
     aliadoPct:aliadoSel?aliadoSel.pct:0, aliadoComision:aComBs,
     notas:notas,
     idVenta:idVenta, tasa:TASA, lineas:lineas,
+    baseUSD:baseUSD, ivaUSD:ivaUSD, totalConIvaUSD:usd, tasaBCV:TASA_BCV,
+    casheaInicial:cashea.inicial, casheaFinanciado:cashea.financiado,
+    casheaComision:cashea.comision, casheaNeto:cashea.neto,
     cliente: cliSel ? {nombre:cliSel.nombre, rif:cliSel.rif || '', tel:cliSel.tel || ''} : null,
     creditoUSD: creditoUSD,
     socio: socioSel
@@ -1218,6 +1265,7 @@ function guardarVenta() {
       if (!d || d.ok !== true) throw new Error(d && d.error ? d.error : 'Respuesta inesperada: ' + JSON.stringify(d).slice(0, 120));
       lastIdVenta = idVenta;
       lastPagos = pagoData.slice();
+      FACT_CASHEA = cashea.financiado > 0 ? cashea : null;
       if (d.numNota) { NOTA_NUM = parseInt(d.numNota); localStorage.setItem('boparts_nota_num', NOTA_NUM); lastNotaAsignada = NOTA_NUM; } else { lastNotaAsignada = 0; }
       lastCredito = hayCredito ? {cliente:cliSel, usd:creditoUSD} : null;
       document.getElementById('successMsg').textContent = vendedor + ' - ' + fmtUSD(usd) + ' / ' + fmtBS(bs) +
@@ -1424,6 +1472,7 @@ function abrirDoc(modo) {
   document.getElementById('skipNota').textContent = esCot ? 'Cerrar' : 'Omitir - Nueva Venta';
   document.getElementById('cotSinCliente').style.display = esCot ? 'block' : 'none';
   document.getElementById('cotMonedaWrap').style.display = esCot ? 'block' : 'none';
+  document.getElementById('btnFactura').style.display = esCot ? 'none' : 'block';
   if (esCot) document.getElementById('selCotMon').value = localStorage.getItem('boparts_cot_mon') || 'BS';
   document.getElementById('docListo').style.display = 'none';
   document.getElementById('btnDoc').style.display = 'block';
@@ -1633,6 +1682,165 @@ function construirPDF(tipo, numero) {
     } catch (e) { reject(e); }
   });
 }
+
+// ============================================================
+// FACTURA FISCAL (v13): numeracion y numero de control salen de CONFIG (rango de la imprenta autorizada).
+// Se expresa en bolivares a la tasa BCV del dia, con el IVA discriminado.
+// ============================================================
+var FACT = null;
+function generarFactura() {
+  if (!cliSel) {
+    var visible = document.getElementById('cliSelected').style.display !== 'none';
+    if (visible && cliMostrado) cliSel = cliMostrado;
+    else if (clienteVenta) cliSel = clienteVenta;
+  }
+  if (!cliSel) { toast('La factura necesita los datos del cliente', 'err'); return; }
+  if (!cliSel.rif) { toast('Falta la cedula o RIF del cliente: la factura lo exige', 'err'); return; }
+  if (!TASA_BCV || TASA_BCV < 1) { toast('No hay tasa BCV cargada. La carga un socio en Gerencia.', 'err'); return; }
+  var btn = document.getElementById('btnFactura');
+  btn.disabled = true; btn.textContent = 'Generando...';
+  fetch(SCRIPT_URL + '?action=nextFactura&t=' + Date.now())
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (!d || !d.ok) throw new Error(d && d.error ? d.error : 'no se pudo numerar');
+      FACT = d;
+      return construirFactura(d);
+    })
+    .then(function(pdf) {
+      lastPDF = pdf;
+      btn.disabled = false; btn.textContent = 'Generar FACTURA fiscal';
+      document.getElementById('docListo').style.display = 'block';
+      toast('Factura ' + pdf.num + ' · control ' + FACT.control + (FACT.restantes ? ' · quedan ' + FACT.restantes : ''), 'ok');
+      compartirPDF();
+    })
+    .catch(function(e) {
+      btn.disabled = false; btn.textContent = 'Generar FACTURA fiscal';
+      toast('No se genero la factura: ' + (e && e.message ? e.message : e), 'err');
+    });
+}
+
+function construirFactura(num) {
+  return new Promise(function(resolve, reject) {
+    try {
+      var JS = window.jspdf && window.jspdf.jsPDF;
+      if (!JS) throw new Error('Libreria PDF no cargo (sin internet?)');
+      var doc = new JS({unit:'mm', format:'a4'});
+      var W = 210, M = 14, y = 12;
+      var hoy = new Date();
+      var fecha = hoy.toLocaleDateString('es-VE', {day:'2-digit', month:'2-digit', year:'numeric'});
+      var amarillo = [245,168,0], negro = [17,17,17], gris = [120,120,120];
+      var nf = 'F-' + ('00000' + num.factura).slice(-6);
+
+      // Emisor
+      doc.setFillColor(negro[0],negro[1],negro[2]); doc.roundedRect(M, y, W - 2*M, 30, 2, 2, 'F');
+      var tx = M + 6;
+      if (LOGO_DATA) { try { doc.addImage(LOGO_DATA, 'PNG', M + 4, y + 4, 22, 22); tx = M + 30; } catch (e) {} }
+      doc.setTextColor(255,255,255); doc.setFont('helvetica','bold'); doc.setFontSize(15); doc.text(EMPRESA.nombre, tx, y + 10);
+      doc.setTextColor(amarillo[0],amarillo[1],amarillo[2]); doc.setFontSize(9); doc.text(EMPRESA.rif, tx, y + 15);
+      doc.setTextColor(200,200,200); doc.setFont('helvetica','normal'); doc.setFontSize(7);
+      doc.text('Domicilio fiscal: ' + EMPRESA.dir, tx, y + 20); doc.text(EMPRESA.contacto, tx, y + 24);
+      doc.setFillColor(amarillo[0],amarillo[1],amarillo[2]); doc.roundedRect(W - M - 58, y + 5, 52, 20, 2, 2, 'F');
+      doc.setTextColor(negro[0],negro[1],negro[2]); doc.setFont('helvetica','bold'); doc.setFontSize(12);
+      doc.text('FACTURA', W - M - 32, y + 11, {align:'center'});
+      doc.setFontSize(9); doc.text('N ' + nf, W - M - 32, y + 16.5, {align:'center'});
+      doc.setFontSize(8); doc.text('Control N ' + num.control, W - M - 32, y + 21.5, {align:'center'});
+      y += 33;
+
+      // Datos de la operacion
+      doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(gris[0],gris[1],gris[2]);
+      doc.text('FECHA DE EMISION', M, y); doc.text('CONDICION', M + 55, y); doc.text('TASA BCV', M + 105, y); doc.text('MONEDA', M + 150, y);
+      doc.setFont('helvetica','bold'); doc.setTextColor(negro[0],negro[1],negro[2]); doc.setFontSize(9);
+      doc.text(fecha, M, y + 5);
+      doc.text(lastCredito ? 'CREDITO' : (FACT_CASHEA ? 'CASHEA' : 'CONTADO'), M + 55, y + 5);
+      doc.text('Bs ' + TASA_BCV, M + 105, y + 5);
+      doc.text('BOLIVARES', M + 150, y + 5);
+      y += 9; doc.setDrawColor(230,230,230); doc.line(M, y, W - M, y); y += 4;
+
+      // Receptor
+      doc.setFillColor(amarillo[0],amarillo[1],amarillo[2]); doc.rect(M, y, W - 2*M, 6, 'F');
+      doc.setFontSize(8); doc.setTextColor(negro[0],negro[1],negro[2]); doc.text('DATOS DEL ADQUIRENTE', M + 3, y + 4.2);
+      y += 6;
+      doc.setFillColor(249,249,249); doc.rect(M, y, W - 2*M, 18, 'F');
+      doc.setFontSize(7); doc.setFont('helvetica','normal'); doc.setTextColor(gris[0],gris[1],gris[2]);
+      doc.text('NOMBRE O RAZON SOCIAL', M + 3, y + 4);
+      doc.setFontSize(11); doc.setFont('helvetica','bold'); doc.setTextColor(negro[0],negro[1],negro[2]);
+      doc.text(String(cliSel.nombre || '').toUpperCase().slice(0, 60), M + 3, y + 9);
+      doc.setFontSize(7); doc.setFont('helvetica','normal'); doc.setTextColor(gris[0],gris[1],gris[2]);
+      doc.text(('CEDULA / RIF: ' + (cliSel.rif || '-') + (cliSel.tel ? '   TELEFONO: ' + cliSel.tel : '') + (cliSel.dir ? '   DIRECCION: ' + cliSel.dir : '')).slice(0, 120), M + 3, y + 14);
+      y += 22;
+
+      // Renglones: precios sin IVA, en bolivares a tasa BCV
+      var body = [], base = 0;
+      for (var i = 0; i < lastCart.length; i++) {
+        var c = lastCart[i];
+        var sub = c.precio * c.cantidad; base += sub;
+        body.push([c.codigo || '', c.producto, String(c.cantidad),
+                   fmtBS(Math.round(c.precio * TASA_BCV * 100) / 100), '16%', fmtBS(Math.round(sub * TASA_BCV))]);
+      }
+      base = Math.round(base * 100) / 100;
+      var iva = Math.round(base * IVA_PCT) / 100;
+      var tot = Math.round((base + iva) * 100) / 100;
+      doc.autoTable({
+        startY: y, margin:{left:M, right:M},
+        head:[['CODIGO','DESCRIPCION','CANT.','PRECIO Bs','ALIC.','TOTAL Bs']], body:body,
+        styles:{fontSize:8, cellPadding:2, textColor:[17,17,17]},
+        headStyles:{fillColor:negro, textColor:[255,255,255], fontStyle:'bold'},
+        alternateRowStyles:{fillColor:[246,246,246]},
+        columnStyles:{0:{cellWidth:24}, 2:{halign:'center', cellWidth:14}, 3:{cellWidth:28, halign:'right'},
+                      4:{halign:'center', cellWidth:14}, 5:{cellWidth:30, halign:'right', fontStyle:'bold'}}
+      });
+      y = doc.lastAutoTable.finalY + 5;
+
+      // Totales discriminados
+      var bx = W - M - 78;
+      function fila(lbl, val, bold) {
+        doc.setFont('helvetica', bold ? 'bold' : 'normal'); doc.setFontSize(bold ? 11 : 9);
+        doc.setTextColor(negro[0],negro[1],negro[2]);
+        doc.text(lbl, bx, y); doc.text(val, W - M - 2, y, {align:'right'});
+        y += bold ? 7 : 5.5;
+      }
+      fila('Base imponible', fmtBS(Math.round(base * TASA_BCV)));
+      fila('IVA 16%', fmtBS(Math.round(iva * TASA_BCV)));
+      doc.setDrawColor(200,200,200); doc.line(bx, y - 3, W - M, y - 3); y += 1;
+      fila('TOTAL A PAGAR', fmtBS(Math.round(tot * TASA_BCV)), true);
+      doc.setFontSize(7); doc.setTextColor(gris[0],gris[1],gris[2]);
+      doc.text('Referencia: ' + fmtUSD(tot) + ' a tasa Bs ' + TASA_BCV, W - M - 2, y, {align:'right'});
+      y += 8;
+
+      // Forma de pago (con desglose Cashea si aplica)
+      doc.setFontSize(8); doc.setFont('helvetica','bold'); doc.setTextColor(negro[0],negro[1],negro[2]);
+      doc.text('FORMA DE PAGO', M, y); y += 5;
+      doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(gris[0],gris[1],gris[2]);
+      for (var k = 0; k < lastPagos.length; k++) {
+        var pg = lastPagos[k];
+        if (!pg.monto) continue;
+        doc.text('- ' + (pg.label || pg.metodo) + ': ' + (pg.moneda === 'USD' ? fmtUSD(pg.monto) : fmtBS(pg.monto)), M + 2, y);
+        y += 4.5;
+      }
+      if (FACT_CASHEA && FACT_CASHEA.financiado > 0) {
+        y += 1;
+        doc.setFont('helvetica','bold'); doc.setTextColor(negro[0],negro[1],negro[2]);
+        doc.text('DESGLOSE CASHEA', M, y); y += 5;
+        doc.setFont('helvetica','normal'); doc.setTextColor(gris[0],gris[1],gris[2]);
+        doc.text('- Inicial pagada en tienda: ' + fmtBS(Math.round(FACT_CASHEA.inicial * TASA_BCV)) + '  (' + fmtUSD(FACT_CASHEA.inicial) + ')', M + 2, y); y += 4.5;
+        doc.text('- Financiado por Cashea: ' + fmtBS(Math.round(FACT_CASHEA.financiado * TASA_BCV)) + '  (' + fmtUSD(FACT_CASHEA.financiado) + ')', M + 2, y); y += 4.5;
+        doc.text('- Las cuotas las administra Cashea en su aplicacion. El comercio no cobra cuotas.', M + 2, y); y += 4.5;
+      }
+
+      // Pie
+      var fy = 285;
+      doc.setFillColor(negro[0],negro[1],negro[2]); doc.rect(M, fy - 6, W - 2*M, 8, 'F');
+      doc.setTextColor(200,200,200); doc.setFontSize(7);
+      doc.text(EMPRESA.nombre + ' | ' + EMPRESA.rif + ' | ' + EMPRESA.tienda, W/2, fy - 1, {align:'center'});
+      doc.setTextColor(150,150,150); doc.setFontSize(6.5);
+      doc.text('Factura emitida conforme a la Providencia SNAT/2011/0071. Conserve este documento.', W/2, fy + 6, {align:'center'});
+
+      var nombreArchivo = nf + '_' + String(cliSel.nombre || 'cliente').replace(/[^a-zA-Z0-9]+/g, '_').slice(0, 30) + '.pdf';
+      resolve({blob: doc.output('blob'), nombre: nombreArchivo, num: nf, control: num.control, totalBs: Math.round(tot * TASA_BCV), totalUsd: tot});
+    } catch (e) { reject(e); }
+  });
+}
+var FACT_CASHEA = null;
 
 function compartirPDF() {
   if (!lastPDF) { toast('Primero genera el PDF', 'err'); return; }
