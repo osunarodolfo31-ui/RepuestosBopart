@@ -1,7 +1,9 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_ventas.html
-  VERSION: v13 (2026-09-16) | requiere Apps Script v19
+  VERSION: v13.1 (2026-09-16) | requiere Apps Script v19
+  v13.1: interruptor "Facturar": encendido agrega el IVA y habilita la factura fiscal; apagado la venta va sin IVA
+         y solo con nota de entrega. Por defecto esta apagado.
   v13: IVA 16% discriminado, tasa BCV para la factura, metodo Cashea con su desglose (inicial, financiado,
        comision 4% + 4%, neto) y FACTURA como segundo documento junto a la nota de entrega
   v12: toda venta pide cliente (busqueda por telefono, cedula o nombre; alta rapida con nombre, cedula y telefono).
@@ -265,6 +267,18 @@ select option{background:#1E1E1E;color:var(--ink)}
     <button class="addpbtn" onclick="addPago()">+ Agregar forma de pago</button>
   </div>
 
+  <!-- FACTURAR -->
+  <div class="section">
+    <div class="stitle">Facturacion</div>
+    <div class="togwrap">
+      <div>
+        <div class="toglbl">Facturar esta venta (con IVA)</div>
+        <div class="togsub" id="factSub">Apagado: nota de entrega, sin IVA</div>
+      </div>
+      <button class="tog" id="factTog" onclick="toggleFacturar()"></button>
+    </div>
+  </div>
+
   <!-- VENTA A SOCIO -->
   <div class="section">
     <div class="stitle">Venta a socio</div>
@@ -451,7 +465,7 @@ select option{background:#1E1E1E;color:var(--ink)}
 var CSV_URL     = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRaAnGd-Bfaxo3LjUiGeV8p0F2weaKqHGwJ0hWibSMj02-h7dRAQPDMmGL5B8-XQg66Yjd3zgOAaz8X/pub?gid=2100998338&single=true&output=csv';
 var CLIENTES_URL= 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRaAnGd-Bfaxo3LjUiGeV8p0F2weaKqHGwJ0hWibSMj02-h7dRAQPDMmGL5B8-XQg66Yjd3zgOAaz8X/pub?gid=647304383&single=true&output=csv';
 var SCRIPT_URL  = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
-var APP_VERSION = 'v13';
+var APP_VERSION = 'v13.1';
 var TASA        = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
 var TASA_ORIGEN = TASA ? 'guardada' : 'ninguna';
 
@@ -753,14 +767,14 @@ function renderCart() {
 // ============================================================
 function updateTotals() {
   // Los precios de la lista son SIN IVA: la base es la suma del carrito y el IVA se agrega encima.
-  var base = 0;
-  for (var i = 0; i < cart.length; i++) base += cart[i].precio * cart[i].cantidad;
-  base = Math.round(base * 100) / 100;
-  var iva = Math.round(base * IVA_PCT) / 100;
+  var base = baseCarritoUSD();
+  var iva = FACTURAR ? Math.round(base * IVA_PCT) / 100 : 0;
   var usd = Math.round((base + iva) * 100) / 100;
   var bs = Math.round(usd * TASA);
   document.getElementById('tBase').textContent = fmtUSD(base);
   document.getElementById('tIVA').textContent  = fmtUSD(iva);
+  document.getElementById('tBase').parentNode.style.display = FACTURAR ? 'flex' : 'none';
+  document.getElementById('tIVA').parentNode.style.display  = FACTURAR ? 'flex' : 'none';
   document.getElementById('tUSD').textContent = fmtUSD(usd);
   document.getElementById('tBS').textContent  = fmtBS(bs);
 
@@ -810,10 +824,10 @@ function baseCarritoUSD() {
   for (var i = 0; i < cart.length; i++) b += cart[i].precio * cart[i].cantidad;
   return Math.round(b * 100) / 100;
 }
-// Lo que el cliente paga: base + IVA
+// Lo que el cliente paga: base, mas IVA solo si la venta se factura
 function totalCarritoUSD() {
   var b = baseCarritoUSD();
-  return Math.round((b + b * IVA_PCT / 100) * 100) / 100;
+  return Math.round((b + (FACTURAR ? b * IVA_PCT / 100 : 0)) * 100) / 100;
 }
 
 function renderPagos() {
@@ -965,6 +979,17 @@ function crearClienteVenta() {
 // VENTA A SOCIO (v11): precio de costo y canal SOCIO. Protegido con el PIN de socios
 // para que el costo no quede a la vista de cualquiera que use la app.
 // ============================================================
+// Facturar: decide si la venta lleva IVA y si se puede emitir factura fiscal.
+var FACTURAR = false;
+function toggleFacturar() {
+  FACTURAR = !FACTURAR;
+  document.getElementById('factTog').classList.toggle('on', FACTURAR);
+  document.getElementById('factSub').textContent = FACTURAR
+    ? 'Se agrega IVA 16% y se puede emitir la factura'
+    : 'Apagado: nota de entrega, sin IVA';
+  updateTotals();
+}
+
 var modoSocio = false;
 var PIN_HASH_SOCIOS = 911136;   // mismo PIN que Gerencia
 function hashPin(t) { var h = 5381; for (var i = 0; i < t.length; i++) h = ((h * 33) ^ t.charCodeAt(i)) >>> 0; return h % 1000000; }
@@ -1117,9 +1142,7 @@ function selAliado(id) {
 function updateComPrev() {
   var el = document.getElementById('comPrev');
   if (!aliadoSel || !cart.length) { el.classList.remove('open'); return; }
-  var base = baseCarritoUSD();
-  var ivaUSD = Math.round(base * IVA_PCT) / 100;
-  var usd = Math.round((base + ivaUSD) * 100) / 100;
+  var usd = totalCarritoUSD();
   var bs = Math.round(usd * TASA);
   var cBs  = Math.round(bs * aliadoSel.pct / 100);
   var cUsd = (usd * aliadoSel.pct / 100).toFixed(2);
@@ -1142,7 +1165,7 @@ function guardarVenta() {
   var fecha = now.toLocaleDateString('es-VE');
   var hora  = now.toLocaleTimeString('es-VE', {hour:'2-digit', minute:'2-digit'});
   var baseUSD = baseCarritoUSD();
-  var ivaUSD  = Math.round(baseUSD * IVA_PCT) / 100;
+  var ivaUSD  = FACTURAR ? Math.round(baseUSD * IVA_PCT) / 100 : 0;
   var usd     = Math.round((baseUSD + ivaUSD) * 100) / 100;
   var bs    = Math.round(usd * TASA);
   var prods = cart.map(function(c) { return c.producto + ' x' + c.cantidad + ' (' + fmtUSD(c.precio) + ')'; }).join(' | ');
@@ -1178,6 +1201,8 @@ function guardarVenta() {
 
   // Validaciones: primero el cliente, que es obligatorio en toda venta
   if (!modoSocio && !clienteVenta) { toast('Toda venta lleva cliente: buscalo o registralo arriba', 'err'); irACliente(); return; }
+  if (FACTURAR && !modoSocio && !(clienteVenta && clienteVenta.rif)) { toast('Para facturar hace falta la cedula o RIF del cliente', 'err'); irACliente(); return; }
+  if (FACTURAR && (!TASA_BCV || TASA_BCV < 1)) { toast('Sin tasa BCV no se puede facturar. La carga un socio en Gerencia.', 'err'); return; }
 
   var creditoUSD = 0, hayCredito = false;
   for (var i = 0; i < pagos.length; i++) {
@@ -1248,7 +1273,7 @@ function guardarVenta() {
     aliadoPct:aliadoSel?aliadoSel.pct:0, aliadoComision:aComBs,
     notas:notas,
     idVenta:idVenta, tasa:TASA, lineas:lineas,
-    baseUSD:baseUSD, ivaUSD:ivaUSD, totalConIvaUSD:usd, tasaBCV:TASA_BCV,
+    facturar:FACTURAR, baseUSD:baseUSD, ivaUSD:ivaUSD, totalConIvaUSD:usd, tasaBCV:TASA_BCV,
     casheaInicial:cashea.inicial, casheaFinanciado:cashea.financiado,
     casheaComision:cashea.comision, casheaNeto:cashea.neto,
     cliente: cliSel ? {nombre:cliSel.nombre, rif:cliSel.rif || '', tel:cliSel.tel || ''} : null,
@@ -1317,6 +1342,9 @@ function resetAll() {
   cart = []; pagos = []; pid = 0;
   aliadoOn = false; aliadoSel = null; cliSel = null; lastCredito = null;
   clienteVenta = null; saldoCliente = 0; pintarClienteVenta();
+  FACTURAR = false;
+  var ft = document.getElementById('factTog'); if (ft) ft.classList.remove('on');
+  var fs = document.getElementById('factSub'); if (fs) fs.textContent = 'Apagado: nota de entrega, sin IVA';
   var cf = document.getElementById('cliVtaForm'); if (cf) cf.style.display = 'none';
   modoSocio = false;
   var tg = document.getElementById('socioTog'); if (tg) tg.classList.remove('on');
@@ -1472,7 +1500,7 @@ function abrirDoc(modo) {
   document.getElementById('skipNota').textContent = esCot ? 'Cerrar' : 'Omitir - Nueva Venta';
   document.getElementById('cotSinCliente').style.display = esCot ? 'block' : 'none';
   document.getElementById('cotMonedaWrap').style.display = esCot ? 'block' : 'none';
-  document.getElementById('btnFactura').style.display = esCot ? 'none' : 'block';
+  document.getElementById('btnFactura').style.display = (esCot || !FACTURAR) ? 'none' : 'block';
   if (esCot) document.getElementById('selCotMon').value = localStorage.getItem('boparts_cot_mon') || 'BS';
   document.getElementById('docListo').style.display = 'none';
   document.getElementById('btnDoc').style.display = 'block';

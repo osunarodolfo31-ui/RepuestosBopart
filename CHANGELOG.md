@@ -10,7 +10,7 @@ en el comentario del encabezado de cada HTML y en la cabecera de `Code.gs`.
 | Archivo                 | Versión | Requiere Apps Script |
 |-------------------------|---------|----------------------|
 | index.html              | v9.6    | **v13** (para la tasa) |
-| boparts_ventas.html     | v13     | **v19**              |
+| boparts_ventas.html     | v13.1   | **v19**              |
 | boparts_cobros.html     | v2.4    | **v13**              |
 | boparts_compras.html    | v2      | **v18**              |
 | boparts_gastos.html     | v1.4    | **v13**              |
