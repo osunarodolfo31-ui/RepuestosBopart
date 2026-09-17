@@ -1,7 +1,8 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_devoluciones.html
-  VERSION: v1 (2026-09-14) | requiere Apps Script v15
+  VERSION: v1.1 (2026-09-17) | requiere Apps Script v19.2
+  v1.1: si el script devuelve una pagina de error en vez de datos, se explica en lugar de mostrar "Unexpected token"
   Devoluciones y cambios sobre una nota de entrega. Solo socios (PIN en cada uso).
   El producto devuelto vuelve al inventario; la linea se revierte con su costo original para que el margen no mienta.
   Diferencia: si el cambio es mas caro, el cliente paga; si es mas barato, se devuelve por pago movil o queda a favor.
@@ -314,8 +315,11 @@ function buscar() {
   document.getElementById('notaInfo').innerHTML = '<div class="cominfo">Buscando...</div>';
   document.getElementById('cuerpo').innerHTML = '';
   fetch(SCRIPT_URL + '?action=nota&num=' + n + '&t=' + Date.now())
-    .then(function(r) { return r.json(); })
-    .then(function(d) {
+    .then(function(r) { return r.text(); })
+    .then(function(t) {
+      var d;
+      try { d = JSON.parse(t); }
+      catch (e) { throw new Error('El script no respondio datos (devolvio una pagina). Revisa que Apps Script este en v19.2 y desplegado como Nueva version.'); }
       if (!d || !d.ok) throw new Error(d && d.error ? d.error : 'sin respuesta');
       NOTA = d; sel = {}; nuevas = [];
       var tarde = d.dias > PLAZO_DIAS;
