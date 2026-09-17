@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_gastos.html
-  VERSION: v1.4 (2026-09-12) — nav con Gerencia | requiere Apps Script v11.2
+  VERSION: v1.5 (2026-09-17) — nav con Gerencia | requiere Apps Script v11.2
   v1.2: 'CUENTA BOPART'; los gastos pagados por un socio generan prestamo de socio (script v11.2); logo sin fondo
   Registro de gastos operativos (no inventario: eso entra por Compras). Monto en USD o Bs, metodo, quien pago, comprobante.
 -->
@@ -301,7 +301,7 @@ select option{background:#1E1E1E;color:var(--ink)}
 <script>
 var SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
 var CLOUD = 'c7jufi9v', PRESET = 'boparts_productos';
-var APP_VERSION = 'v1.4';
+var APP_VERSION = 'v1.5';
 var TASA = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
 var comprobante = '';
 var METODOS = [
@@ -334,7 +334,7 @@ function subirFoto(input) {
   var box = document.getElementById('fotoBox'); box.textContent = 'Subiendo...';
   comprimir(file, 1600, 0.8).then(function(blob) {
     var fd = new FormData(); fd.append('file', blob, 'gasto.jpg'); fd.append('upload_preset', PRESET); fd.append('folder', 'boparts/gastos');
-    return fetch('https://api.cloudinary.com/v1_1/' + CLOUD + '/image/upload', {method:'POST', body:fd}).then(function(r) { return r.json(); });
+    return fetch('https://api.cloudinary.com/v1_1/' + CLOUD + '/image/upload', {method:'POST', body:fd}).then(leerJSON);
   }).then(function(d) {
     if (!d.secure_url) throw new Error('sin url');
     comprobante = d.secure_url; box.className = 'fotobox ok'; box.innerHTML = 'Comprobante subido ✓<input type="file" accept="image/*" onchange="subirFoto(this)">';
@@ -417,7 +417,7 @@ function closeNav() {
 // La tasa la fijan los socios desde Gerencia y vive en CONFIG: aqui solo se lee y se guarda por si no hay senal.
 function sincronizarTasa(despues) {
   fetch(SCRIPT_URL + '?action=config&t=' + Date.now())
-    .then(function(r) { return r.json(); })
+    .then(leerJSON)
     .then(function(d) {
       if (!d || !d.ok || !(d.tasa > 0) || d.tasa === TASA) return;
       TASA = d.tasa;
@@ -427,6 +427,18 @@ function sincronizarTasa(despues) {
     .catch(function() {});
 }
 sincronizarTasa(preview);
+
+// Lee la respuesta del script con cuidado: si Apps Script devuelve su pagina de error (HTML),
+// r.json() explota con "Unexpected token '<'". Asi se explica que pasa en vez de mostrar eso.
+function leerJSON(r) {
+  return r.text().then(function(t) {
+    try { return JSON.parse(t); }
+    catch (e) {
+      var limpio = String(t).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
+      throw new Error('El script no devolvio datos' + (limpio ? ': ' + limpio : '') + '. Revisa que Apps Script este desplegado como Nueva version.');
+    }
+  });
+}
 </script>
 </body>
 </html>

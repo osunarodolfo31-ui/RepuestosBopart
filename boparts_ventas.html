@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_ventas.html
-  VERSION: v13.1 (2026-09-16) | requiere Apps Script v19
+  VERSION: v13.2 (2026-09-17) | requiere Apps Script v19
   v13.1: interruptor "Facturar": encendido agrega el IVA y habilita la factura fiscal; apagado la venta va sin IVA
          y solo con nota de entrega. Por defecto esta apagado.
   v13: IVA 16% discriminado, tasa BCV para la factura, metodo Cashea con su desglose (inicial, financiado,
@@ -465,7 +465,7 @@ select option{background:#1E1E1E;color:var(--ink)}
 var CSV_URL     = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRaAnGd-Bfaxo3LjUiGeV8p0F2weaKqHGwJ0hWibSMj02-h7dRAQPDMmGL5B8-XQg66Yjd3zgOAaz8X/pub?gid=2100998338&single=true&output=csv';
 var CLIENTES_URL= 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRaAnGd-Bfaxo3LjUiGeV8p0F2weaKqHGwJ0hWibSMj02-h7dRAQPDMmGL5B8-XQg66Yjd3zgOAaz8X/pub?gid=647304383&single=true&output=csv';
 var SCRIPT_URL  = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
-var APP_VERSION = 'v13.1';
+var APP_VERSION = 'v13.2';
 var TASA        = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
 var TASA_ORIGEN = TASA ? 'guardada' : 'ninguna';
 
@@ -476,7 +476,7 @@ var BCV_FECHA = localStorage.getItem('boparts_bcv_fecha') || '';
 // La tasa la fijan los socios desde Gerencia y vive en CONFIG: aqui solo se lee y se guarda por si no hay senal.
 function sincronizarTasa() {
   fetch(SCRIPT_URL + '?action=config&t=' + Date.now())
-    .then(function(r) { return r.json(); })
+    .then(leerJSON)
     .then(function(d) {
       if (!d || !d.ok) return;
       if (d.bcv > 0) {
@@ -638,7 +638,7 @@ function loadClientes() {
     .catch(function(e1) {
       // Respaldo: pedir la lista a Apps Script (v10.5+). Si tampoco, reintentar en 5 s.
       fetch(SCRIPT_URL + '?action=clientes&t=' + Date.now())
-        .then(function(r) { return r.json(); })
+        .then(leerJSON)
         .then(function(d) {
           if (!d || !d.ok || !d.clientes) throw new Error('script sin clientes');
           clientesCargados(d.clientes.map(filaCliente), 'script');
@@ -923,7 +923,7 @@ function cargarSaldoCliente() {
   saldoCliente = 0;
   if (!clienteVenta) return;
   fetch(SCRIPT_URL + '?action=cxc&cliente=' + encodeURIComponent(clienteVenta.nombre) + '&t=' + Date.now())
-    .then(function(r) { return r.json(); })
+    .then(leerJSON)
     .then(function(d) {
       if (!d || !d.ok || !d.clientes || !d.clientes.length) return;
       saldoCliente = parseNum(d.clientes[0].saldoUSD);
@@ -1484,7 +1484,7 @@ function abrirCotizacion() {
   lastCart = cart.map(function(c) { return {producto:c.producto, codigo:c.codigo, precio:parseFloat(c.precio)||0, costo:parseFloat(c.costo)||0, cantidad:parseInt(c.cantidad)||1}; });
   // Pedir el numero mientras el vendedor elige cliente (si cancela, ese numero se pierde; en cotizaciones no importa)
   cotNumPromise = fetch(SCRIPT_URL + '?action=nextCot')
-    .then(function(r) { return r.json(); })
+    .then(leerJSON)
     .then(function(d) { return d && d.num ? d.num : null; })
     .catch(function() { return null; });
   abrirDoc('cot');
@@ -1553,7 +1553,7 @@ function generarDoc() {
     pNum = Promise.resolve(lastNotaAsignada);            // ya vino con la venta: sin espera
   } else {
     pNum = fetch(SCRIPT_URL + '?action=nextNota&idVenta=' + encodeURIComponent(lastIdVenta))   // script viejo
-      .then(function(r) { return r.json(); }).then(function(d) { return d && d.num ? d.num : null; }).catch(function() { return null; });
+      .then(leerJSON).then(function(d) { return d && d.num ? d.num : null; }).catch(function() { return null; });
   }
   pNum
     .then(function(num) {
@@ -1728,7 +1728,7 @@ function generarFactura() {
   var btn = document.getElementById('btnFactura');
   btn.disabled = true; btn.textContent = 'Generando...';
   fetch(SCRIPT_URL + '?action=nextFactura&t=' + Date.now())
-    .then(function(r) { return r.json(); })
+    .then(leerJSON)
     .then(function(d) {
       if (!d || !d.ok) throw new Error(d && d.error ? d.error : 'no se pudo numerar');
       FACT = d;
@@ -1960,6 +1960,18 @@ function toggleNav() {
 function closeNav() {
   document.getElementById('navPan').classList.remove('open');
   document.getElementById('navOv').classList.remove('open');
+}
+
+// Lee la respuesta del script con cuidado: si Apps Script devuelve su pagina de error (HTML),
+// r.json() explota con "Unexpected token '<'". Asi se explica que pasa en vez de mostrar eso.
+function leerJSON(r) {
+  return r.text().then(function(t) {
+    try { return JSON.parse(t); }
+    catch (e) {
+      var limpio = String(t).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
+      throw new Error('El script no devolvio datos' + (limpio ? ': ' + limpio : '') + '. Revisa que Apps Script este desplegado como Nueva version.');
+    }
+  });
 }
 </script>
 </body>

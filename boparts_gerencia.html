@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_gerencia.html
-  VERSION: v2.1 (2026-09-16) | requiere Apps Script v19
+  VERSION: v2.2 (2026-09-17) | requiere Apps Script v19
   v2.1: el engranaje ahora tiene tasa de trabajo, tasa BCV (para las facturas) y el estado de la numeracion fiscal
   v2: cuentas por pagar a proveedores (saldo, facturas por vencer y vencidas, abonos) y aviso de recepciones
       pendientes de costear
@@ -390,7 +390,7 @@ select option{background:#1E1E1E;color:var(--ink)}
 
 <script>
 var SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
-var APP_VERSION = 'v2.1';
+var APP_VERSION = 'v2.2';
 var TASA = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
 var periodo = 'hoy', DATA = null;
 
@@ -486,7 +486,7 @@ function toggleConfig() {
 
 function cargarTasa() {
   fetch(SCRIPT_URL + '?action=config&t=' + Date.now())
-    .then(function(r) { return r.json(); })
+    .then(leerJSON)
     .then(function(d) {
       if (!d || !d.ok) throw new Error('sin config');
       TASA = num(d.tasa);
@@ -518,7 +518,7 @@ function guardarBCV() {
   if (!(t > 0)) { toast('Escribe la tasa BCV', 'err'); return; }
   fetch(SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'},
     body:JSON.stringify({tipo:'tasa', cual:'BCV', tasa:t, quien:'Gerencia'})})
-    .then(function(r) { return r.json(); })
+    .then(leerJSON)
     .then(function(d) {
       if (!d || !d.ok) throw new Error(d && d.error ? d.error : 'no se guardo');
       toast('Tasa BCV del dia: ' + t, 'ok');
@@ -532,7 +532,7 @@ function guardarTasa() {
   if (!(t > 0)) { toast('Escribe la tasa', 'err'); return; }
   if (TASA && Math.abs(t - TASA) / TASA > 0.25 && !confirm('La tasa cambia de ' + TASA + ' a ' + t + '. Es mas del 25%. Confirmas?')) return;
   fetch(SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body:JSON.stringify({tipo:'tasa', tasa:t, quien:'Gerencia'})})
-    .then(function(r) { return r.json(); })
+    .then(leerJSON)
     .then(function(d) {
       if (!d || !d.ok) throw new Error(d && d.error ? d.error : 'no se guardo');
       toast('Tasa fijada en ' + t + ' para todas las apps', 'ok');
@@ -546,7 +546,7 @@ function guardarTasa() {
 // Es un compromiso de la tienda con el cliente, no una venta.
 function cargarApartados() {
   fetch(SCRIPT_URL + '?action=apartados&t=' + Date.now())
-    .then(function(r) { return r.json(); })
+    .then(leerJSON)
     .then(function(d) {
       if (!d || !d.ok) return;
       var abiertos = (d.apartados || []).filter(function(a) { return a.estado === 'ABIERTO' || a.estado === 'LISTO'; });
@@ -574,8 +574,8 @@ function cargarApartados() {
 var CXP = [];
 function cargarPagar() {
   Promise.all([
-    fetch(SCRIPT_URL + '?action=cxp&t=' + Date.now()).then(function(r) { return r.json(); }),
-    fetch(SCRIPT_URL + '?action=compras&estado=PENDIENTE%20COSTO&t=' + Date.now()).then(function(r) { return r.json(); })
+    fetch(SCRIPT_URL + '?action=cxp&t=' + Date.now()).then(leerJSON),
+    fetch(SCRIPT_URL + '?action=compras&estado=PENDIENTE%20COSTO&t=' + Date.now()).then(leerJSON)
   ]).then(function(res) {
     CXP = (res[0] && res[0].proveedores ? res[0].proveedores : []).filter(function(p) { return p.saldoUSD > 0.009; });
     pintarPagar((res[1] && res[1].compras) ? res[1].compras.length : 0);
@@ -650,7 +650,7 @@ function pagarProveedor(prov) {
 var CONTEOS = [];
 function cargarConteos() {
   fetch(SCRIPT_URL + '?action=conteos&t=' + Date.now())
-    .then(function(r) { return r.json(); })
+    .then(leerJSON)
     .then(function(d) {
       CONTEOS = (d && d.conteos) ? d.conteos : [];
       pintarConteos();
@@ -705,8 +705,8 @@ document.getElementById('cliTabs').addEventListener('click', function(e) {
 
 function cargarClientes() {
   Promise.all([
-    fetch(SCRIPT_URL + '?action=clientes&t=' + Date.now()).then(function(r) { return r.json(); }),
-    fetch(SCRIPT_URL + '?action=cliente_stats&t=' + Date.now()).then(function(r) { return r.json(); })
+    fetch(SCRIPT_URL + '?action=clientes&t=' + Date.now()).then(leerJSON),
+    fetch(SCRIPT_URL + '?action=cliente_stats&t=' + Date.now()).then(leerJSON)
   ]).then(function(res) {
     var c = res[0], st = res[1];
     CLIENTES = (c && c.clientes ? c.clientes : []).map(function(r) {
@@ -984,6 +984,18 @@ else {
   var pi = document.getElementById('pinInput');
   pi.addEventListener('keydown', function(e) { if (e.key === 'Enter') validarPin(); });
   setTimeout(function() { pi.focus(); }, 250);
+}
+
+// Lee la respuesta del script con cuidado: si Apps Script devuelve su pagina de error (HTML),
+// r.json() explota con "Unexpected token '<'". Asi se explica que pasa en vez de mostrar eso.
+function leerJSON(r) {
+  return r.text().then(function(t) {
+    try { return JSON.parse(t); }
+    catch (e) {
+      var limpio = String(t).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
+      throw new Error('El script no devolvio datos' + (limpio ? ': ' + limpio : '') + '. Revisa que Apps Script este desplegado como Nueva version.');
+    }
+  });
 }
 </script>
 </body>

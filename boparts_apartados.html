@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_apartados.html
-  VERSION: v1.2 (2026-09-14) | requiere Apps Script v14
+  VERSION: v1.3 (2026-09-17) | requiere Apps Script v14
   v1.2: el precio de cada linea se puede editar al crear el apartado (descuentos); ese precio es el que queda
         congelado. El precio de lista se muestra al lado cuando hay diferencia.
   v1.1: el panel de abono/entrega usaba una clase que no existe en este archivo y se dibujaba suelto al final de
@@ -352,7 +352,7 @@ select option{background:#1E1E1E;color:var(--ink)}
 var CSV_URL    = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRaAnGd-Bfaxo3LjUiGeV8p0F2weaKqHGwJ0hWibSMj02-h7dRAQPDMmGL5B8-XQg66Yjd3zgOAaz8X/pub?gid=2100998338&single=true&output=csv';
 var CLIENTES_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRaAnGd-Bfaxo3LjUiGeV8p0F2weaKqHGwJ0hWibSMj02-h7dRAQPDMmGL5B8-XQg66Yjd3zgOAaz8X/pub?gid=647304383&single=true&output=csv';
 var SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
-var APP_VERSION = 'v1.2';
+var APP_VERSION = 'v1.3';
 var TASA = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
 
 var METODOS = [
@@ -377,7 +377,7 @@ document.getElementById('fechaHdr').textContent = APP_VERSION + ' · ' + new Dat
   document.getElementById('mvMet').innerHTML = h;
 })();
 
-fetch(SCRIPT_URL + '?action=config&t=' + Date.now()).then(function(r) { return r.json(); })
+fetch(SCRIPT_URL + '?action=config&t=' + Date.now()).then(leerJSON)
   .then(function(d) { if (d && d.ok && d.tasa > 0) { TASA = d.tasa; try { localStorage.setItem('motoauto_tasa', String(TASA)); } catch (e) {} } })
   .catch(function() {});
 
@@ -404,7 +404,7 @@ fetch(CLIENTES_URL + '&t=' + Date.now()).then(function(r) { return r.text(); }).
 // ---------- lista ----------
 function cargar() {
   fetch(SCRIPT_URL + '?action=apartados&t=' + Date.now())
-    .then(function(r) { return r.json(); })
+    .then(leerJSON)
     .then(function(d) {
       if (!d || !d.ok) throw new Error('sin datos');
       APARTADOS = d.apartados || [];
@@ -769,6 +769,18 @@ function closeNav() {
 
 document.addEventListener('click', function(e) { if (!e.target.closest('.wrap')) { prodDrop.classList.remove('open'); cliDrop.classList.remove('open'); } });
 cargar();
+
+// Lee la respuesta del script con cuidado: si Apps Script devuelve su pagina de error (HTML),
+// r.json() explota con "Unexpected token '<'". Asi se explica que pasa en vez de mostrar eso.
+function leerJSON(r) {
+  return r.text().then(function(t) {
+    try { return JSON.parse(t); }
+    catch (e) {
+      var limpio = String(t).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
+      throw new Error('El script no devolvio datos' + (limpio ? ': ' + limpio : '') + '. Revisa que Apps Script este desplegado como Nueva version.');
+    }
+  });
+}
 </script>
 </body>
 </html>

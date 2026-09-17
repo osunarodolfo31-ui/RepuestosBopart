@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_devoluciones.html
-  VERSION: v1.1 (2026-09-17) | requiere Apps Script v19.2
+  VERSION: v1.2 (2026-09-17) | requiere Apps Script v19.2
   v1.1: si el script devuelve una pagina de error en vez de datos, se explica en lugar de mostrar "Unexpected token"
   Devoluciones y cambios sobre una nota de entrega. Solo socios (PIN en cada uso).
   El producto devuelto vuelve al inventario; la linea se revierte con su costo original para que el margen no mienta.
@@ -288,7 +288,7 @@ var NOTA = null, PRODUCTS = [], sel = {}, nuevas = [];
 
 document.getElementById('fechaHdr').textContent = APP_VERSION + ' · ' + new Date().toLocaleDateString('es-VE', {weekday:'long', day:'numeric', month:'long'});
 
-fetch(SCRIPT_URL + '?action=config&t=' + Date.now()).then(function(r) { return r.json(); })
+fetch(SCRIPT_URL + '?action=config&t=' + Date.now()).then(leerJSON)
   .then(function(d) { if (d && d.ok && d.tasa > 0) { TASA = d.tasa; try { localStorage.setItem('motoauto_tasa', String(TASA)); } catch (e) {} } })
   .catch(function() {});
 
@@ -527,6 +527,18 @@ function closeNav() {
 }
 
 document.addEventListener('click', function(e) { if (!e.target.closest('.wrap')) { var d = document.getElementById('prodDrop'); if (d) d.classList.remove('open'); } });
+
+// Lee la respuesta del script con cuidado: si Apps Script devuelve su pagina de error (HTML),
+// r.json() explota con "Unexpected token '<'". Asi se explica que pasa en vez de mostrar eso.
+function leerJSON(r) {
+  return r.text().then(function(t) {
+    try { return JSON.parse(t); }
+    catch (e) {
+      var limpio = String(t).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
+      throw new Error('El script no devolvio datos' + (limpio ? ': ' + limpio : '') + '. Revisa que Apps Script este desplegado como Nueva version.');
+    }
+  });
+}
 </script>
 </body>
 </html>

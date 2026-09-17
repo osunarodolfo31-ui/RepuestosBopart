@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_cobros.html
-  VERSION: v2.4 (2026-09-13) | requiere Apps Script v13
+  VERSION: v2.5 (2026-09-17) | requiere Apps Script v13
   v2.4: boton Cobrar en cada cliente y en su detalle: manda el estado de cuenta por WhatsApp al chat del cliente
         (usa el telefono de la hoja CLIENTES) sin tener que registrar un abono antes
   v2.1: cada nota muestra los productos que se debe; fechas cortas dd/mm/aaaa; logo sin fondo en el encabezado
@@ -329,7 +329,7 @@ var TELS = {};   // nombre del cliente -> telefono, para abrir su chat directo
 
 try { TELS = JSON.parse(localStorage.getItem('boparts_tels') || '{}'); } catch (e) {}
 fetch(SCRIPT_URL + '?action=clientes&t=' + Date.now())
-  .then(function(r) { return r.json(); })
+  .then(leerJSON)
   .then(function(d) {
     if (!d || !d.ok || !d.clientes) return;
     d.clientes.forEach(function(c) { if (c[0] && c[2]) TELS[String(c[0]).trim().toUpperCase()] = String(c[2]).trim(); });
@@ -376,7 +376,7 @@ function primerNombre(n) {
 }
 var ultimo = null;   // ultimo abono registrado (para el mensaje de WhatsApp)
 
-var APP_VERSION = 'v2.4';
+var APP_VERSION = 'v2.5';
 document.getElementById('fechaHdr').textContent = APP_VERSION + ' · ' + new Date().toLocaleDateString('es-VE', {weekday:'long', day:'numeric', month:'long'});
 
 // Metodos de pago (sin CREDITO)
@@ -390,7 +390,7 @@ document.getElementById('fechaHdr').textContent = APP_VERSION + ' · ' + new Dat
 function cargar() {
   document.getElementById('cliList').innerHTML = '<div class="empty">Cargando...</div>';
   fetch(SCRIPT_URL + '?action=cxc&t=' + Date.now())
-    .then(function(r) { return r.json(); })
+    .then(leerJSON)
     .then(function(d) {
       if (!d || !d.ok) throw new Error(d && d.error ? d.error : 'sin respuesta');
       if (!TASA && d.tasa > 1) TASA = d.tasa;
@@ -489,7 +489,7 @@ function guardarAbono() {
   var btn = document.getElementById('btnAbono');
   btn.disabled = true; btn.textContent = 'Guardando...';
   fetch(SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body:JSON.stringify(payload)})
-    .then(function(r) { return r.json(); })
+    .then(leerJSON)
     .then(function(d) {
       btn.disabled = false; btn.textContent = 'Registrar Abono';
       if (!d || d.ok !== true) throw new Error(d && d.error ? d.error : 'Respuesta invalida');
@@ -562,7 +562,7 @@ function closeNav() {
 // La tasa la fijan los socios desde Gerencia y vive en CONFIG: aqui solo se lee y se guarda por si no hay senal.
 function sincronizarTasa(despues) {
   fetch(SCRIPT_URL + '?action=config&t=' + Date.now())
-    .then(function(r) { return r.json(); })
+    .then(leerJSON)
     .then(function(d) {
       if (!d || !d.ok || !(d.tasa > 0) || d.tasa === TASA) return;
       TASA = d.tasa;
@@ -574,6 +574,18 @@ function sincronizarTasa(despues) {
 
 sincronizarTasa(function() { renderLista(); renderDetalle(); });
 cargar();
+
+// Lee la respuesta del script con cuidado: si Apps Script devuelve su pagina de error (HTML),
+// r.json() explota con "Unexpected token '<'". Asi se explica que pasa en vez de mostrar eso.
+function leerJSON(r) {
+  return r.text().then(function(t) {
+    try { return JSON.parse(t); }
+    catch (e) {
+      var limpio = String(t).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
+      throw new Error('El script no devolvio datos' + (limpio ? ': ' + limpio : '') + '. Revisa que Apps Script este desplegado como Nueva version.');
+    }
+  });
+}
 </script>
 </body>
 </html>

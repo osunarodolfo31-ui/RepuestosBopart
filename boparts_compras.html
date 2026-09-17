@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_compras.html
-  VERSION: v2.1 (2026-09-16) | requiere Apps Script v19.1
+  VERSION: v2.2 (2026-09-17) | requiere Apps Script v19.1
   v2.1: en el costeo tambien se fija el precio de venta. Se propone costo + 50% y se puede ajustar linea por linea
         o cambiar el margen de toda la compra. El precio queda escrito en la lista y el producto sale listo para vender.
   v2: pestana "Por costear": con el PIN de socios se abren las recepciones pendientes, se pone el costo de cada
@@ -354,7 +354,7 @@ select option{background:#1E1E1E;color:var(--ink)}
 var CSV_URL    = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRaAnGd-Bfaxo3LjUiGeV8p0F2weaKqHGwJ0hWibSMj02-h7dRAQPDMmGL5B8-XQg66Yjd3zgOAaz8X/pub?gid=2100998338&single=true&output=csv';
 var SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
 var CLOUD = 'c7jufi9v', PRESET = 'boparts_productos';
-var APP_VERSION = 'v2.1';
+var APP_VERSION = 'v2.2';
 
 var PRODUCTS = [], PROVEEDORES = [], lineas = [], provSel = null, fotoUrl = '';
 document.getElementById('fechaHdr').textContent = APP_VERSION + ' · ' + new Date().toLocaleDateString('es-VE', {weekday:'long', day:'numeric', month:'long'});
@@ -375,7 +375,7 @@ fetch(CSV_URL + '&t=' + Date.now()).then(function(r) { return r.text(); }).then(
 
 // ---- proveedores (via Apps Script; la hoja no esta publicada) ----
 try { PROVEEDORES = JSON.parse(localStorage.getItem('boparts_proveedores') || '[]'); } catch (e) {}
-fetch(SCRIPT_URL + '?action=proveedores&t=' + Date.now()).then(function(r) { return r.json(); }).then(function(d) {
+fetch(SCRIPT_URL + '?action=proveedores&t=' + Date.now()).then(leerJSON).then(function(d) {
   if (d && d.ok && d.proveedores) {
     PROVEEDORES = d.proveedores.map(function(r) { return {nombre:r[0], rif:r[1], tel:r[2], contacto:r[3]}; }).filter(function(p) { return p.nombre; });
     localStorage.setItem('boparts_proveedores', JSON.stringify(PROVEEDORES));
@@ -421,7 +421,7 @@ function subirFoto(input) {
   var box = document.getElementById('fotoBox'); box.textContent = 'Subiendo...';
   comprimir(file, 1600, 0.8).then(function(blob) {
     var fd = new FormData(); fd.append('file', blob, 'factura.jpg'); fd.append('upload_preset', PRESET); fd.append('folder', 'boparts/facturas');
-    return fetch('https://api.cloudinary.com/v1_1/' + CLOUD + '/image/upload', {method:'POST', body:fd}).then(function(r) { return r.json(); });
+    return fetch('https://api.cloudinary.com/v1_1/' + CLOUD + '/image/upload', {method:'POST', body:fd}).then(leerJSON);
   }).then(function(d) {
     if (!d.secure_url) throw new Error('sin url');
     fotoUrl = d.secure_url; box.className = 'fotobox ok'; box.innerHTML = 'Factura subida ✓ <a href="' + fotoUrl + '" target="_blank" style="color:var(--green)">ver</a><input type="file" accept="image/*" onchange="subirFoto(this)">';
@@ -545,7 +545,7 @@ function verTab(t) {
 function cargarPendientes() {
   document.getElementById('listaCostear').innerHTML = '<div class="cart-empty">Cargando...</div>';
   fetch(SCRIPT_URL + '?action=compras&estado=PENDIENTE%20COSTO&t=' + Date.now())
-    .then(function(r) { return r.json(); })
+    .then(leerJSON)
     .then(function(d) {
       PENDIENTES = (d && d.compras) ? d.compras : [];
       document.getElementById('pendNum').textContent = PENDIENTES.length ? '(' + PENDIENTES.length + ')' : '';
@@ -764,6 +764,18 @@ function closeNav() {
   document.getElementById('navOv').classList.remove('open');
 }
 
+
+// Lee la respuesta del script con cuidado: si Apps Script devuelve su pagina de error (HTML),
+// r.json() explota con "Unexpected token '<'". Asi se explica que pasa en vez de mostrar eso.
+function leerJSON(r) {
+  return r.text().then(function(t) {
+    try { return JSON.parse(t); }
+    catch (e) {
+      var limpio = String(t).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
+      throw new Error('El script no devolvio datos' + (limpio ? ': ' + limpio : '') + '. Revisa que Apps Script este desplegado como Nueva version.');
+    }
+  });
+}
 </script>
 </body>
 </html>

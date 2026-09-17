@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_demanda.html
-  VERSION: v8.4 (2026-09-11) — nav con Gerencia | requiere Apps Script v7 o superior
+  VERSION: v8.5 (2026-09-17) — nav con Gerencia | requiere Apps Script v7 o superior
   v8.3: menu completo (Compras, Gastos, Cobros); logo sin fondo en el encabezado
   v8.1: lee precios de proveedores con coma o punto decimal
   Cambios v8: el POST lee la respuesta del script; exito solo con {ok:true}; si falla, el formulario queda intacto y avisa
@@ -511,7 +511,7 @@ function subirFoto(input, slotIdx) {
   fd.append('folder', 'boparts/demanda');
 
   fetch('https://api.cloudinary.com/v1_1/' + CLOUDINARY + '/image/upload', {method:'POST', body:fd})
-    .then(function(r){ return r.json(); })
+    .then(leerJSON)
     .then(function(d){
       if (d.secure_url) {
         fotos[slotIdx] = d.secure_url;
@@ -579,7 +579,7 @@ function guardar() {
   if (btn) { btn.disabled = true; btn.textContent = 'Guardando...'; }
 
   fetch(SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body:JSON.stringify(payload)})
-    .then(function(r) { return r.json(); })
+    .then(leerJSON)
     .then(function(d) {
       if (btn) { btn.disabled = false; btn.textContent = 'Registrar Demanda'; }
       if (!d || d.ok !== true) throw new Error(d && d.error ? d.error : 'Respuesta invalida');
@@ -643,6 +643,18 @@ function parseNum(v) {
   }
   var n = parseFloat(t);
   return isNaN(n) ? 0 : n;
+}
+
+// Lee la respuesta del script con cuidado: si Apps Script devuelve su pagina de error (HTML),
+// r.json() explota con "Unexpected token '<'". Asi se explica que pasa en vez de mostrar eso.
+function leerJSON(r) {
+  return r.text().then(function(t) {
+    try { return JSON.parse(t); }
+    catch (e) {
+      var limpio = String(t).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
+      throw new Error('El script no devolvio datos' + (limpio ? ': ' + limpio : '') + '. Revisa que Apps Script este desplegado como Nueva version.');
+    }
+  });
 }
 </script>
 </body>
