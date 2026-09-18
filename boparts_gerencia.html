@@ -1,7 +1,9 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_gerencia.html
-  VERSION: v2.2 (2026-09-17) | requiere Apps Script v19
+  VERSION: v2.3 (2026-09-17) | requiere Apps Script v20
+  v2.3: quedaba una lectura de respuesta sin proteger; al guardar un cliente se muestra lo que realmente quedo
+        en la hoja, no lo que se envio
   v2.1: el engranaje ahora tiene tasa de trabajo, tasa BCV (para las facturas) y el estado de la numeracion fiscal
   v2: cuentas por pagar a proveedores (saldo, facturas por vencer y vencidas, abonos) y aviso de recepciones
       pendientes de costear
@@ -390,7 +392,7 @@ select option{background:#1E1E1E;color:var(--ink)}
 
 <script>
 var SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
-var APP_VERSION = 'v2.2';
+var APP_VERSION = 'v2.3';
 var TASA = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
 var periodo = 'hoy', DATA = null;
 
@@ -789,7 +791,12 @@ function guardarCli(nombre) {
     .then(function(r) { return r.text(); })
     .then(function(t) { var d; try { d = JSON.parse(t); } catch (e) { throw new Error('respuesta rara'); }
       if (!d || !d.ok) throw new Error(d && d.error ? d.error : 'no se guardo');
-      c.credito = cred; c.limite = lim; c.dias = dias; c.suelto = false;
+      // Se refleja lo que quedo guardado en la hoja, no lo que se envio
+      var srv = d.cliente || {};
+      c.credito = (srv.credito !== undefined) ? srv.credito : cred;
+      c.limite = (srv.limite !== undefined) ? srv.limite : lim;
+      c.dias = (srv.dias !== undefined) ? srv.dias : dias;
+      c.suelto = false;
       toast(c.nombre + ': ' + (cred ? 'credito hasta ' + usd(lim) + (dias ? ' a ' + dias + ' dias' : '') : 'solo contado'), 'ok');
       pintarClientes();
     })
@@ -804,7 +811,7 @@ function cargar() {
   document.getElementById('cuerpo').innerHTML = '<div class="cart-empty">Cargando...</div>';
   document.getElementById('periodoLbl').textContent = fechaES(r.d1) + ' a ' + fechaES(r.d2);
   fetch(SCRIPT_URL + '?action=ventas&desde=' + r.d1 + '&hasta=' + r.d2 + '&t=' + Date.now())
-    .then(function(x) { return x.json(); })
+    .then(leerJSON)
     .then(function(d) {
       if (!d || !d.ok) throw new Error(d && d.error ? d.error : 'sin datos');
       DATA = d; render(r);

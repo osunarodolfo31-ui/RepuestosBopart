@@ -1,7 +1,9 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_compras.html
-  VERSION: v2.2 (2026-09-17) | requiere Apps Script v19.1
+  VERSION: v2.3 (2026-09-17) | requiere Apps Script v20
+  v2.3: cambiar un costo o precio ya no reinicia la condicion de pago, los dias ni quien costea; si la compra ya
+        estaba costeada, el script lo rechaza y la app lo avisa en vez de duplicar la deuda
   v2.1: en el costeo tambien se fija el precio de venta. Se propone costo + 50% y se puede ajustar linea por linea
         o cambiar el margen de toda la compra. El precio queda escrito en la lista y el producto sale listo para vender.
   v2: pestana "Por costear": con el PIN de socios se abren las recepciones pendientes, se pone el costo de cada
@@ -354,7 +356,7 @@ select option{background:#1E1E1E;color:var(--ink)}
 var CSV_URL    = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRaAnGd-Bfaxo3LjUiGeV8p0F2weaKqHGwJ0hWibSMj02-h7dRAQPDMmGL5B8-XQg66Yjd3zgOAaz8X/pub?gid=2100998338&single=true&output=csv';
 var SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
 var CLOUD = 'c7jufi9v', PRESET = 'boparts_productos';
-var APP_VERSION = 'v2.2';
+var APP_VERSION = 'v2.3';
 
 var PRODUCTS = [], PROVEEDORES = [], lineas = [], provSel = null, fotoUrl = '';
 document.getElementById('fechaHdr').textContent = APP_VERSION + ' · ' + new Date().toLocaleDateString('es-VE', {weekday:'long', day:'numeric', month:'long'});
@@ -525,6 +527,15 @@ function renderLineas() {
 var PIN_HASH_SOCIOS = 911136;
 function hashPin(t) { var h = 5381; for (var i = 0; i < t.length; i++) h = ((h * 33) ^ t.charCodeAt(i)) >>> 0; return h % 1000000; }
 var PENDIENTES = [], costeando = null, DIAS_PROV = {};
+// El formulario del costeo se guarda aparte: pintarCosteo() rehace el HTML y antes borraba lo elegido.
+var FCOS = {cond:'CONTADO', dias:0, met:'', quien:''};
+function guardarFCos() {
+  var g = function(id) { var e = document.getElementById(id); return e ? e.value : undefined; };
+  var c = g('csCond'); if (c !== undefined) FCOS.cond = c;
+  var d = g('csDias'); if (d !== undefined) FCOS.dias = parseInt(d) || 0;
+  var m = g('csMet'); if (m !== undefined) FCOS.met = m;
+  var q = g('csQuien'); if (q !== undefined) FCOS.quien = q;
+}
 var MARGEN = 50;   // % sobre el costo que se propone por defecto
 
 function verTab(t) {
@@ -567,6 +578,7 @@ function pintarPendientes() {
 
 function abrirCosteo(i) {
   costeando = PENDIENTES[i];
+  FCOS = {cond:'CONTADO', dias:DIAS_PROV[costeando.proveedor] || 0, met:'', quien:FCOS.quien};
   costeando.productos.forEach(function(l) { if (!l.costo) l.costo = 0; });
   pintarCosteo();
 }
@@ -592,10 +604,13 @@ function pintarCosteo() {
     '<input type="number" step="1" value="' + MARGEN + '" onchange="setMargen(this.value)">' +
     '<div class="cominfo">Propone el precio de venta de cada linea. Puedes cambiar el precio de una linea sin tocar las demas.</div></div>' +
     '<div class="tot"><span>Total de la compra</span><span>' + usdC(total) + '</span></div>' +
-    '<div class="field"><label>Condicion *</label><select id="csCond" onchange="pintarCosteo2()">' +
-      '<option value="CONTADO">Pagada de contado</option><option value="CREDITO">A credito</option></select></div>' +
+    '<div class="field"><label>Condicion *</label><select id="csCond" onchange="guardarFCos();pintarCosteo2()">' +
+      '<option value="CONTADO"' + (FCOS.cond === 'CONTADO' ? ' selected' : '') + '>Pagada de contado</option>' +
+      '<option value="CREDITO"' + (FCOS.cond === 'CREDITO' ? ' selected' : '') + '>A credito</option></select></div>' +
     '<div id="csExtra"></div>' +
-    '<div class="field"><label>Quien costea *</label><select id="csQuien"><option value="">Seleccionar...</option><option>Rodolfo Osuna</option><option>Javier Boves</option></select></div>' +
+    '<div class="field"><label>Quien costea *</label><select id="csQuien" onchange="guardarFCos()"><option value="">Seleccionar...</option>' +
+      '<option' + (FCOS.quien === 'Rodolfo Osuna' ? ' selected' : '') + '>Rodolfo Osuna</option>' +
+      '<option' + (FCOS.quien === 'Javier Boves' ? ' selected' : '') + '>Javier Boves</option></select></div>' +
     '<button class="nbtn nbtn-p" onclick="guardarCosteo()">Cerrar costeo</button>' +
     '<button class="nbtn nbtn-s" onclick="costeando=null;pintarPendientes()">Volver</button></div>';
   document.getElementById('listaCostear').innerHTML = h;
@@ -607,23 +622,26 @@ function pintarCosteo2() {
   var ex = document.getElementById('csExtra');
   if (!sel || !ex) return;
   if (sel.value === 'CREDITO') {
-    var dias = DIAS_PROV[costeando.proveedor] || 15;
-    ex.innerHTML = '<div class="field"><label>Dias de credito *</label><input type="number" id="csDias" value="' + dias + '" step="1"></div>' +
+    var dias = FCOS.dias || DIAS_PROV[costeando.proveedor] || 15;
+    ex.innerHTML = '<div class="field"><label>Dias de credito *</label><input type="number" id="csDias" value="' + dias + '" step="1" onchange="guardarFCos()"></div>' +
       '<div class="cominfo">Se guardan como los dias de este proveedor y se proponen la proxima vez; se pueden cambiar cuando se acuerde otra cosa.</div>';
   } else {
-    ex.innerHTML = '<div class="field"><label>Metodo de pago</label><select id="csMet">' +
-      '<option value="">Seleccionar...</option><option>Efectivo USD</option><option>Pago Movil</option>' +
-      '<option>Transferencia</option><option>Zelle</option><option>Binance</option><option>Otro</option></select></div>';
+    var ms = ['', 'Efectivo USD', 'Pago Movil', 'Transferencia', 'Zelle', 'Binance', 'Otro'];
+    ex.innerHTML = '<div class="field"><label>Metodo de pago</label><select id="csMet" onchange="guardarFCos()">' +
+      ms.map(function(m) { return '<option value="' + m + '"' + (FCOS.met === m ? ' selected' : '') + '>' + (m || 'Seleccionar...') + '</option>'; }).join('') +
+      '</select></div>';
   }
 }
 // Al poner el costo se propone el precio con el margen; si ya se escribio un precio a mano, no se toca.
 function setCosto(i, v) {
+  guardarFCos();
   var l = costeando.productos[i];
   l.costo = parseNumC(v);
   if (!l.precioManual) l.precio = Math.round(l.costo * (1 + MARGEN / 100) * 100) / 100;
   pintarCosteo();
 }
 function setPrecio(i, v) {
+  guardarFCos();
   var l = costeando.productos[i];
   l.precio = parseNumC(v);
   l.precioManual = true;
@@ -631,6 +649,7 @@ function setPrecio(i, v) {
 }
 // Cambia el margen de toda la compra y recalcula los precios que no se hayan tocado a mano
 function setMargen(v) {
+  guardarFCos();
   MARGEN = parseNumC(v) || 0;
   costeando.productos.forEach(function(l) {
     if (!l.precioManual && parseNumC(l.costo) > 0) l.precio = Math.round(parseNumC(l.costo) * (1 + MARGEN / 100) * 100) / 100;
@@ -661,7 +680,8 @@ function guardarCosteo() {
     .then(function(d) {
       if (!d || !d.ok) throw new Error(d && d.error ? d.error : 'no se guardo');
       if (dias) DIAS_PROV[c.proveedor] = dias;
-      toast('Costeada: ' + usdC(d.total) + (d.condicion === 'CREDITO' ? ' a credito, vence ' + d.vence : ' de contado'), 'ok');
+      if (d.repetida) toast('Esa compra ya estaba costeada (' + usdC(d.total) + '). No se duplico nada.', 'err');
+      else toast('Costeada: ' + usdC(d.total) + (d.condicion === 'CREDITO' ? ' a credito, vence ' + d.vence : ' de contado'), 'ok');
       costeando = null; cargarPendientes();
     })
     .catch(function(e) { toast('No se pudo costear: ' + e.message, 'err'); });

@@ -1,7 +1,9 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_ventas.html
-  VERSION: v13.2 (2026-09-17) | requiere Apps Script v19
+  VERSION: v13.3 (2026-09-17) | requiere Apps Script v20
+  v13.3: el ID de la venta se conserva mientras no cambie el carrito, asi un reintento no crea otra venta;
+         la factura queda guardada en la venta (numero y control) y reimprimir no consume numeracion nueva
   v13.1: interruptor "Facturar": encendido agrega el IVA y habilita la factura fiscal; apagado la venta va sin IVA
          y solo con nota de entrega. Por defecto esta apagado.
   v13: IVA 16% discriminado, tasa BCV para la factura, metodo Cashea con su desglose (inicial, financiado,
@@ -465,7 +467,7 @@ select option{background:#1E1E1E;color:var(--ink)}
 var CSV_URL     = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRaAnGd-Bfaxo3LjUiGeV8p0F2weaKqHGwJ0hWibSMj02-h7dRAQPDMmGL5B8-XQg66Yjd3zgOAaz8X/pub?gid=2100998338&single=true&output=csv';
 var CLIENTES_URL= 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRaAnGd-Bfaxo3LjUiGeV8p0F2weaKqHGwJ0hWibSMj02-h7dRAQPDMmGL5B8-XQg66Yjd3zgOAaz8X/pub?gid=647304383&single=true&output=csv';
 var SCRIPT_URL  = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
-var APP_VERSION = 'v13.2';
+var APP_VERSION = 'v13.3';
 var TASA        = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
 var TASA_ORIGEN = TASA ? 'guardada' : 'ninguna';
 
@@ -1177,8 +1179,14 @@ function guardarVenta() {
     lastCart.push({producto:cart[i].producto, codigo:cart[i].codigo, precio:parseFloat(cart[i].precio)||0, costo:parseFloat(cart[i].costo)||0, cantidad:parseInt(cart[i].cantidad)||1});
   }
 
-  // ID unico de la venta: enlaza la fila de VENTAS con sus lineas en VENTAS_DETALLE
-  var idVenta = 'V' + now.getFullYear() + pad2(now.getMonth()+1) + pad2(now.getDate()) + '-' + pad2(now.getHours()) + pad2(now.getMinutes()) + pad2(now.getSeconds()) + '-' + Math.random().toString(36).substr(2,4).toUpperCase();
+  // ID unico de la venta: enlaza la fila de VENTAS con sus lineas en VENTAS_DETALLE.
+  // Se conserva entre reintentos: si la respuesta se pierde y se vuelve a enviar, el script reconoce
+  // el mismo ID y no duplica la venta. Solo se renueva cuando empieza una venta nueva.
+  if (!idVentaActual) {
+    idVentaActual = 'V' + now.getFullYear() + pad2(now.getMonth()+1) + pad2(now.getDate()) + '-' +
+      pad2(now.getHours()) + pad2(now.getMinutes()) + pad2(now.getSeconds()) + '-' + Math.random().toString(36).substr(2,4).toUpperCase();
+  }
+  var idVenta = idVentaActual;
   var lineas = lastCart.map(function(c) {
     return {codigo:c.codigo, producto:c.producto, cantidad:c.cantidad, precio:c.precio, costo:c.costo};
   });
@@ -1327,6 +1335,7 @@ function parseNum(v) {
   return isNaN(n) ? 0 : n;
 }
 var lastIdVenta = '';
+var idVentaActual = '';   // se mantiene entre reintentos de la misma venta
 var lastCredito = null;
 var lastNotaAsignada = 0;
 var lastPagos = [];         // formas de pago de la ultima venta (para el mensaje de WhatsApp)
@@ -1341,6 +1350,7 @@ function nuevaVenta() {
 function resetAll() {
   cart = []; pagos = []; pid = 0;
   aliadoOn = false; aliadoSel = null; cliSel = null; lastCredito = null;
+  idVentaActual = ''; FACT = null;
   clienteVenta = null; saldoCliente = 0; pintarClienteVenta();
   FACTURAR = false;
   var ft = document.getElementById('factTog'); if (ft) ft.classList.remove('on');
@@ -1717,6 +1727,12 @@ function construirPDF(tipo, numero) {
 // ============================================================
 var FACT = null;
 function generarFactura() {
+  // Si ya se numero esta venta, se reimprime la misma factura: no se consume otro numero de control
+  if (FACT) {
+    construirFactura(FACT).then(function(pdf) { lastPDF = pdf; toast('Reimprimiendo ' + pdf.num, 'ok'); compartirPDF(); })
+      .catch(function(e) { toast('No se pudo reimprimir: ' + e.message, 'err'); });
+    return;
+  }
   if (!cliSel) {
     var visible = document.getElementById('cliSelected').style.display !== 'none';
     if (visible && cliMostrado) cliSel = cliMostrado;
@@ -1732,7 +1748,15 @@ function generarFactura() {
     .then(function(d) {
       if (!d || !d.ok) throw new Error(d && d.error ? d.error : 'no se pudo numerar');
       FACT = d;
-      return construirFactura(d);
+      return postScript({tipo:'factura_venta', idVenta:lastIdVenta, facturaNum:'F-' + ('00000' + d.factura).slice(-6),
+        controlNum:String(d.control), cliente:{nombre:cliSel.nombre, rif:cliSel.rif || ''},
+        baseUSD:baseCarritoUSD(), ivaUSD:Math.round(baseCarritoUSD() * IVA_PCT) / 100,
+        totalConIvaUSD:totalCarritoUSD(), tasaBCV:TASA_BCV, totalBS:Math.round(totalCarritoUSD() * TASA),
+        formaPago:lastPagos.map(function(p) { return p.label || p.metodo; }).join(' + '),
+        fecha:new Date().toLocaleDateString('es-VE'), hora:new Date().toLocaleTimeString('es-VE', {hour:'2-digit', minute:'2-digit'}),
+        vendedor:document.getElementById('selV').value || ''})
+        .then(function() { return construirFactura(d); })
+        .catch(function() { return construirFactura(d); });   // el PDF sale igual; el aviso lo da el script
     })
     .then(function(pdf) {
       lastPDF = pdf;

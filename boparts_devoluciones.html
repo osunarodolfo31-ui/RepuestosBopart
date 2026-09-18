@@ -1,7 +1,9 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_devoluciones.html
-  VERSION: v1.2 (2026-09-17) | requiere Apps Script v19.2
+  VERSION: v1.3 (2026-09-17) | requiere Apps Script v20
+  v1.3: el formulario (resolucion, autoriza, cliente, motivo) ya no se pierde al cambiar cantidades; el cliente
+        viene de la venta; el servidor valida cuanto queda por devolver
   v1.1: si el script devuelve una pagina de error en vez de datos, se explica en lugar de mostrar "Unexpected token"
   Devoluciones y cambios sobre una nota de entrega. Solo socios (PIN en cada uso).
   El producto devuelto vuelve al inventario; la linea se revierte con su costo original para que el margen no mienta.
@@ -285,6 +287,16 @@ var PIN_HASH_SOCIOS = 911136;      // mismo PIN de Gerencia
 var PLAZO_DIAS = 5;                // maximo acordado para aceptar un cambio
 var TASA = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
 var NOTA = null, PRODUCTS = [], sel = {}, nuevas = [];
+// El formulario se guarda aparte del HTML: render() reconstruye la pantalla y antes borraba lo escrito.
+var FORM = {res:'PAGO_MOVIL', met:'', aut:'', cli:'', motivo:''};
+function guardarForm() {
+  var g = function(id) { var e = document.getElementById(id); return e ? e.value : undefined; };
+  var r = g('selRes'); if (r !== undefined) FORM.res = r;
+  var m = g('selMet'); if (m !== undefined) FORM.met = m;
+  var a = g('selAut'); if (a !== undefined) FORM.aut = a;
+  var c = g('inCli'); if (c !== undefined) FORM.cli = c;
+  var mo = g('inMotivo'); if (mo !== undefined) FORM.motivo = mo;
+}
 
 document.getElementById('fechaHdr').textContent = APP_VERSION + ' · ' + new Date().toLocaleDateString('es-VE', {weekday:'long', day:'numeric', month:'long'});
 
@@ -322,6 +334,7 @@ function buscar() {
       catch (e) { throw new Error('El script no respondio datos (devolvio una pagina). Revisa que Apps Script este en v19.2 y desplegado como Nueva version.'); }
       if (!d || !d.ok) throw new Error(d && d.error ? d.error : 'sin respuesta');
       NOTA = d; sel = {}; nuevas = [];
+      FORM = {res:'PAGO_MOVIL', met:'', aut:FORM.aut, cli:d.cliente || '', motivo:''};
       var tarde = d.dias > PLAZO_DIAS;
       document.getElementById('notaInfo').innerHTML =
         '<div class="cominfo' + (tarde ? ' warn' : '') + '">NE-' + ('000' + d.nota).slice(-4) + ' del ' + fechaES(d.fecha) +
@@ -371,14 +384,18 @@ function render() {
       (dif > 0 ? 'Paga ' + usd(dif) : (dif < 0 ? 'A favor ' + usd(-dif) : 'Sin diferencia')) + '</b></div>';
 
   if (dif > 0.009) {
-    h += '<div class="field" style="margin-top:10px"><label>Como paga la diferencia *</label><select id="selMet">' + opcionesMetodos() + '</select></div>';
+    h += '<div class="field" style="margin-top:10px"><label>Como paga la diferencia *</label><select id="selMet" onchange="guardarForm()">' + opcionesMetodos() + '</select></div>';
   } else if (dif < -0.009) {
     h += '<div class="field" style="margin-top:10px"><label>Como se resuelve *</label>' +
-      '<select id="selRes" onchange="render()"><option value="PAGO_MOVIL">Devolver por pago movil</option><option value="CREDITO_A_FAVOR">Dejar como saldo a favor del cliente</option></select></div>';
+      '<select id="selRes" onchange="guardarForm()">' +
+      '<option value="PAGO_MOVIL"' + (FORM.res === 'PAGO_MOVIL' ? ' selected' : '') + '>Devolver por pago movil</option>' +
+      '<option value="CREDITO_A_FAVOR"' + (FORM.res === 'CREDITO_A_FAVOR' ? ' selected' : '') + '>Dejar como saldo a favor del cliente</option></select></div>';
   }
-  h += '<div class="row2"><div class="field"><label>Autoriza *</label><select id="selAut"><option value="">Seleccionar...</option><option>Rodolfo Osuna</option><option>Javier Boves</option></select></div>' +
-    '<div class="field"><label>Cliente</label><input type="text" id="inCli" placeholder="Nombre" value="' + escHtml(NOTA.cliente || '') + '"></div></div>' +
-    '<div class="field"><label>Motivo *</label><input type="text" id="inMotivo" placeholder="Se equivoco de modelo, no le sirvio..."></div>' +
+  h += '<div class="row2"><div class="field"><label>Autoriza *</label><select id="selAut" onchange="guardarForm()"><option value="">Seleccionar...</option>' +
+    '<option' + (FORM.aut === 'Rodolfo Osuna' ? ' selected' : '') + '>Rodolfo Osuna</option>' +
+    '<option' + (FORM.aut === 'Javier Boves' ? ' selected' : '') + '>Javier Boves</option></select></div>' +
+    '<div class="field"><label>Cliente</label><input type="text" id="inCli" placeholder="Nombre" oninput="guardarForm()" value="' + escHtml(FORM.cli || NOTA.cliente || '') + '"></div></div>' +
+    '<div class="field"><label>Motivo *</label><input type="text" id="inMotivo" placeholder="Se equivoco de modelo, no le sirvio..." oninput="guardarForm()" value="' + escHtml(FORM.motivo) + '"></div>' +
     '<button class="nbtn nbtn-p" onclick="guardar()">Registrar ' + (nuevas.length ? 'cambio' : 'devolucion') + '</button></div>';
 
   document.getElementById('cuerpo').innerHTML = h;
@@ -391,6 +408,7 @@ function opcionesMetodos() {
   return h;
 }
 function setQ(i, v) {
+  guardarForm();
   var l = NOTA.lineas[i], max = l.cantidad - (l.devuelto || 0);
   var q = parseInt(v) || 0;
   sel[i] = Math.max(0, Math.min(max, q));
@@ -405,14 +423,15 @@ function buscarProd() {
   drop.classList.add('open');
 }
 function addNueva(i) {
+  guardarForm();
   var p = window._res[i];
   document.getElementById('prodDrop').classList.remove('open');
   var ex = nuevas.filter(function(x) { return x.codigo === p.codigo; })[0];
   if (ex) ex.cantidad++; else nuevas.push({codigo:p.codigo, producto:p.producto, precio:p.precio, costo:p.costo, cantidad:1});
   render();
 }
-function delNueva(i) { nuevas.splice(i, 1); render(); }
-function setQN(i, v) { nuevas[i].cantidad = Math.max(1, parseInt(v) || 1); render(); }
+function delNueva(i) { guardarForm(); nuevas.splice(i, 1); render(); }
+function setQN(i, v) { guardarForm(); nuevas[i].cantidad = Math.max(1, parseInt(v) || 1); render(); }
 function renderNuevas() {
   var el = document.getElementById('nuevasEl');
   if (!el) return;
@@ -454,7 +473,7 @@ function guardar() {
   var payload = {
     tipo:'devolucion', nota:NOTA.nota, idVenta:NOTA.idVenta,
     fecha:now.toLocaleDateString('es-VE'), hora:now.toLocaleTimeString('es-VE', {hour:'2-digit', minute:'2-digit'}),
-    cliente:document.getElementById('inCli').value.trim(), autorizadoPor:aut, motivo:motivo,
+    cliente:document.getElementById('inCli').value.trim(), rif:NOTA.rif || '', autorizadoPor:aut, motivo:motivo,
     resolucion:res, metodo:met ? met.metodo : '', banco:met ? met.banco : '', tasa:TASA,
     devueltas:devueltas, nuevas:nuevas
   };
