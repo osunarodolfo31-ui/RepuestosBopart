@@ -12,8 +12,8 @@ en el comentario del encabezado de cada HTML y en la cabecera de `Code.gs`.
 | index.html              | v9.6    | **v13** (para la tasa) |
 | boparts_ventas.html     | v13.3   | **v20**              |
 | boparts_cobros.html     | v2.5    | **v20**              |
-| boparts_compras.html    | v2.3    | **v20**              |
-| boparts_gastos.html     | v1.5    | **v20**              |
+| boparts_compras.html    | v2.4    | **v20**              |
+| boparts_gastos.html     | v1.6    | **v20**              |
 | boparts_fotos.html      | v8.3    | **v11.5**            |
 | boparts_demanda.html    | v8.5    | v7 o superior        |
 | boparts_gerencia.html   | v2.3    | **v20**              |
@@ -21,7 +21,7 @@ en el comentario del encabezado de cada HTML y en la cabecera de `Code.gs`.
 | boparts_devoluciones.html| v1.3   | **v20**              |
 | boparts_inventario.html | v1.3    | **v20**              |
 | boparts_reportes.html   | v8      | ninguno (lo reemplaza gerencia) |
-| Code.gs (Apps Script)   | v20     | —                    |
+| Code.gs (Apps Script)   | v21     | —                    |
 
 Deployment ID (no cambia): `AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg`
 
@@ -30,6 +30,47 @@ Para volver atrás:
 - Apps Script: Implementar → Administrar implementaciones → lápiz → elegir la versión anterior → Implementar.
 
 ---
+
+## v21 — 2026-09-18 · Bloque D, parte 1: identidad en el servidor
+**Code.gs v21.** Sin cambios en ningún HTML. La operación sigue exactamente igual hasta que se active.
+
+**Interruptor: `CONFIG!B15`.** `NO` (o vacío) = sistema abierto, como hasta hoy. `SI` = exige sesión.
+Es una celda de la hoja, no código: si algo falla en plena venta, se escribe `NO` y todo vuelve a
+funcionar en segundos sin volver a desplegar.
+
+Qué trae:
+- **Hoja `USUARIOS`** — NOMBRE, ROL (SOCIO/VENDEDOR), ACTIVO, PIN_NUEVO, PIN_HASH, TOKEN, TOKEN_VENCE,
+  ULTIMO_ACCESO. Los PIN se escriben en claro en `PIN_NUEVO` y el script los convierte a hash y borra
+  el texto. El PIN nunca queda guardado en ninguna parte, ni en el código ni en la hoja.
+- **`tipo:'login'`** — valida usuario y PIN y devuelve un token que vale 12 horas.
+- **Rol mínimo por acción, verificado en el servidor.** Lo que no está en la tabla de permisos exige
+  SOCIO: se niega por defecto. Hasta ahora el PIN lo validaba el navegador y se saltaba con la consola.
+- **Con sesión activa, el nombre lo pone el servidor.** El selector de vendedor deja de decidir a nombre
+  de quién se registra una venta, un gasto o una recepción.
+- **`action=productos` y `action=catalogo`** — sirven LISTA DE PRODUCTOS y el catálogo de proveedores por
+  el script, para poder despublicar esos CSV. A un VENDEDOR se le entrega la lista **sin** las columnas
+  Costo, descuento y Costo Final; las columnas no se corren de sitio, llegan vacías.
+- **El costo de la venta se toma de la hoja**, no del teléfono. Si la línea no trae costo, el script lo
+  busca en LISTA DE PRODUCTOS en el momento de guardar y lo congela ahí, igual que antes.
+- **Revocar a alguien:** borrar su TOKEN en USUARIOS, o poner NO en ACTIVO. Surte efecto de inmediato.
+  Cambiarle el PIN también cierra sus sesiones abiertas.
+
+Instalación (no rompe nada, se puede hacer en horario de tienda):
+1. Pegar `Code.gs` v21 completo encima del v20 → Implementar → Administrar implementaciones → lápiz →
+   Nueva versión → Implementar.
+2. En el editor, ejecutar una vez la función `prepararBloqueD`. Crea la hoja USUARIOS con los tres
+   usuarios y escribe `NO` en `CONFIG!B15`.
+3. Escribir los PIN en la columna `PIN_NUEVO` de USUARIOS. Desaparecen solos en el primer inicio de sesión.
+
+Pendiente de bloque D: las 12 pantallas con login (parte 2) y despublicar las hojas (parte 3).
+
+## v2.4 / v1.6 — 2026-09-18 · Foto de factura sobrescrita
+**boparts_compras.html v2.4 · boparts_gastos.html v1.6**
+Las fotos de factura subían a Cloudinary siempre con el nombre `factura.jpg` (y `gasto.jpg`), sin `public_id`.
+El preset resolvía el nombre desde el archivo, así que **cada subida sobrescribía la anterior** y todas las
+compras quedaban apuntando a la misma imagen: la última subida. Ahora cada foto lleva nombre único
+(`factura_<timestamp>_<aleatorio>`), sin depender de cómo esté configurado el preset.
+Las fotos anteriores no se recuperan: ya no existen en Cloudinary.
 
 ## index v9 — 2026-09-11 · Velocidad
 **index.html v9**

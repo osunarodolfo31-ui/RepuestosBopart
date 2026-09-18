@@ -1,6 +1,27 @@
 /**
  * Repuesto BoParts — Code.gs
- * VERSION: v20 (2026-09-17) | va con ventas v13.3, compras v2.3, inventario v1.3, devoluciones v1.3, gerencia v2.3
+ * VERSION: v21 (2026-09-18) | compatible con TODAS las pantallas actuales mientras CONFIG!B15 = NO
+ *
+ * v21 — BLOQUE D, parte 1: identidad en el servidor. NO cambia nada en la operacion hasta que se active.
+ *
+ *   INTERRUPTOR: CONFIG!B15. Escribe "SI" para exigir sesion, "NO" (o vacio) para trabajar como hasta hoy.
+ *   Es una celda, no codigo: si algo sale mal en plena venta, escribes NO y en segundos todo vuelve a funcionar
+ *   sin redesplegar nada.
+ *
+ *   Lo que agrega:
+ *     - Hoja USUARIOS: quien puede entrar, con que PIN y con que rol (SOCIO o VENDEDOR).
+ *       Los PIN se ponen desde la hoja, en la columna PIN_NUEVO; el script los convierte a hash y borra el
+ *       texto en claro. El PIN nunca queda escrito en ningun lado.
+ *     - tipo 'login': valida usuario + PIN y devuelve un token que vale 12 horas.
+ *     - Cada accion exige un rol minimo, verificado AQUI, no en el telefono.
+ *     - action=productos y action=catalogo: sirven LISTA DE PRODUCTOS y CATALOGO PROVEEDORES por el script,
+ *       para poder despublicar esos CSV. A un VENDEDOR se le entrega la lista SIN las columnas de costo.
+ *     - La venta rellena el costo de cada linea desde la hoja si el telefono no lo manda, para que el costo
+ *       deje de viajar por internet y no se pueda alterar desde el navegador.
+ *
+ *   Revocar a alguien: borra su TOKEN en USUARIOS o pon NO en ACTIVO. Surte efecto en la siguiente llamada.
+ *
+ * v20 (2026-09-17) | va con ventas v13.3, compras v2.3, inventario v1.3, devoluciones v1.3, gerencia v2.3
  *
  * v20 — integridad. Corrige tres fallos que podian ensuciar los datos:
  *   1. El conteo de inventario contaba los movimientos del MISMO dia anteriores al conteo. Ahora el corte es por
@@ -119,6 +140,127 @@ var SH_CXC      = 'CXC_MOV';
 var COL_ID      = 24;   // X
 var COL_NOTA    = 25;   // Y
 
+// ============================================================
+// BLOQUE D — IDENTIDAD Y ROLES (v21)
+// ============================================================
+var SH_USUARIOS = 'USUARIOS';
+var SAL_PIN     = 'BoParts.2026.';        // sal del hash: cambiarla invalida todos los PIN a la vez
+var HORAS_SESION = 12;
+
+// USUARIOS: A NOMBRE, B ROL, C ACTIVO, D PIN_NUEVO, E PIN_HASH, F TOKEN, G TOKEN_VENCE, H ULTIMO_ACCESO
+var U_NOMBRE = 1, U_ROL = 2, U_ACTIVO = 3, U_PIN_NUEVO = 4, U_HASH = 5, U_TOKEN = 6, U_VENCE = 7, U_ULT = 8;
+
+// Rol minimo de cada accion. Lo que no este aqui exige SOCIO: se niega por defecto, no se permite por defecto.
+var PERMISOS_GET = {
+  config:'VENDEDOR', nextNota:'VENDEDOR', nextCot:'VENDEDOR', nextFactura:'VENDEDOR', nota:'VENDEDOR',
+  apartados:'VENDEDOR', proveedores:'VENDEDOR', stock:'VENDEDOR', conteos:'VENDEDOR', clientes:'VENDEDOR',
+  cxc:'VENDEDOR', productos:'VENDEDOR', catalogo:'VENDEDOR',
+  ventas:'SOCIO', socios:'SOCIO', cxp:'SOCIO', cliente_stats:'SOCIO', compras:'SOCIO', diag:'SOCIO'
+};
+var PERMISOS_POST = {
+  fotos:'VENDEDOR', cliente:'VENDEDOR', demanda:'VENDEDOR', conteo:'VENDEDOR', gasto:'VENDEDOR',
+  proveedor:'VENDEDOR', compra:'VENDEDOR', cotizacion:'VENDEDOR', abono:'VENDEDOR', venta:'VENDEDOR',
+  factura_venta:'VENDEDOR', apartado:'VENDEDOR', apartado_abono:'VENDEDOR', apartado_entregar:'VENDEDOR',
+  costeo:'SOCIO', cxp_abono:'SOCIO', conteo_revision:'SOCIO', devolucion:'SOCIO', apartado_cerrar:'SOCIO',
+  tasa:'SOCIO', socio:'SOCIO'
+};
+
+function authActiva_(ss) {
+  try {
+    var v = String(ss.getSheetByName('CONFIG').getRange('B15').getValue() || '').trim().toUpperCase();
+    return v === 'SI' || v === 'SÍ' || v === 'TRUE' || v === '1';
+  } catch (err) { return false; }
+}
+
+function hojaUsuarios_(ss) {
+  var sh = ss.getSheetByName(SH_USUARIOS);
+  if (!sh) {
+    sh = ss.insertSheet(SH_USUARIOS);
+    sh.appendRow(['NOMBRE','ROL','ACTIVO','PIN_NUEVO','PIN_HASH','TOKEN','TOKEN_VENCE','ULTIMO_ACCESO']);
+    sh.appendRow(['Rodolfo Osuna','SOCIO','SI','','','','','']);
+    sh.appendRow(['Javier Boves','SOCIO','SI','','','','','']);
+    sh.appendRow(['Reinaldo Cuicas','VENDEDOR','SI','','','','','']);
+    sh.setFrozenRows(1);
+    sh.getRange('D:E').setNumberFormat('@');
+  }
+  return sh;
+}
+
+function hashPin_(pin) {
+  var bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, SAL_PIN + String(pin));
+  return bytes.map(function(b) { return ('0' + (b & 0xFF).toString(16)).slice(-2); }).join('');
+}
+
+// Los PIN se escriben en claro en la columna PIN_NUEVO de la hoja. Aqui se convierten a hash y se borra el texto.
+function sincronizarPines_(ss) {
+  var sh = hojaUsuarios_(ss);
+  if (sh.getLastRow() < 2) return sh;
+  var n = sh.getLastRow() - 1;
+  var vals = sh.getRange(2, 1, n, 8).getValues();
+  for (var i = 0; i < n; i++) {
+    var nuevo = String(vals[i][U_PIN_NUEVO - 1] || '').trim();
+    if (!nuevo) continue;
+    sh.getRange(i + 2, U_HASH).setValue(hashPin_(nuevo));
+    sh.getRange(i + 2, U_PIN_NUEVO).setValue('');
+    sh.getRange(i + 2, U_TOKEN).setValue('');       // cambiar el PIN cierra las sesiones abiertas
+    sh.getRange(i + 2, U_VENCE).setValue('');
+  }
+  return sh;
+}
+
+function login_(ss, d) {
+  var sh = sincronizarPines_(ss);
+  var usuario = String(d.usuario || '').trim().toUpperCase();
+  var pin = String(d.pin || '').trim();
+  if (!usuario || !pin) throw new Error('Falta usuario o PIN');
+  if (sh.getLastRow() < 2) throw new Error('No hay usuarios configurados');
+  var n = sh.getLastRow() - 1;
+  var vals = sh.getRange(2, 1, n, 8).getValues();
+  for (var i = 0; i < n; i++) {
+    if (String(vals[i][U_NOMBRE - 1] || '').trim().toUpperCase() !== usuario) continue;
+    if (String(vals[i][U_ACTIVO - 1] || '').trim().toUpperCase() === 'NO') throw new Error('Usuario desactivado');
+    var hash = String(vals[i][U_HASH - 1] || '').trim();
+    if (!hash) throw new Error('Ese usuario todavia no tiene PIN. Escribelo en la columna PIN_NUEVO de la hoja USUARIOS.');
+    if (hash !== hashPin_(pin)) throw new Error('PIN incorrecto');
+    var token = Utilities.getUuid().replace(/-/g, '');
+    var vence = new Date(Date.now() + HORAS_SESION * 3600 * 1000);
+    sh.getRange(i + 2, U_TOKEN).setValue(token);
+    sh.getRange(i + 2, U_VENCE).setValue(vence);
+    sh.getRange(i + 2, U_ULT).setValue(new Date());
+    return {ok:true, tipo:'login', token:token, nombre:String(vals[i][U_NOMBRE - 1]),
+            rol:String(vals[i][U_ROL - 1] || 'VENDEDOR').toUpperCase(),
+            vence:Utilities.formatDate(vence, TZ_VE, 'yyyy-MM-dd HH:mm')};
+  }
+  throw new Error('Usuario no encontrado');
+}
+
+// Devuelve {nombre, rol} o lanza SESION (token invalido/vencido) o PERMISO (rol insuficiente).
+// Con el interruptor en NO devuelve un usuario generico y nunca bloquea: la operacion sigue igual que en v20.
+function auth_(ss, token, rolMin) {
+  if (!authActiva_(ss)) return {nombre:'', rol:'SOCIO', libre:true};
+  token = String(token || '').trim();
+  if (!token) throw new Error('SESION');
+  var sh = hojaUsuarios_(ss);
+  if (sh.getLastRow() < 2) throw new Error('SESION');
+  var n = sh.getLastRow() - 1;
+  var vals = sh.getRange(2, 1, n, 8).getValues();
+  for (var i = 0; i < n; i++) {
+    if (String(vals[i][U_TOKEN - 1] || '').trim() !== token) continue;
+    if (String(vals[i][U_ACTIVO - 1] || '').trim().toUpperCase() === 'NO') throw new Error('SESION');
+    var v = vals[i][U_VENCE - 1];
+    if (!esFecha_(v) || v.getTime() < Date.now()) throw new Error('SESION');
+    var rol = String(vals[i][U_ROL - 1] || 'VENDEDOR').toUpperCase();
+    if (rolMin === 'SOCIO' && rol !== 'SOCIO') throw new Error('PERMISO');
+    return {nombre:String(vals[i][U_NOMBRE - 1]), rol:rol, libre:false};
+  }
+  throw new Error('SESION');
+}
+
+function rolDe_(tabla, clave) {
+  var r = tabla[clave];
+  return r ? r : 'SOCIO';   // lo desconocido se trata como reservado a socios
+}
+
 function json_(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
@@ -131,12 +273,30 @@ function doGet(e) {
   try {
     return rutearGet_(e);
   } catch (err) {
+    var m = String(err && err.message ? err.message : err);
+    // La app distingue estos dos para mandar al login en vez de mostrar un error tecnico
+    if (m === 'SESION')  return json_({ok:false, sesion:true,  error:'Tu sesion vencio. Vuelve a entrar.'});
+    if (m === 'PERMISO') return json_({ok:false, permiso:true, error:'Esa pantalla es solo para los socios.'});
     // Sin esto, cualquier error devuelve la pagina HTML de Google y las apps no pueden leerla
-    return json_({ok:false, error:String(err && err.message ? err.message : err)});
+    return json_({ok:false, error:m});
   }
 }
 
 function rutearGet_(e) {
+  // ---- BLOQUE D (v21): identidad antes que nada ----
+  var ssA = SpreadsheetApp.getActiveSpreadsheet();
+  var accion = String(e.parameter.action || '');
+  var usr = auth_(ssA, e.parameter.token, rolDe_(PERMISOS_GET, accion));
+
+  // Lista de productos por el script, para poder despublicar el CSV.
+  // A un vendedor se le entrega sin las columnas de costo: no viajan a su telefono.
+  if (accion === 'productos') {
+    return json_(listaProductos_(ssA, usr.rol === 'SOCIO'));
+  }
+  if (accion === 'catalogo') {
+    return json_(catalogoProveedores_(ssA));
+  }
+
   if (e.parameter.action === 'nextNota') {
     var lock = LockService.getScriptLock();
     lock.waitLock(5000);
@@ -261,6 +421,28 @@ function doPost(e) {
   try {
     const data = JSON.parse(e.postData.contents);
     const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+    // ---- BLOQUE D (v21): iniciar sesion ----
+    if (data.tipo === 'login') {
+      var lockL = LockService.getScriptLock(); lockL.waitLock(10000);
+      try { return json_(login_(ss, data)); }
+      finally { lockL.releaseLock(); }
+    }
+
+    // ---- BLOQUE D (v21): identidad y rol antes de tocar nada ----
+    // 'fotos' no manda tipo: se reconoce igual que abajo, por los campos de imagen.
+    var claveP = data.tipo ? String(data.tipo) :
+      ((data.row !== undefined || data.imagen !== undefined || data.imagen2 !== undefined || data.imagen3 !== undefined) ? 'fotos' : '');
+    var quien = auth_(ss, data.token, rolDe_(PERMISOS_POST, claveP));
+
+    // Con sesion activa, el nombre lo pone el servidor: nadie registra a nombre de otro.
+    if (!quien.libre && quien.nombre) {
+      if (claveP === 'venta' || claveP === 'demanda' || claveP === 'cotizacion') data.vendedor = quien.nombre;
+      if (claveP === 'compra')  data.recibidoPor = quien.nombre;
+      if (claveP === 'gasto')   data.registradoPor = quien.nombre;
+      if (claveP === 'conteo')  data.contadoPor = quien.nombre;
+      if (claveP === 'costeo')  data.quien = quien.nombre;
+    }
 
     // ---- FOTOS (v11.5: por codigo, con la fila como respaldo) ----
     if (!data.tipo && (data.row !== undefined || data.imagen !== undefined || data.imagen2 !== undefined || data.imagen3 !== undefined)) {
@@ -488,7 +670,10 @@ function doPost(e) {
     return json_({ok:false,error:'tipo desconocido'});
 
   } catch(err) {
-    return json_({ok:false,error:err.message});
+    var mp = String(err && err.message ? err.message : err);
+    if (mp === 'SESION')  return json_({ok:false, sesion:true,  error:'Tu sesion vencio. Vuelve a entrar.'});
+    if (mp === 'PERMISO') return json_({ok:false, permiso:true, error:'Esa accion es solo para los socios.'});
+    return json_({ok:false,error:mp});
   }
 }
 
@@ -605,8 +790,13 @@ function guardarVenta_(ss, data) {
     det.setFrozenRows(1);
   }
   const tasa = Number(data.tasa) || 0;
+  // v21: el costo se toma de la hoja en el momento de la venta. Si el telefono no lo manda (bloque D, donde
+  // el costo ya no viaja a un vendedor), se busca aqui. Queda congelado en la linea, igual que antes.
+  var costoHoja = costosPorCodigo_(ss, lineas.map(function(l) { return l.codigo; }));
   const rows = lineas.map(function(l) {
-    var cant = Number(l.cantidad) || 0, pre = Number(l.precio) || 0, cos = Number(l.costo) || 0;
+    var cant = Number(l.cantidad) || 0, pre = Number(l.precio) || 0;
+    var cos = Number(l.costo) || 0;
+    if (!cos) cos = costoHoja[String(l.codigo || '').trim().toUpperCase()] || 0;
     var sub = cant * pre, cost = cant * cos;
     return [idVenta, fechaV, data.hora, data.vendedor, data.canal, l.codigo||'', l.producto||'',
             cant, pre, cos, sub, cost, sub - cost, tasa, Math.round(sub * tasa), numNota];
@@ -1775,4 +1965,80 @@ function guardarFacturaVenta_(ss, d) {
     Number(d.tasaBCV) || 0, Number(d.totalBS) || 0, d.formaPago || '', d.idVenta || '', d.vendedor || '', '', '']);
   formatoFecha_(fx, fx.getLastRow(), 3);
   return {ok:true, tipo:'factura_venta', facturaNum:d.facturaNum, controlNum:d.controlNum};
+}
+
+
+// ============================================================
+// BLOQUE D (v21) — DATOS QUE ANTES SE LEIAN POR CSV PUBLICO
+// ============================================================
+// LISTA DE PRODUCTOS: A Codigo, B MARCA, C PRODUCTO, D Categoria, E Cant, F Costo, G descuento,
+//                     H Costo Final, I Precio, J EN BS, K REF, L IMAGEN, M IMAGEN2, N IMAGEN3
+// Los datos empiezan en la fila 3 (la 1 es de titulos/tasa y la 2 los encabezados).
+var COL_COSTO = 6, COL_DESC = 7, COL_COSTO_FINAL = 8;
+
+function listaProductos_(ss, conCosto) {
+  var sh = ss.getSheetByName('LISTA DE PRODUCTOS');
+  if (!sh || sh.getLastRow() < 3) return {ok:true, tasa:leerTasa_(ss), filas:[]};
+  var ancho = Math.max(sh.getLastColumn(), 14);
+  var vals = sh.getRange(3, 1, sh.getLastRow() - 2, ancho).getValues();
+  var filas = [];
+  for (var i = 0; i < vals.length; i++) {
+    var r = vals[i];
+    if (!String(r[2] || '').trim()) continue;              // sin nombre de producto no es una fila real
+    var f = [];
+    for (var c = 0; c < 14; c++) f.push(r[c] == null ? '' : r[c]);
+    if (!conCosto) { f[COL_COSTO - 1] = ''; f[COL_DESC - 1] = ''; f[COL_COSTO_FINAL - 1] = ''; }
+    filas.push(f);
+  }
+  return {ok:true, tasa:leerTasa_(ss), conCosto:!!conCosto, filas:filas};
+}
+
+// Costo vigente de una lista de codigos, para congelarlo en la linea de venta.
+function costosPorCodigo_(ss, codigos) {
+  var out = {};
+  var quiero = {};
+  (codigos || []).forEach(function(c) { var k = String(c || '').trim().toUpperCase(); if (k) quiero[k] = 1; });
+  var sh = ss.getSheetByName('LISTA DE PRODUCTOS');
+  if (!sh || sh.getLastRow() < 3) return out;
+  var vals = sh.getRange(3, 1, sh.getLastRow() - 2, COL_COSTO_FINAL).getValues();
+  for (var i = 0; i < vals.length; i++) {
+    var k = String(vals[i][0] || '').trim().toUpperCase();
+    if (!k || !quiero[k] || out[k]) continue;
+    var cf = Number(vals[i][COL_COSTO_FINAL - 1]) || 0;
+    out[k] = cf || Number(vals[i][COL_COSTO - 1]) || 0;    // si no hay Costo Final, sirve el Costo
+  }
+  return out;
+}
+
+// El catalogo de los 8 proveedores, que usa boparts_demanda.html.
+function catalogoProveedores_(ss) {
+  var nombres = ['CATALOGO PROVEEDORES', 'CATALOGO_PROVEEDORES', 'Catalogo Proveedores', 'CATALOGO'];
+  var sh = null;
+  for (var i = 0; i < nombres.length && !sh; i++) sh = ss.getSheetByName(nombres[i]);
+  if (!sh) {
+    // Ultimo recurso: la primera hoja cuyo nombre contenga "catalogo"
+    ss.getSheets().forEach(function(s) { if (!sh && /catalogo/i.test(s.getName())) sh = s; });
+  }
+  if (!sh || sh.getLastRow() < 2) return {ok:false, error:'No se encontro la hoja del catalogo de proveedores'};
+  var vals = sh.getRange(1, 1, sh.getLastRow(), sh.getLastColumn()).getValues()
+    .map(function(r) { return r.map(function(v) { return v == null ? '' : v; }); });
+  return {ok:true, hoja:sh.getName(), filas:vals};
+}
+
+// ============================================================
+// BLOQUE D (v21) — AYUDA PARA CONFIGURAR, desde el editor
+// ============================================================
+// Ejecuta esta funcion UNA VEZ desde el editor de Apps Script (boton Ejecutar).
+// Crea la hoja USUARIOS con los tres usuarios y deja CONFIG!B15 en NO.
+// Los PIN se ponen despues, a mano, en la columna PIN_NUEVO de la hoja USUARIOS.
+function prepararBloqueD() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  hojaUsuarios_(ss);
+  var cfg = ss.getSheetByName('CONFIG');
+  if (cfg && !String(cfg.getRange('B15').getValue() || '').trim()) {
+    cfg.getRange('A15').setValue('AUTH_ACTIVA');
+    cfg.getRange('B15').setValue('NO');
+  }
+  SpreadsheetApp.flush();
+  return 'Listo. Escribe los PIN en USUARIOS!D (PIN_NUEVO). CONFIG!B15 = NO (sistema abierto, como hasta hoy).';
 }
