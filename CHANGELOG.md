@@ -21,7 +21,7 @@ en el comentario del encabezado de cada HTML y en la cabecera de `Code.gs`.
 | boparts_devoluciones.html| v1.3   | **v20**              |
 | boparts_inventario.html | v1.3    | **v20**              |
 | boparts_reportes.html   | v8      | ninguno (lo reemplaza gerencia) |
-| Code.gs (Apps Script)   | v21     | —                    |
+| Code.gs (Apps Script)   | v21.1   | —                    |
 
 Deployment ID (no cambia): `AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg`
 
@@ -30,6 +30,22 @@ Para volver atrás:
 - Apps Script: Implementar → Administrar implementaciones → lápiz → elegir la versión anterior → Implementar.
 
 ---
+
+## v21.1 — 2026-09-18 · Métodos de pago y aliados, desde la hoja
+**Code.gs v21.1.** Sin cambios en ningún HTML todavía (lo consume `boparts_ventas.html` en la parte 2).
+
+Los métodos de pago y los aliados estaban escritos **dentro** de `boparts_ventas.html`: agregar un banco o
+corregir la comisión de un punto obligaba a editar el archivo y subirlo. Peor: una comisión equivocada no da
+error, solo calcula mal el NETO de cada venta sin que nadie lo note.
+
+- `action=metodos` los devuelve desde las hojas **METODOS_PAGO** (LABEL, METODO, BANCO, MONEDA, FIJO_BS, PCT,
+  CREDITO, ACTIVO) y **ALIADOS** (ID, NOMBRE, NEGOCIO, PCT, ACTIVO).
+- Si la hoja está vacía, se llena con **exactamente** los valores que hoy están en `ventas.html` v13.3.
+  El día que se instala, nada cambia.
+- Si la hoja existe con **otras columnas** (las heredadas, que ya nadie leía), no se interpreta: se usan los
+  valores de siempre y la respuesta trae un aviso. Leer columnas equivocadas sería peor que no leer.
+- `ACTIVO = NO` saca un método o un aliado de la pantalla sin borrar su historia.
+- El orden de las filas es el orden en que salen en la pantalla de venta.
 
 ## v21 — 2026-09-18 · Bloque D, parte 1: identidad en el servidor
 **Code.gs v21.** Sin cambios en ningún HTML. La operación sigue exactamente igual hasta que se active.

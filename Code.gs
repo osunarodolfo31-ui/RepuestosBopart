@@ -1,6 +1,11 @@
 /**
  * Repuesto BoParts — Code.gs
- * VERSION: v21 (2026-09-18) | compatible con TODAS las pantallas actuales mientras CONFIG!B15 = NO
+ * VERSION: v21.1 (2026-09-18) | compatible con TODAS las pantallas actuales mientras CONFIG!B15 = NO
+ *
+ * v21.1: action=metodos devuelve los metodos de pago y los aliados desde las hojas METODOS_PAGO y ALIADOS,
+ *        para que agregar un banco o cambiar una comision se haga en la hoja y no en el codigo. La primera
+ *        vez, si la hoja esta vacia, se llena con exactamente los valores que hoy estan escritos dentro de
+ *        boparts_ventas.html: el dia que se instala, nada cambia.
  *
  * v21 — BLOQUE D, parte 1: identidad en el servidor. NO cambia nada en la operacion hasta que se active.
  *
@@ -154,7 +159,7 @@ var U_NOMBRE = 1, U_ROL = 2, U_ACTIVO = 3, U_PIN_NUEVO = 4, U_HASH = 5, U_TOKEN 
 var PERMISOS_GET = {
   config:'VENDEDOR', nextNota:'VENDEDOR', nextCot:'VENDEDOR', nextFactura:'VENDEDOR', nota:'VENDEDOR',
   apartados:'VENDEDOR', proveedores:'VENDEDOR', stock:'VENDEDOR', conteos:'VENDEDOR', clientes:'VENDEDOR',
-  cxc:'VENDEDOR', productos:'VENDEDOR', catalogo:'VENDEDOR',
+  cxc:'VENDEDOR', productos:'VENDEDOR', catalogo:'VENDEDOR', metodos:'VENDEDOR',
   ventas:'SOCIO', socios:'SOCIO', cxp:'SOCIO', cliente_stats:'SOCIO', compras:'SOCIO', diag:'SOCIO'
 };
 var PERMISOS_POST = {
@@ -295,6 +300,9 @@ function rutearGet_(e) {
   }
   if (accion === 'catalogo') {
     return json_(catalogoProveedores_(ssA));
+  }
+  if (accion === 'metodos') {
+    return json_(metodosYAliados_(ssA));
   }
 
   if (e.parameter.action === 'nextNota') {
@@ -2041,4 +2049,103 @@ function prepararBloqueD() {
   }
   SpreadsheetApp.flush();
   return 'Listo. Escribe los PIN en USUARIOS!D (PIN_NUEVO). CONFIG!B15 = NO (sistema abierto, como hasta hoy).';
+}
+
+
+// ============================================================
+// BLOQUE D (v21.1) — METODOS DE PAGO Y ALIADOS, desde la hoja
+// ============================================================
+// Estaban escritos dentro de boparts_ventas.html. Ahi, agregar un banco o corregir la comision de un punto
+// obligaba a editar el archivo y subirlo; y una comision equivocada no da error, solo calcula mal el NETO
+// de cada venta sin que nadie lo note. Ahora se administran desde las hojas.
+//
+// METODOS_PAGO: A LABEL, B METODO, C BANCO, D MONEDA (USD/BS), E FIJO_BS, F PCT, G CREDITO (SI/NO), H ACTIVO (SI/NO)
+// ALIADOS:      A ID, B NOMBRE, C NEGOCIO, D PCT, E ACTIVO (SI/NO)
+//
+// El orden de las filas es el orden en que salen en la pantalla de venta.
+
+var METODOS_DEFECTO = [
+  ['Efectivo USD',                  'Efectivo',       '',                            'USD', 0,    0,   'NO', 'SI'],
+  ['Efectivo Bs',                   'Efectivo',       '',                            'BS',  0,    0,   'NO', 'SI'],
+  ['Pago Movil Banesco',            'Pago Movil',     'Banesco',                     'BS',  0,    0,   'NO', 'SI'],
+  ['Pago Movil Bancrecer',          'Pago Movil',     'Bancrecer',                   'BS',  0,    0,   'NO', 'SI'],
+  ['Punto Bancamiga',               'Punto de Venta', 'Bancamiga',                   'BS',  1000, 1.5, 'NO', 'SI'],
+  ['Punto Bancrecer Emp.',          'Punto de Venta', 'Bancrecer Empresarial',       'BS',  0,    0,   'NO', 'SI'],
+  ['Cashea Bancrecer',              'Cashea',         'Bancrecer Empresarial',       'BS',  0,    0,   'NO', 'SI'],
+  ['CREDITO (cuenta por cobrar)',   'Credito',        '',                            'USD', 0,    0,   'SI', 'SI']
+];
+var ALIADOS_DEFECTO = [
+  ['AL-001', 'Luis',  'Taller Diesel', 5, 'SI'],
+  ['AL-002', 'David', 'Taller Motos',  5, 'SI']
+];
+
+function siNo_(v, pordefecto) {
+  var s = String(v == null ? '' : v).trim().toUpperCase();
+  if (!s) return !!pordefecto;
+  return s === 'SI' || s === 'SÍ' || s === 'TRUE' || s === '1' || s === 'X';
+}
+
+// Devuelve la hoja si sus encabezados son los que esperamos. Si esta vacia o no existe, la crea con los
+// valores de hoy. Si existe pero con OTRAS columnas (las hojas viejas que ya no lee nadie), NO se interpreta:
+// devuelve null y arriba se usan los valores de siempre. Leer columnas equivocadas seria peor que no leer:
+// una comision mal leida no da error, solo calcula mal el NETO de cada venta.
+function hojaSemilla_(ss, nombre, encabezados, semilla) {
+  var sh = ss.getSheetByName(nombre);
+  if (!sh) sh = ss.insertSheet(nombre);
+  if (sh.getLastRow() < 1) { sh.appendRow(encabezados); sh.setFrozenRows(1); }
+  var cab = sh.getRange(1, 1, 1, Math.max(sh.getLastColumn(), encabezados.length)).getValues()[0];
+  var norm = function(v) { return String(v == null ? '' : v).trim().toUpperCase().replace(/[\s.]+/g, '_'); };
+  for (var i = 0; i < encabezados.length; i++) {
+    if (norm(cab[i]) !== norm(encabezados[i])) return null;
+  }
+  if (sh.getLastRow() < 2 && semilla && semilla.length) {
+    sh.getRange(2, 1, semilla.length, semilla[0].length).setValues(semilla);
+  }
+  return sh;
+}
+
+function metodosYAliados_(ss) {
+  var avisos = [];
+  var shM = hojaSemilla_(ss, 'METODOS_PAGO',
+    ['LABEL','METODO','BANCO','MONEDA','FIJO_BS','PCT','CREDITO','ACTIVO'], METODOS_DEFECTO);
+  if (!shM) avisos.push('La hoja METODOS_PAGO tiene otras columnas; se estan usando los metodos de siempre. ' +
+                        'Encabezados que espera la app: LABEL, METODO, BANCO, MONEDA, FIJO_BS, PCT, CREDITO, ACTIVO.');
+  var metodos = [];
+  if (shM && shM.getLastRow() >= 2) {
+    shM.getRange(2, 1, shM.getLastRow() - 1, 8).getValues().forEach(function(r) {
+      var label = String(r[0] || '').trim();
+      if (!label) return;
+      if (!siNo_(r[7], true)) return;                       // ACTIVO vacio = activo
+      metodos.push({label:label, metodo:String(r[1] || '').trim(), banco:String(r[2] || '').trim(),
+                    moneda:(String(r[3] || 'BS').trim().toUpperCase() === 'USD' ? 'USD' : 'BS'),
+                    fijo:Number(r[4]) || 0, pct:Number(r[5]) || 0, credito:siNo_(r[6], false)});
+    });
+  }
+
+  var shA = hojaSemilla_(ss, 'ALIADOS', ['ID','NOMBRE','NEGOCIO','PCT','ACTIVO'], ALIADOS_DEFECTO);
+  if (!shA) avisos.push('La hoja ALIADOS tiene otras columnas; se estan usando los aliados de siempre. ' +
+                        'Encabezados que espera la app: ID, NOMBRE, NEGOCIO, PCT, ACTIVO.');
+  var aliados = [];
+  if (shA && shA.getLastRow() >= 2) {
+    shA.getRange(2, 1, shA.getLastRow() - 1, 5).getValues().forEach(function(r) {
+      var nom = String(r[1] || '').trim();
+      if (!nom) return;
+      if (!siNo_(r[4], true)) return;
+      aliados.push({id:String(r[0] || '').trim() || nom.toUpperCase(), nombre:nom,
+                    negocio:String(r[2] || '').trim(), pct:Number(r[3]) || 0});
+    });
+  }
+
+  // Si alguien deja las hojas sin una sola fila utilizable, se responde con lo de siempre en vez de
+  // dejar la pantalla de venta sin metodos de pago.
+  var deHoja = metodos.length > 0;
+  if (!metodos.length) {
+    metodos = METODOS_DEFECTO.map(function(r) {
+      return {label:r[0], metodo:r[1], banco:r[2], moneda:r[3], fijo:r[4], pct:r[5], credito:r[6] === 'SI'};
+    });
+  }
+  if (!aliados.length && !shA) {
+    aliados = ALIADOS_DEFECTO.map(function(r) { return {id:r[0], nombre:r[1], negocio:r[2], pct:r[3]}; });
+  }
+  return {ok:true, metodos:metodos, aliados:aliados, deHoja:deHoja, avisos:avisos};
 }
