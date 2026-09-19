@@ -1,7 +1,8 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_apartados.html
-  VERSION: v1.4 (2026-09-18) | requiere Apps Script v21.4
+  VERSION: v1.5 (2026-09-18) | requiere Apps Script v21.4
+  v1.5: con sesion activa, el desplegable de vendedor se fija en quien entro y se bloquea.
   v1.4: productos y clientes ya no se leen de un CSV publicado, sino por action=productos y action=clientes.
         Incluye la pantalla de login; solo aparece cuando CONFIG!B15 = SI.
   v1.2: el precio de cada linea se puede editar al crear el apartado (descuentos); ese precio es el que queda
@@ -322,7 +323,7 @@ select option{background:#1E1E1E;color:var(--ink)}
 <div class="nav-ov" id="navOv" onclick="closeNav()"></div>
 <div class="nav-pan" id="navPan">
   <div class="nav-t">Repuesto BoParts</div>
-  <div id="verTag" style="font-size:10px;color:var(--ink-muted);margin:-6px 0 10px;letter-spacing:0.3px">app v1.4 · script ?</div>
+  <div id="verTag" style="font-size:10px;color:var(--ink-muted);margin:-6px 0 10px;letter-spacing:0.3px">app v1.5 · script ?</div>
   <div class="nav-g">
     <a class="ncard" href="index.html">
       <span class="nicon">📋</span>
@@ -422,6 +423,28 @@ function leerJSON(r) {
   });
 }
 
+
+/* Con sesion activa, los desplegables de "quien hace esto" se fijan en quien entro y se bloquean.
+   Regla: solo se toca un desplegable que YA ofrece ese nombre. Asi el de "Autoriza" de devoluciones,
+   que solo lista a los socios, no se fuerza con un vendedor que no puede autorizar. */
+function fijarPersonaDeSesion() {
+  var nom = miNombre();
+  if (!nom) return;
+  var sels = document.getElementsByTagName('select');
+  for (var i = 0; i < sels.length; i++) {
+    var sel = sels[i];
+    if (sel.disabled) continue;
+    for (var j = 0; j < sel.options.length; j++) {
+      if (String(sel.options[j].text).trim() !== nom) continue;
+      sel.value = sel.options[j].value || sel.options[j].text;
+      sel.disabled = true;
+      sel.style.opacity = '0.75';
+      sel.title = 'Registrado a nombre de quien inicio sesion';
+      break;
+    }
+  }
+}
+
 function mostrarLogin() {
   var box = document.getElementById('loginBox');
   if (!box) return;
@@ -465,6 +488,8 @@ function hacerLogin() {
       document.getElementById('loginBox').classList.remove('open');
       btn.disabled = false; btn.textContent = 'Entrar';
       if (typeof alEntrar === 'function') alEntrar();
+      fijarPersonaDeSesion();
+      setTimeout(fijarPersonaDeSesion, 800);   // por si la pantalla dibuja sus desplegables despues
     })
     .catch(function(e) {
       btn.disabled = false; btn.textContent = 'Entrar';
@@ -476,7 +501,12 @@ function hacerLogin() {
 // Al abrir la pantalla: si el login esta activo y no hay sesion valida, se pide antes de cargar nada.
 // Si esta apagado, no se pide nada y todo sigue como hasta hoy.
 function revisarSesion(alTener) {
-  if (sesionActual()) { alTener(); return; }
+  if (sesionActual()) {
+    alTener();
+    fijarPersonaDeSesion();
+    setTimeout(fijarPersonaDeSesion, 800);
+    return;
+  }
   fetch(SCRIPT_URL_SESION + '?action=quienes&t=' + Date.now())
     .then(function(r) { return r.text(); })
     .then(function(t) {
@@ -526,7 +556,7 @@ function sellarVersion(d) {
   if (t) t.textContent = 'app ' + APP_VERSION + ' \u00b7 script ' + VER_SCRIPT;
   return d;
 }
-var APP_VERSION = 'v1.4';
+var APP_VERSION = 'v1.5';
 var TASA = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
 
 var METODOS = [

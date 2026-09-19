@@ -10,14 +10,14 @@ en el comentario del encabezado de cada HTML y en la cabecera de `Code.gs`.
 | Archivo                 | Versión | Requiere Apps Script |
 |-------------------------|---------|----------------------|
 | index.html              | v10.2   | **v21.4**            |
-| boparts_ventas.html     | v14     | **v21.4**            |
+| boparts_ventas.html     | v14.1   | **v21.4**            |
 | boparts_cobros.html     | v2.5    | **v20**              |
 | boparts_compras.html    | v2.4    | **v20**              |
 | boparts_gastos.html     | v1.6    | **v20**              |
 | boparts_fotos.html      | v8.3    | **v11.5**            |
 | boparts_demanda.html    | v8.5    | v7 o superior        |
 | boparts_gerencia.html   | v2.3    | **v20**              |
-| boparts_apartados.html  | v1.4    | **v21.4**            |
+| boparts_apartados.html  | v1.5    | **v21.4**            |
 | boparts_devoluciones.html| v1.3   | **v20**              |
 | boparts_inventario.html | v1.3    | **v20**              |
 | boparts_reportes.html   | v8      | ninguno (lo reemplaza gerencia) |
@@ -30,6 +30,17 @@ Para volver atrás:
 - Apps Script: Implementar → Administrar implementaciones → lápiz → elegir la versión anterior → Implementar.
 
 ---
+
+## ventas v14.1 / apartados v1.5 — 2026-09-18 · El bloqueo de persona, para todas las pantallas
+En v14 el selector solo se fijaba en `ventas.html`. En apartados seguía diciendo "Seleccionar...".
+
+Ahora lo hace el módulo compartido, así que vale igual en las ocho pantallas que preguntan quién hace la
+operación (vendedor, quién recibe, quién cuenta, quién registra).
+
+Regla: **solo se toca un desplegable que ya ofrece ese nombre.** Por eso el de "Autoriza" de devoluciones,
+que solo lista a los socios, no se fuerza con un vendedor que no tiene permiso para autorizar.
+
+Con el login apagado nada de esto ocurre: los desplegables siguen libres, como siempre.
 
 ## ventas v14 / apartados v1.4 — 2026-09-18 · Bloque D, parte 2 (2 de 3): se va el CSV de CLIENTES
 **boparts_ventas.html v14 · boparts_apartados.html v1.4** — requieren Apps Script v21.4
