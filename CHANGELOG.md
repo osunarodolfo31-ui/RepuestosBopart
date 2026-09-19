@@ -12,7 +12,7 @@ en el comentario del encabezado de cada HTML y en la cabecera de `Code.gs`.
 | index.html              | v10.3   | **v21.5**            |
 | boparts_ventas.html     | v14.1   | **v21.5**            |
 | boparts_cobros.html     | v2.6    | **v21.5**            |
-| boparts_compras.html    | v2.5    | **v21.5**            |
+| boparts_compras.html    | v2.6    | **v21.6**            |
 | boparts_gastos.html     | v1.7    | **v21.5**            |
 | boparts_fotos.html      | v9      | **v21.5**            |
 | boparts_demanda.html    | v8.6    | **v21.5**            |
@@ -21,7 +21,7 @@ en el comentario del encabezado de cada HTML y en la cabecera de `Code.gs`.
 | boparts_devoluciones.html| v1.4   | **v21.5**            |
 | boparts_inventario.html | v1.4    | **v21.5**            |
 | boparts_reportes.html   | —       | **SE ELIMINA** (lo reemplazo gerencia) |
-| Code.gs (Apps Script)   | v21.5   | —                    |
+| Code.gs (Apps Script)   | v21.6   | —                    |
 
 Deployment ID (no cambia): `AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg`
 
@@ -61,6 +61,22 @@ una URL pública — ya no lo hacen. Piden `action=clientes` y `action=productos
 
 Con esto, las hojas que faltan por migrar son **LISTA DE PRODUCTOS** (compras, fotos, devoluciones) y
 **CATALOGO_PROVEEDORES** (demanda).
+
+## v21.6 / compras v2.6 — 2026-09-19 · Una recepción reenviada ya no se duplica
+Mismo fallo que se corrigió en ventas con v20, que quedó fuera en compras: el `idCompra` se generaba nuevo en
+cada pulsación del botón, así que un reintento tras un fallo de red entraba como recepción distinta.
+
+Duplicaba más de lo que parece:
+- la recepción y sus líneas — y con ellas el stock, que suma las compras;
+- **los productos marcados como NUEVOS se volvían a crear en LISTA DE PRODUCTOS**, ensuciando el catálogo con
+  códigos repetidos. Eso es lo que costaba más limpiar después.
+
+- **compras v2.6**: el ID se conserva mientras no se empiece una recepción nueva. El botón "Nueva recepción"
+  es lo único que lo renueva.
+- **Code.gs v21.6**: si ya existe una recepción con ese ID, no escribe nada y devuelve lo de la primera vez.
+  La app lo dice en pantalla en vez de callarse.
+
+Con 9 casos de prueba, incluido el de un envío que falla por red y se reintenta.
 
 ## Bloque D, parte 2 completa — 2026-09-18 · Ninguna pantalla depende ya de una hoja publicada
 **Code.gs v21.5** + las once pantallas.

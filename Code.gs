@@ -1,6 +1,12 @@
 /**
  * Repuesto BoParts — Code.gs
- * VERSION: v21.5 (2026-09-18) | compatible con TODAS las pantallas actuales mientras CONFIG!B15 = NO
+ * VERSION: v21.6 (2026-09-19) | compatible con TODAS las pantallas actuales mientras CONFIG!B15 = NO
+ *
+ * v21.6: una recepcion reenviada ya no se duplica. Era el mismo fallo que se corrigio en ventas con v20, que
+ *        quedo fuera en compras. Ahora se identifica por ID_COMPRA y, si ya existe, no se escribe nada y se
+ *        devuelve lo de la primera vez. Importa mas de lo que parece: al duplicarse no solo entraba la
+ *        recepcion dos veces (y el stock con ella), sino que los productos marcados como NUEVOS se creaban
+ *        otra vez en LISTA DE PRODUCTOS, ensuciando el catalogo con codigos repetidos.
  *
  * v21.5: cada fila de action=productos lleva al final su NUMERO DE FILA real en la hoja. boparts_fotos.html
  *        la calculaba contando filas del CSV; como esta respuesta omite las filas sin producto, esa cuenta
@@ -986,10 +992,32 @@ function hojaProveedores_(ss) {
   return sh;
 }
 
+// Busca una recepcion ya registrada por su ID. Devuelve la fila o 0.
+function compraPorId_(ss, idCompra) {
+  if (!idCompra) return 0;
+  var sh = ss.getSheetByName('COMPRAS');
+  if (!sh || sh.getLastRow() < 2) return 0;
+  var n = sh.getLastRow() - 1;
+  var ids = sh.getRange(2, 1, n, 1).getValues();
+  for (var i = n - 1; i >= 0; i--) {          // desde el final: lo recien guardado esta abajo
+    if (String(ids[i][0]) === String(idCompra)) return i + 2;
+  }
+  return 0;
+}
+
 function guardarCompra_(ss, d) {
   var lineas = d.lineas || [];
   if (!lineas.length) throw new Error('Compra sin lineas');
   if (!d.proveedor) throw new Error('Compra sin proveedor');
+
+  // Si el telefono reenvia la misma recepcion (se perdio la respuesta), no se duplica nada:
+  // ni la recepcion, ni sus lineas, ni los productos nuevos en LISTA DE PRODUCTOS.
+  var yaEsta = compraPorId_(ss, d.idCompra);
+  if (yaEsta) {
+    return {nuevos:0, repetida:true, fila:yaEsta,
+            unidades:Number(ss.getSheetByName('COMPRAS').getRange(yaEsta, 8).getValue()) || 0};
+  }
+
   var fecha = fechaVE_(d.fecha);
 
   var shC = ss.getSheetByName('COMPRAS');

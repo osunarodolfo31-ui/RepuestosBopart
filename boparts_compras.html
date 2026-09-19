@@ -1,7 +1,9 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_compras.html
-  VERSION: v2.5 (2026-09-18) | requiere Apps Script v21.4
+  VERSION: v2.6 (2026-09-19) | requiere Apps Script v21.6
+  v2.6: el ID de la recepcion se conserva mientras no cambie lo recibido, asi un reintento no crea otra
+        recepcion. Si el script reconoce que ya estaba guardada, la app lo dice en vez de callarse.
   v2.5: la lista de productos se pide al script (action=productos) en vez del CSV publicado; login incluido.
   v2.4: cada foto de factura sube con nombre unico (antes todas se sobreescribian)
   VERSION anterior: v2.3 (2026-09-17) | requiere Apps Script v20
@@ -327,7 +329,7 @@ select option{background:#1E1E1E;color:var(--ink)}
 <div class="nav-ov" id="navOv" onclick="closeNav()"></div>
 <div class="nav-pan" id="navPan">
   <div class="nav-t">Repuesto BoParts</div>
-  <div id="verTag" style="font-size:10px;color:var(--ink-muted);margin:-6px 0 10px;letter-spacing:0.3px">app v2.5 · script ?</div>
+  <div id="verTag" style="font-size:10px;color:var(--ink-muted);margin:-6px 0 10px;letter-spacing:0.3px">app v2.6 · script ?</div>
   <div class="nav-g">
     <a class="ncard" href="index.html">
       <span class="nicon">📋</span>
@@ -562,9 +564,10 @@ function sellarVersion(d) {
 }
 function txt_(v) { return v == null ? '' : String(v); }
 var CLOUD = 'c7jufi9v', PRESET = 'boparts_productos';
-var APP_VERSION = 'v2.5';
+var APP_VERSION = 'v2.6';
 
 var PRODUCTS = [], PROVEEDORES = [], lineas = [], provSel = null, fotoUrl = '';
+var idCompraActual = '';   // se mantiene entre reintentos de la MISMA recepcion
 document.getElementById('fechaHdr').textContent = APP_VERSION + ' · ' + new Date().toLocaleDateString('es-VE', {weekday:'long', day:'numeric', month:'long'});
 
 // ---- productos (v2.5: por el script, para poder despublicar LISTA DE PRODUCTOS) ----
@@ -924,9 +927,17 @@ function guardarCompra() {
   if (!provSel) { toast('Selecciona o crea el proveedor', 'err'); return; }
   if (!lineas.length) { toast('Agrega los productos recibidos', 'err'); return; }
   var now = new Date();
+  // El ID se conserva entre reintentos: si la respuesta se pierde y se vuelve a enviar, el script reconoce
+  // el mismo ID y no duplica la recepcion ni vuelve a crear los productos nuevos. Solo se renueva al empezar
+  // una recepcion nueva (boton "Nueva recepcion").
+  if (!idCompraActual) {
+    idCompraActual = 'C' + now.getFullYear() + pad2(now.getMonth()+1) + pad2(now.getDate()) + '-' +
+      pad2(now.getHours()) + pad2(now.getMinutes()) + pad2(now.getSeconds()) + '-' +
+      Math.random().toString(36).substr(2,4).toUpperCase();
+  }
   var payload = {
     tipo:'compra',
-    idCompra:'C' + now.getFullYear() + pad2(now.getMonth()+1) + pad2(now.getDate()) + '-' + pad2(now.getHours()) + pad2(now.getMinutes()) + pad2(now.getSeconds()),
+    idCompra:idCompraActual,
     fecha:now.toLocaleDateString('es-VE'), hora:now.toLocaleTimeString('es-VE', {hour:'2-digit', minute:'2-digit'}),
     recibidoPor:quien, proveedor:provSel.nombre, factura:document.getElementById('inFactura').value.trim(),
     fotoUrl:fotoUrl, notas:document.getElementById('txtNotas').value.trim(),
@@ -937,7 +948,9 @@ function guardarCompra() {
     btn.disabled = false; btn.textContent = 'Registrar Recepcion';
     if (!d || d.ok !== true) throw new Error(d && d.error ? d.error : 'Respuesta inesperada');
     var u = lineas.reduce(function(a, l) { return a + l.cantidad; }, 0);
-    document.getElementById('successMsg').textContent = provSel.nombre + ' - ' + lineas.length + ' productos, ' + u + ' unidades' + (d.nuevos ? '\n' + d.nuevos + ' producto(s) nuevo(s) creados sin precio' : '') + '\nEstado: PENDIENTE COSTO';
+    document.getElementById('successMsg').textContent = d.repetida
+      ? provSel.nombre + ' - esta recepcion ya estaba guardada.\nNo se duplico nada.'
+      : provSel.nombre + ' - ' + lineas.length + ' productos, ' + u + ' unidades' + (d.nuevos ? '\n' + d.nuevos + ' producto(s) nuevo(s) creados sin precio' : '') + '\nEstado: PENDIENTE COSTO';
     document.getElementById('success').classList.add('open');
   }).catch(function(e) {
     btn.disabled = false; btn.textContent = 'Registrar Recepcion';
@@ -946,7 +959,7 @@ function guardarCompra() {
 }
 function nueva() {
   document.getElementById('success').classList.remove('open');
-  lineas = []; provSel = null; fotoUrl = ''; renderLineas(); mostrarProv();
+  lineas = []; provSel = null; fotoUrl = ''; idCompraActual = ''; renderLineas(); mostrarProv();
   document.getElementById('inFactura').value = ''; document.getElementById('txtNotas').value = '';
   var box = document.getElementById('fotoBox'); box.className = 'fotobox'; box.innerHTML = 'Tocar para fotografiar o elegir de galeria<input type="file" accept="image/*" onchange="subirFoto(this)">';
 }
