@@ -1,7 +1,9 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_gerencia.html
-  VERSION: v2.5 (2026-09-19) | requiere Apps Script v21.6
+  VERSION: v2.6 (2026-09-19) | requiere Apps Script v22
+  v2.6: en la ficha del cliente se marca si es aliado y con que porcentaje. Pantalla de liquidacion:
+        comisiones cobrables menos lo que debe, en un solo movimiento.
   v2.5: relacion de gastos linea por linea. El detalle (fecha, descripcion, quien pago) ya venia en la
         respuesta del script desde v12 y la pantalla solo lo sumaba.
   v2.4: con el login encendido, un socio que ya inicio sesion entra directo: no se le piden dos claves.
@@ -243,6 +245,22 @@ select option{background:#1E1E1E;color:var(--ink)}
 .cli .det{display:none;margin-top:10px;border-top:1px solid var(--border);padding-top:10px}
 .cli.open .det{display:block}
 .chip{display:inline-block;font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;margin-right:4px}
+.chip.ali{background:rgba(245,168,0,.18);color:var(--brand)}
+.liq{background:var(--card2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;margin-bottom:8px}
+.liqh{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.liqh .nm{font-size:14px;font-weight:600;color:var(--ink)}
+.liqh .sb{font-size:11px;color:var(--ink-muted);margin-top:2px}
+.liqh .rt{font-size:17px;font-weight:700;color:var(--green);text-align:right;white-space:nowrap}
+.liqh .rt.neg{color:var(--red)}
+.liqh .rt small{display:block;font-size:10px;font-weight:500;color:var(--ink-muted);text-transform:uppercase;letter-spacing:.3px;margin-top:1px}
+.liqd{margin-top:10px;border-top:1px solid var(--border);padding-top:8px}
+.liqd>div{display:flex;align-items:baseline;justify-content:space-between;gap:8px;padding:3px 0;font-size:12px}
+.liqd span{color:var(--ink-soft)}
+.liqd b{color:var(--ink);font-weight:600}
+.liqd b.neg{color:var(--red)}
+.liqd b.mut{color:var(--ink-muted)}
+.liqd small{color:var(--ink-muted);font-size:10px;flex-basis:100%;text-align:right;margin-top:-3px}
+.liqm{margin-top:8px;font-size:12px;color:var(--ink-muted)}
 .chip.cr{background:var(--brand-soft);color:var(--brand)}
 .chip.no{background:rgba(255,255,255,.07);color:var(--ink-muted)}
 .chip.al{background:rgba(239,68,68,.15);color:var(--red)}
@@ -332,6 +350,8 @@ select option{background:#1E1E1E;color:var(--ink)}
 
   <div id="apartadosBox"></div>
 
+  <div id="liqBox"></div>
+
   <div class="section">
     <div class="stitle">Clientes <span style="float:right;font-weight:500;text-transform:none;color:var(--ink-muted)" id="cliCount"></span></div>
     <div class="tabs" id="cliTabs">
@@ -373,7 +393,7 @@ select option{background:#1E1E1E;color:var(--ink)}
 <div class="nav-ov" id="navOv" onclick="closeNav()"></div>
 <div class="nav-pan" id="navPan">
   <div class="nav-t">Repuesto BoParts</div>
-  <div id="verTag" style="font-size:10px;color:var(--ink-muted);margin:-6px 0 10px;letter-spacing:0.3px">app v2.5 · script ?</div>
+  <div id="verTag" style="font-size:10px;color:var(--ink-muted);margin:-6px 0 10px;letter-spacing:0.3px">app v2.6 · script ?</div>
   <div class="nav-g">
     <a class="ncard" href="index.html">
       <span class="nicon">📋</span>
@@ -606,7 +626,7 @@ function sellarVersion(d) {
   if (t) t.textContent = 'app ' + APP_VERSION + ' \u00b7 script ' + VER_SCRIPT;
   return d;
 }
-var APP_VERSION = 'v2.5';
+var APP_VERSION = 'v2.6';
 var TASA = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
 var periodo = 'hoy', DATA = null;
 
@@ -639,6 +659,7 @@ function abrirGerencia() {
   cargarPagar();
   cargarConteos();
   cargarClientes();
+  cargarLiquidacion();
   cargar();
 }
 function salirGerencia() { olvidarSesion(); location.reload(); }
@@ -935,14 +956,16 @@ function cargarClientes() {
     var c = res[0], st = res[1];
     CLIENTES = (c && c.clientes ? c.clientes : []).map(function(r) {
       return {nombre:r[0] || '', ced:r[1] || '', tel:r[2] || '', credito:String(r[6] || '').toUpperCase() === 'SI',
-              limite:num(r[7]), dias:num(r[8])};
+              limite:num(r[7]), dias:num(r[8]),
+              aliado:String(r[9] || '').toUpperCase() === 'SI', pct:num(r[10]), negocio:r[11] || ''};
     }).filter(function(x) { return x.nombre; });
     STATS = {};
     (st && st.clientes ? st.clientes : []).forEach(function(s) { STATS[s.cliente.trim().toUpperCase()] = s; });
     // Clientes que aparecen en ventas pero no estan en la hoja CLIENTES
     (st && st.clientes ? st.clientes : []).forEach(function(s) {
       var existe = CLIENTES.some(function(x) { return x.nombre.trim().toUpperCase() === s.cliente.trim().toUpperCase(); });
-      if (!existe) CLIENTES.push({nombre:s.cliente, ced:'', tel:'', credito:false, limite:0, dias:0, suelto:true});
+      if (!existe) CLIENTES.push({nombre:s.cliente, ced:'', tel:'', credito:false, limite:0, dias:0,
+                                  aliado:false, pct:0, negocio:'', suelto:true});
     });
     pintarClientes();
   }).catch(function(e) {
@@ -976,6 +999,7 @@ function pintarClientes() {
       '<div class="sb">' + (c.ced ? escHtml(c.ced) : 'sin cedula') + (c.tel ? ' · ' + escHtml(c.tel) : ' · sin telefono') + '</div>' +
       '<div style="margin-top:6px">' +
         (c.credito ? '<span class="chip cr">CREDITO' + (c.limite ? ' ' + usd(c.limite) : '') + '</span>' : '<span class="chip no">contado</span>') +
+        (c.aliado ? '<span class="chip ali">ALIADO' + (c.pct ? ' ' + c.pct + '%' : '') + '</span>' : '') +
         (dormido ? '<span class="chip al">' + s.diasSinComprar + ' dias sin venir</span>' : '') +
         (c.suelto ? '<span class="chip al">sin ficha</span>' : '') +
       '</div></div>' +
@@ -989,6 +1013,12 @@ function pintarClientes() {
           '<div><label style="font-size:11px">Credito</label><select id="cr-' + idSafe(c.nombre) + '"><option value="NO"' + (c.credito ? '' : ' selected') + '>No</option><option value="SI"' + (c.credito ? ' selected' : '') + '>Si</option></select></div>' +
           '<div><label style="font-size:11px">Limite USD</label><input type="number" step="1" id="lm-' + idSafe(c.nombre) + '" value="' + (c.limite || '') + '" placeholder="0"></div>' +
           '<div><label style="font-size:11px">Dias</label><input type="number" step="1" id="di-' + idSafe(c.nombre) + '" value="' + (c.dias || '') + '" placeholder="0" style="width:64px"></div>' +
+        '</div>' +
+        // v2.6: el aliado es este mismo cliente. Su cedula es lo que une la comision con la deuda.
+        '<div class="cfg" style="margin-top:8px">' +
+          '<div><label style="font-size:11px">Aliado</label><select id="al-' + idSafe(c.nombre) + '"><option value="NO"' + (c.aliado ? '' : ' selected') + '>No</option><option value="SI"' + (c.aliado ? ' selected' : '') + '>Si</option></select></div>' +
+          '<div><label style="font-size:11px">Comision %</label><input type="number" step="0.5" id="pc-' + idSafe(c.nombre) + '" value="' + (c.pct || '') + '" placeholder="0" style="width:72px"></div>' +
+          '<div style="flex:1"><label style="font-size:11px">Su negocio</label><input type="text" id="ng-' + idSafe(c.nombre) + '" value="' + escAttr(c.negocio || '') + '" placeholder="Taller Diesel"></div>' +
         '</div>' +
         '<button class="tab on" style="width:100%;margin-top:10px;padding:10px" onclick="guardarCli(\'' + id + '\')">Guardar</button>' +
       '</div></div>';
@@ -1006,10 +1036,17 @@ function guardarCli(nombre) {
   var cred = document.getElementById('cr-' + id).value === 'SI';
   var lim = num(document.getElementById('lm-' + id).value);
   var dias = num(document.getElementById('di-' + id).value);
+  var ali = document.getElementById('al-' + id).value === 'SI';
+  var pct = num(document.getElementById('pc-' + id).value);
+  var neg = document.getElementById('ng-' + id).value.trim();
   if (cred && !c.ced && !c.tel) { toast('Este cliente no tiene cedula ni telefono: completalos en la hoja antes de darle credito', 'err'); return; }
   if (cred && !lim) { toast('Ponle un limite: sin tope, el credito no tiene freno', 'err'); return; }
+  // La cedula es lo que une su comision con su deuda. Un aliado sin cedula no se puede liquidar.
+  if (ali && !c.ced) { toast('Para marcarlo como aliado necesita cedula: es lo que une su comision con lo que debe', 'err'); return; }
+  if (ali && !pct) { toast('Ponle el porcentaje de comision', 'err'); return; }
   fetch(SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'},
-    body:JSON.stringify({tipo:'cliente', nombre:c.nombre, rif:c.ced, tel:c.tel, credito:cred, limite:lim, dias:dias, fecha:new Date().toLocaleDateString('es-VE')})})
+    body:JSON.stringify({tipo:'cliente', nombre:c.nombre, rif:c.ced, tel:c.tel, credito:cred, limite:lim, dias:dias,
+                         aliado:ali, comisionPct:pct, negocio:neg, fecha:new Date().toLocaleDateString('es-VE')})})
     .then(function(r) { return r.text(); })
     .then(function(t) { var d; try { d = JSON.parse(t); } catch (e) { throw new Error('respuesta rara'); }
       if (!d || !d.ok) throw new Error(d && d.error ? d.error : 'no se guardo');
@@ -1018,9 +1055,14 @@ function guardarCli(nombre) {
       c.credito = (srv.credito !== undefined) ? srv.credito : cred;
       c.limite = (srv.limite !== undefined) ? srv.limite : lim;
       c.dias = (srv.dias !== undefined) ? srv.dias : dias;
+      c.aliado = (srv.aliado !== undefined) ? srv.aliado : ali;
+      c.pct = (srv.comisionPct !== undefined) ? srv.comisionPct : pct;
+      c.negocio = (srv.negocio !== undefined) ? srv.negocio : neg;
       c.suelto = false;
-      toast(c.nombre + ': ' + (cred ? 'credito hasta ' + usd(lim) + (dias ? ' a ' + dias + ' dias' : '') : 'solo contado'), 'ok');
+      toast(c.nombre + ': ' + (cred ? 'credito hasta ' + usd(lim) + (dias ? ' a ' + dias + ' dias' : '') : 'solo contado') +
+            (c.aliado ? ' · aliado ' + c.pct + '%' : ''), 'ok');
       pintarClientes();
+      cargarLiquidacion();
     })
     .catch(function(e) { toast('No se guardo: ' + e.message, 'err'); });
 }
@@ -1251,6 +1293,99 @@ function leerJSON(r) {
     }
   });
 }
+// ============================================================
+// LIQUIDACION DE ALIADOS (v2.6)
+// ============================================================
+var LIQ = [], liqTasa = 0;
+
+function cargarLiquidacion() {
+  fetch(SCRIPT_URL + '?action=liquidacion&t=' + Date.now())
+    .then(leerJSON)
+    .then(function(d) {
+      sellarVersion(d);
+      if (!d || !d.ok) throw new Error(d && d.error ? d.error : 'sin datos');
+      LIQ = d.aliados || []; liqTasa = d.tasa || 0;
+      pintarLiquidacion();
+    })
+    .catch(function(e) {
+      if (e && e.message === 'SESION') return;
+      document.getElementById('liqBox').innerHTML = '';
+    });
+}
+
+function pintarLiquidacion() {
+  var box = document.getElementById('liqBox');
+  if (!LIQ.length) {
+    box.innerHTML = '<div class="section"><div class="stitle">Liquidacion de aliados</div>' +
+      '<div class="cart-empty">Ningun cliente esta marcado como aliado.<br>' +
+      '<span style="font-size:12px">Abajo, en Clientes, abre su ficha y pon Aliado = Si con su porcentaje.</span></div></div>';
+    return;
+  }
+  var h = '<div class="section"><div class="stitle">Liquidacion de aliados</div>';
+  var hayAprox = false;
+  LIQ.forEach(function(a) {
+    if (a.aproximadas) hayAprox = true;
+    var nada = a.comisiones <= 0.009 && a.deuda <= 0.009 && a.porCobrar <= 0.009;
+    h += '<div class="liq">' +
+      '<div class="liqh"><div><div class="nm">' + escHtml(a.nombre) + '</div>' +
+        '<div class="sb">' + (a.negocio ? escHtml(a.negocio) + ' · ' : '') + a.pct + '% · ' +
+          (a.cedula ? escHtml(a.cedula) : '<span style="color:var(--red)">sin cedula</span>') + '</div></div>' +
+        '<div class="rt' + (a.neto < 0 ? ' neg' : '') + '">' + usd(a.neto) + '<small>' + (a.neto < 0 ? 'te debe' : 'a pagarle') + '</small></div>' +
+      '</div>';
+    if (nada) {
+      h += '<div class="liqm">Sin movimientos pendientes</div>';
+    } else {
+      h += '<div class="liqd">' +
+        '<div><span>Comisiones cobrables</span><b>' + usd(a.comisiones) + '</b><small>' + a.ventas + ' venta' + (a.ventas === 1 ? '' : 's') + '</small></div>' +
+        (a.porCobrar > 0.009 ? '<div><span>Pendiente de cobro</span><b class="mut">' + usd(a.porCobrar) + '</b><small>el cliente aun no paga</small></div>' : '') +
+        (a.deuda > 0.009 ? '<div><span>Mercancia que se llevo</span><b class="neg">-' + usd(a.deuda) + '</b><small>su cuenta por cobrar</small></div>' : '') +
+        '</div>';
+      if (a.comisiones > 0.009) {
+        h += '<button class="tab on" style="width:100%;margin-top:10px;padding:10px" onclick="liquidar(\'' + escAttr(a.nombre) + '\')">' +
+             (a.neto > 0.009 ? 'Liquidar y pagarle ' + usd(a.neto) : 'Aplicar ' + usd(a.comisiones) + ' a su deuda') + '</button>';
+      } else if (a.deuda > 0.009) {
+        h += '<div class="liqm">No tiene comisiones cobrables. Su deuda se arrastra.</div>';
+      }
+    }
+    h += '</div>';
+  });
+  if (hayAprox) {
+    h += '<div class="aviso" style="margin-top:10px">Algunas comisiones son anteriores a esta version y se guardaron solo en bolivares. ' +
+         'Se convirtieron con la tasa de hoy (' + (liqTasa || '?') + '), asi que ese monto es aproximado.</div>';
+  }
+  h += '</div>';
+  box.innerHTML = h;
+}
+
+function liquidar(nombre) {
+  var a = LIQ.filter(function(x) { return x.nombre === nombre; })[0];
+  if (!a) return;
+  var quien = miNombre() || prompt('Quien liquida? (Rodolfo Osuna / Javier Boves)');
+  if (!quien) return;
+  var metodo = '';
+  if (a.neto > 0.009) {
+    metodo = prompt('Como le pagas los ' + usd(a.neto) + '?\n(Pago Movil, Efectivo USD, Transferencia...)', 'Pago Movil');
+    if (metodo === null) return;
+  }
+  var resumen = a.nombre + '\n\nComisiones: ' + usd(a.comisiones) +
+    (a.deuda > 0.009 ? '\nSe aplica a su deuda: ' + usd(Math.min(a.comisiones, a.deuda)) : '') +
+    '\nSale de caja: ' + usd(Math.max(0, a.neto)) + '\n\nConfirmas?';
+  if (!confirm(resumen)) return;
+
+  fetch(SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'},
+    body:JSON.stringify({tipo:'liquidar_aliado', aliado:a.nombre, cedula:a.cedula, quien:quien, metodo:metodo, tasa:liqTasa})})
+    .then(leerJSON)
+    .then(function(d) {
+      if (!d || !d.ok) throw new Error(d && d.error ? d.error : 'no se liquido');
+      toast(d.aliado + ': ' + usd(d.comisiones) + ' en ' + d.ventas + ' ventas' +
+            (d.aplicado > 0.009 ? ' · ' + usd(d.aplicado) + ' a su deuda' : '') +
+            (d.pagado > 0.009 ? ' · pagarle ' + usd(d.pagado) : ' · nada que pagar'), 'ok');
+      cargarLiquidacion();
+      cargarClientes();
+    })
+    .catch(function(e) { if (e && e.message !== 'SESION') toast('No se liquido: ' + e.message, 'err'); });
+}
+
 </script>
 </body>
 </html>

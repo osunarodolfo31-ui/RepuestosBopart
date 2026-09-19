@@ -10,13 +10,13 @@ en el comentario del encabezado de cada HTML y en la cabecera de `Code.gs`.
 | Archivo                 | Versión | Requiere Apps Script |
 |-------------------------|---------|----------------------|
 | index.html              | v10.3   | **v21.5**            |
-| boparts_ventas.html     | v14.1   | **v21.5**            |
+| boparts_ventas.html     | v14.2   | **v22**              |
 | boparts_cobros.html     | v2.6    | **v21.5**            |
 | boparts_compras.html    | v2.6    | **v21.6**            |
 | boparts_gastos.html     | v1.7    | **v21.5**            |
 | boparts_fotos.html      | v9      | **v21.5**            |
 | boparts_demanda.html    | v8.6    | **v21.5**            |
-| boparts_gerencia.html   | v2.5    | **v21.6**            |
+| boparts_gerencia.html   | v2.6    | **v22**              |
 | boparts_apartados.html  | v1.5    | **v21.5**            |
 | boparts_devoluciones.html| v1.4   | **v21.5**            |
 | boparts_inventario.html | v1.4    | **v21.5**            |
@@ -61,6 +61,32 @@ una URL pública — ya no lo hacen. Piden `action=clientes` y `action=productos
 
 Con esto, las hojas que faltan por migrar son **LISTA DE PRODUCTOS** (compras, fotos, devoluciones) y
 **CATALOGO_PROVEEDORES** (demanda).
+
+## gerencia v2.6 / ventas v14.2 — 2026-09-19 · Liquidación de aliados (parte 2: pantallas)
+
+**En la ficha del cliente** (Gerencia → Clientes) hay ahora tres campos más: Aliado Sí/No, Comisión % y
+Su negocio. Un aliado marcado lleva su chip dorado con el porcentaje.
+
+No deja marcar como aliado a quien no tiene cédula. **La cédula es lo que une su comisión con lo que debe**;
+sin ella la liquidación no puede cruzar las dos cuentas y pagaría de más.
+
+**Sección "Liquidación de aliados"**, arriba de Clientes. Por cada uno:
+
+- Comisiones cobrables, con cuántas ventas
+- Pendiente de cobro aparte, cuando la venta fue a crédito y el cliente todavía no paga
+- La mercancía que se llevó, en rojo y restando
+- El neto: verde si hay que pagarle, rojo si te debe
+
+El botón dice lo que va a pasar: *"Liquidar y pagarle $17.00"* o *"Aplicar $10.00 a su deuda"*. Pide confirmación
+con el desglose antes de tocar nada. Si alguna comisión es anterior a la v22 y se convirtió con la tasa de hoy,
+lo avisa: ese monto es aproximado.
+
+**ventas v14.2** deja de tener los métodos de pago y los aliados escritos por dentro: los pide con
+`action=metodos`. Los métodos salen de `METODOS_PAGO` y los aliados de `CLIENTES` con ALIADO = SI. Agregar un
+banco o un aliado deja de ser un cambio de código. Si el script no responde, se queda con lo que ya tenía y la
+venta se puede hacer igual: nunca se deja al vendedor sin métodos de pago.
+
+La venta manda ahora la cédula del aliado, que es con lo que el servidor busca su ficha y su porcentaje.
 
 ## v22 — 2026-09-19 · El aliado es un cliente más (parte 1: servidor)
 **Code.gs v22.** Todavía sin pantallas: se instala y no cambia nada visible.
