@@ -1,6 +1,15 @@
 /**
  * Repuesto BoParts — Code.gs
- * VERSION: v21.2 (2026-09-18) | compatible con TODAS las pantallas actuales mientras CONFIG!B15 = NO
+ * VERSION: v21.4 (2026-09-18) | compatible con TODAS las pantallas actuales mientras CONFIG!B15 = NO
+ *
+ * v21.4: cada respuesta del script incluye su version (campo "v"). Asi, cuando una pantalla falla, se sabe en
+ *        un vistazo si el script desplegado es el que corresponde o quedo uno viejo. Es el error mas comun al
+ *        instalar: guardar con Ctrl+S no despliega; hay que hacer Implementar > Nueva version.
+ *
+ * v21.3: CORRIGE index v10. El CSV publicado entregaba TODAS las celdas como texto; la hoja las entrega con
+ *        su tipo real (numero, fecha). Un codigo numerico llegaba como numero y la pantalla reventaba con
+ *        "(q[0] || '').trim is not a function". Ahora action=productos y action=catalogo devuelven cada celda
+ *        ya convertida a texto, igual que hacia el CSV. Las fechas salen como dd/MM/yyyy.
  *
  * v21.2: action=quienes devuelve los nombres activos para llenar el desplegable del login. Es la UNICA
  *        accion que no exige sesion, porque hace falta antes de tener una. No entrega PIN, ni hash, ni token.
@@ -269,7 +278,11 @@ function rolDe_(tabla, clave) {
   return r ? r : 'SOCIO';   // lo desconocido se trata como reservado a socios
 }
 
+var VERSION_SCRIPT = 'v21.4';
+
 function json_(obj) {
+  // La version viaja en cada respuesta: es la forma rapida de saber si lo desplegado es lo que crees
+  if (obj && typeof obj === 'object' && obj.v === undefined) obj.v = VERSION_SCRIPT;
   return ContentService.createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
 }
@@ -2012,13 +2025,21 @@ function listaProductos_(ss, conCosto) {
   var filas = [];
   for (var i = 0; i < vals.length; i++) {
     var r = vals[i];
-    if (!String(r[2] || '').trim()) continue;              // sin nombre de producto no es una fila real
+    if (!comoTexto_(r[2]).trim()) continue;                // sin nombre de producto no es una fila real
     var f = [];
-    for (var c = 0; c < 14; c++) f.push(r[c] == null ? '' : r[c]);
+    for (var c = 0; c < 14; c++) f.push(comoTexto_(r[c]));
     if (!conCosto) { f[COL_COSTO - 1] = ''; f[COL_DESC - 1] = ''; f[COL_COSTO_FINAL - 1] = ''; }
     filas.push(f);
   }
   return {ok:true, tasa:leerTasa_(ss), conCosto:!!conCosto, filas:filas};
+}
+
+// Una celda, como la entregaba el CSV: siempre texto. Sin esto, un codigo o una categoria numerica llega
+// como number y cualquier .trim() de las pantallas revienta.
+function comoTexto_(v) {
+  if (v == null) return '';
+  if (esFecha_(v)) return Utilities.formatDate(v, TZ_VE, 'dd/MM/yyyy');
+  return String(v);
 }
 
 // Costo vigente de una lista de codigos, para congelarlo en la linea de venta.
@@ -2049,7 +2070,7 @@ function catalogoProveedores_(ss) {
   }
   if (!sh || sh.getLastRow() < 2) return {ok:false, error:'No se encontro la hoja del catalogo de proveedores'};
   var vals = sh.getRange(1, 1, sh.getLastRow(), sh.getLastColumn()).getValues()
-    .map(function(r) { return r.map(function(v) { return v == null ? '' : v; }); });
+    .map(function(r) { return r.map(comoTexto_); });
   return {ok:true, hoja:sh.getName(), filas:vals};
 }
 

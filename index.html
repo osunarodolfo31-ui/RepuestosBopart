@@ -1,7 +1,11 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — index.html
-  VERSION: v10 (2026-09-18) — requiere Apps Script v21.2
+  VERSION: v10.2 (2026-09-18) — requiere Apps Script v21.4
+  v10.2: el menu muestra que version de la app y del script estan corriendo de verdad. Sin eso, un archivo
+         sin subir o una cache vieja se confunden con un error del codigo.
+  v10.1: toda celda que llega del script se convierte a texto antes de usarla. La hoja entrega numeros y
+         fechas con su tipo real (el CSV entregaba todo como texto) y un codigo numerico rompia la lista.
   v10: la lista ya no se lee del CSV publicado de LISTA DE PRODUCTOS, sino por action=productos del script.
        Eso permite despublicar esa hoja. Incluye la pantalla de login, que solo aparece cuando CONFIG!B15 = SI.
        EQUIVALENCIAS se sigue leyendo por CSV: no tiene nada sensible y sirve de respaldo.
@@ -386,6 +390,14 @@ function revisarSesion(alTener) {
 
 // v10: la lista viene del script, no del CSV publicado. Asi LISTA DE PRODUCTOS puede dejar de estar publicada.
 const SCRIPT_URL_SESION = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
+const APP_VERSION = 'v10.2';
+var VER_SCRIPT = '?';
+function sellarVersion(d) {
+  if (d && d.v) VER_SCRIPT = d.v;
+  var t = document.getElementById('verTag');
+  if (t) t.textContent = 'app ' + APP_VERSION + ' · script ' + VER_SCRIPT;
+  return d;
+}
 const PROD_URL = SCRIPT_URL_SESION + '?action=productos';
 const EQUIV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRaAnGd-Bfaxo3LjUiGeV8p0F2weaKqHGwJ0hWibSMj02-h7dRAQPDMmGL5B8-XQg66Yjd3zgOAaz8X/pub?gid=1078159524&single=true&output=csv';
 
@@ -500,8 +512,14 @@ function filasDesde(text) {
     if (d.sesion)  { olvidarSesion(); mostrarLogin(); throw new Error('SESION'); }
     if (!d.ok)     { throw new Error(d.error || 'el script no devolvio la lista'); }
     // Dos filas delante para que los indices queden igual que en el CSV (los datos empiezan en 2)
+    sellarVersion(d);
     var cab = [[ '', '', '', '', d.tasa || '' ], []];
-    return cab.concat(d.filas || []);
+    // Todo a texto: el CSV entregaba siempre texto y el resto de la pantalla cuenta con eso.
+    // Se hace tambien aqui, y no solo en el script, para que un telefono con cache vieja no rompa.
+    var filas = (d.filas || []).map(function(f) {
+      return f.map(function(v) { return v == null ? '' : String(v); });
+    });
+    return cab.concat(filas);
   }
   return parseCSV(text);
 }
@@ -626,7 +644,7 @@ function showLoading() {
   document.getElementById('list').innerHTML = `<div class="state-box"><div class="icon">⏳</div><p>Cargando productos…</p></div>`;
 }
 function showError(msg) {
-  document.getElementById('list').innerHTML = `<div class="state-box"><div class="icon">⚠️</div><p>No se pudo cargar la lista.<br><small>${msg}</small></p><button class="retry" onclick="loadData(true)">Reintentar</button></div>`;
+  document.getElementById('list').innerHTML = `<div class="state-box"><div class="icon">⚠️</div><p>No se pudo cargar la lista.<br><small>${msg}</small><br><small style="opacity:0.6">app ${APP_VERSION} · script ${VER_SCRIPT}</small></p><button class="retry" onclick="loadData(true)">Reintentar</button></div>`;
 }
 
 function render(filtered) {
@@ -807,6 +825,7 @@ function marcarSlide(idx, slide) {
 <div class="nav-overlay" id="navOverlay" onclick="closeNav()"></div>
 <div class="nav-panel" id="navPanel">
   <div class="nav-panel-title">🔧 Repuesto BoParts</div>
+  <div id="verTag" style="font-size:10px;color:var(--ink-muted);margin:-8px 0 10px;letter-spacing:0.3px">app v10.2 · script ?</div>
   <div class="nav-grid">
     <a class="nav-card cur" href="index.html">
       <span class="nav-icon">📋</span>

@@ -9,7 +9,7 @@ en el comentario del encabezado de cada HTML y en la cabecera de `Code.gs`.
 
 | Archivo                 | Versión | Requiere Apps Script |
 |-------------------------|---------|----------------------|
-| index.html              | v10     | **v21.2**            |
+| index.html              | v10.2   | **v21.4**            |
 | boparts_ventas.html     | v13.3   | **v20**              |
 | boparts_cobros.html     | v2.5    | **v20**              |
 | boparts_compras.html    | v2.4    | **v20**              |
@@ -21,7 +21,7 @@ en el comentario del encabezado de cada HTML y en la cabecera de `Code.gs`.
 | boparts_devoluciones.html| v1.3   | **v20**              |
 | boparts_inventario.html | v1.3    | **v20**              |
 | boparts_reportes.html   | v8      | ninguno (lo reemplaza gerencia) |
-| Code.gs (Apps Script)   | v21.2   | —                    |
+| Code.gs (Apps Script)   | v21.4   | —                    |
 
 Deployment ID (no cambia): `AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg`
 
@@ -30,6 +30,31 @@ Para volver atrás:
 - Apps Script: Implementar → Administrar implementaciones → lápiz → elegir la versión anterior → Implementar.
 
 ---
+
+## v21.4 / index v10.2 — 2026-09-18 · Saber qué versión está corriendo
+Dos veces esta noche un error se vio igual que un fallo de código cuando en realidad era un archivo sin subir
+o sin desplegar. Ahora se ve de un vistazo:
+
+- **Code.gs v21.4**: cada respuesta del script trae el campo `v` con su versión.
+- **index.html v10.2**: el menú (botón ☰) muestra `app v10.2 · script v21.4`, y el cuadro de error también.
+  Si el menú dice `script v21.2`, lo que falta es **Implementar → Nueva versión**, no una corrección.
+
+Recordatorio de instalación: en Apps Script, **Ctrl+S no despliega**. Guardar cambia el editor; la app web
+sigue sirviendo la versión anterior hasta que se hace Implementar → Administrar implementaciones → lápiz →
+Versión: **Nueva versión** → Implementar.
+
+## v21.3 / index v10.1 — 2026-09-18 · Corrección: celdas con tipo
+`(q[0] || "").trim is not a function` al abrir la lista de precios con index v10.
+
+El CSV publicado entregaba **todas** las celdas como texto. La hoja las entrega con su tipo real: un código
+como `1021` llegaba como número, y `.trim()` no existe en un número. Reventaba antes de pintar un solo producto.
+
+- **Code.gs v21.3**: `action=productos` y `action=catalogo` convierten cada celda a texto antes de responder,
+  igual que hacía el CSV. Las fechas salen como `dd/MM/yyyy`.
+- **index.html v10.1**: además convierte a texto de su lado, por si un teléfono se queda con una versión
+  anterior del script.
+
+Esto aplica a las cinco pantallas que faltan por migrar: ninguna va a ver el problema.
 
 ## v21.2 / index v10 — 2026-09-18 · Bloque D, parte 2 (1 de 3): la lista de precios deja el CSV
 **Code.gs v21.2 · index.html v10**
