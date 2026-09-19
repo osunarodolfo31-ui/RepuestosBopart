@@ -16,7 +16,7 @@ en el comentario del encabezado de cada HTML y en la cabecera de `Code.gs`.
 | boparts_gastos.html     | v1.7    | **v21.5**            |
 | boparts_fotos.html      | v9      | **v21.5**            |
 | boparts_demanda.html    | v8.6    | **v21.5**            |
-| boparts_gerencia.html   | v2.4    | **v21.5**            |
+| boparts_gerencia.html   | v2.5    | **v21.6**            |
 | boparts_apartados.html  | v1.5    | **v21.5**            |
 | boparts_devoluciones.html| v1.4   | **v21.5**            |
 | boparts_inventario.html | v1.4    | **v21.5**            |
@@ -61,6 +61,16 @@ una URL pública — ya no lo hacen. Piden `action=clientes` y `action=productos
 
 Con esto, las hojas que faltan por migrar son **LISTA DE PRODUCTOS** (compras, fotos, devoluciones) y
 **CATALOGO_PROVEEDORES** (demanda).
+
+## gerencia v2.5 — 2026-09-19 · Relación de gastos, línea por línea
+Gerencia mostraba el total de gastos del período y la barra por categoría, pero no **qué** se gastó. Y esa es
+la vista que sirve para revisar.
+
+El detalle ya venía en la respuesta del script desde v12 — fecha, categoría, descripción, monto USD, monto Bs
+y quién pagó — y la pantalla solo lo sumaba. No hizo falta tocar el backend.
+
+Ahora, debajo de la barra por categoría: cada gasto con su descripción, fecha, categoría y quién lo pagó,
+ordenados del más reciente al más viejo, con el total arriba.
 
 ## v21.6 / compras v2.6 — 2026-09-19 · Una recepción reenviada ya no se duplica
 Mismo fallo que se corrigió en ventas con v20, que quedó fuera en compras: el `idCompra` se generaba nuevo en

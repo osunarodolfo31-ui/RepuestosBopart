@@ -1,7 +1,9 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_gerencia.html
-  VERSION: v2.4 (2026-09-18) | requiere Apps Script v21.5
+  VERSION: v2.5 (2026-09-19) | requiere Apps Script v21.6
+  v2.5: relacion de gastos linea por linea. El detalle (fecha, descripcion, quien pago) ya venia en la
+        respuesta del script desde v12 y la pantalla solo lo sumaba.
   v2.4: con el login encendido, un socio que ya inicio sesion entra directo: no se le piden dos claves.
         Con el login apagado sigue el PIN de siempre, que es la unica puerta que hay en ese caso.
   v2.3: quedaba una lectura de respuesta sin proteger; al guardar un cliente se muestra lo que realmente quedo
@@ -44,6 +46,13 @@
   --green:#22C55E;--red:#EF4444;
   --radius:14px;--radius-sm:8px;
 }
+.gtot{font-size:12px;color:var(--ink-muted);margin-bottom:10px}
+.grow{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:9px 0;border-bottom:1px solid var(--border)}
+.grow:last-child{border-bottom:none}
+.gizq{min-width:0;flex:1}
+.gdesc{font-size:13px;color:var(--ink);line-height:1.35;word-break:break-word}
+.gmeta{font-size:11px;color:var(--ink-muted);margin-top:2px}
+.gder{font-size:13px;font-weight:600;color:var(--ink);white-space:nowrap}
   /* ===== LOGIN (bloque D) — identico en todas las pantallas ===== */
   .login{display:none;position:fixed;inset:0;background:var(--bg);z-index:900;align-items:center;justify-content:center;padding:24px}
   .login.open{display:flex}
@@ -364,7 +373,7 @@ select option{background:#1E1E1E;color:var(--ink)}
 <div class="nav-ov" id="navOv" onclick="closeNav()"></div>
 <div class="nav-pan" id="navPan">
   <div class="nav-t">Repuesto BoParts</div>
-  <div id="verTag" style="font-size:10px;color:var(--ink-muted);margin:-6px 0 10px;letter-spacing:0.3px">app v2.4 · script ?</div>
+  <div id="verTag" style="font-size:10px;color:var(--ink-muted);margin:-6px 0 10px;letter-spacing:0.3px">app v2.5 · script ?</div>
   <div class="nav-g">
     <a class="ncard" href="index.html">
       <span class="nicon">📋</span>
@@ -597,7 +606,7 @@ function sellarVersion(d) {
   if (t) t.textContent = 'app ' + APP_VERSION + ' \u00b7 script ' + VER_SCRIPT;
   return d;
 }
-var APP_VERSION = 'v2.4';
+var APP_VERSION = 'v2.5';
 var TASA = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
 var periodo = 'hoy', DATA = null;
 
@@ -1140,6 +1149,25 @@ function render(r) {
     var gc = {};
     G.forEach(function(g) { gc[g[1]] = gc[g[1]] || {n:g[1], u:0, v:0, c:0}; gc[g[1]].v += g[3]; gc[g[1]].u += 1; });
     h += '<div class="section"><div class="stitle">Gastos por categoria</div>' + barras(gc, 10, true) + '</div>';
+
+    // Relacion linea por linea: es la que sirve para revisar, no el total.
+    // g = [fecha, categoria, descripcion, montoUSD, montoBS, pagadoPor]
+    var gOrd = G.slice().sort(function(a, b) { return String(b[0]).localeCompare(String(a[0])); });
+    var totG = 0; gOrd.forEach(function(g) { totG += num(g[3]); });
+    h += '<div class="section"><div class="stitle">Relacion de gastos</div>' +
+         '<div class="gtot">' + gOrd.length + ' gastos \u00b7 ' + usd(totG) + '</div>';
+    gOrd.forEach(function(g) {
+      var quien = String(g[5] || '').trim();
+      h += '<div class="grow">' +
+             '<div class="gizq">' +
+               '<div class="gdesc">' + escHtml(g[2] || '(sin descripcion)') + '</div>' +
+               '<div class="gmeta">' + fechaCorta(g[0]) + ' \u00b7 ' + escHtml(g[1] || 'sin categoria') +
+                 (quien ? ' \u00b7 pago ' + escHtml(quien) : '') + '</div>' +
+             '</div>' +
+             '<div class="gder">' + usd(num(g[3])) + '</div>' +
+           '</div>';
+    });
+    h += '</div>';
   }
 
   document.getElementById('cuerpo').innerHTML = h;
@@ -1176,6 +1204,12 @@ function kpi(k, v, s, cls) {
 }
 function mejor(d) { var k = '', m = -1; Object.keys(d).forEach(function(x) { if (d[x] > m) { m = d[x]; k = x; } }); return k; }
 function usd(n) { return '$' + (Math.round((n || 0) * 100) / 100).toFixed(2); }
+
+// Las fechas llegan como yyyy-MM-dd; en la relacion se leen mejor como dd/MM
+function fechaCorta(f) {
+  var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(f || ''));
+  return m ? m[3] + '/' + m[2] : escHtml(f || '');
+}
 function bs(n) { return 'Bs ' + Math.round(n || 0).toLocaleString('es-VE'); }
 function fechaES(f) { var p = String(f).split('-'); return p.length === 3 ? p[2] + '/' + p[1] + '/' + p[0] : f; }
 function escHtml(s) {
