@@ -9,7 +9,7 @@ en el comentario del encabezado de cada HTML y en la cabecera de `Code.gs`.
 
 | Archivo                 | Versión | Requiere Apps Script |
 |-------------------------|---------|----------------------|
-| index.html              | v9.6    | **v13** (para la tasa) |
+| index.html              | v10     | **v21.2**            |
 | boparts_ventas.html     | v13.3   | **v20**              |
 | boparts_cobros.html     | v2.5    | **v20**              |
 | boparts_compras.html    | v2.4    | **v20**              |
@@ -21,7 +21,7 @@ en el comentario del encabezado de cada HTML y en la cabecera de `Code.gs`.
 | boparts_devoluciones.html| v1.3   | **v20**              |
 | boparts_inventario.html | v1.3    | **v20**              |
 | boparts_reportes.html   | v8      | ninguno (lo reemplaza gerencia) |
-| Code.gs (Apps Script)   | v21.1   | —                    |
+| Code.gs (Apps Script)   | v21.2   | —                    |
 
 Deployment ID (no cambia): `AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg`
 
@@ -30,6 +30,21 @@ Para volver atrás:
 - Apps Script: Implementar → Administrar implementaciones → lápiz → elegir la versión anterior → Implementar.
 
 ---
+
+## v21.2 / index v10 — 2026-09-18 · Bloque D, parte 2 (1 de 3): la lista de precios deja el CSV
+**Code.gs v21.2 · index.html v10**
+
+- `action=quienes` devuelve los nombres activos para el desplegable del login. Es la **única** acción que no
+  exige sesión, porque hace falta antes de tener una. No entrega PIN, ni hash, ni token.
+- **index.html v10** ya no lee el CSV publicado de LISTA DE PRODUCTOS: pide `action=productos` al script.
+  Con esto esa hoja puede dejar de estar publicada en cuanto las otras cinco pantallas también migren.
+- Incluye el **módulo de sesión** que va idéntico en todas las pantallas: pantalla de login, token guardado
+  12 h en el teléfono, y cuando el token vence manda al login en vez de mostrar un error técnico.
+- Mientras `CONFIG!B15 = NO`, **el login no aparece nunca** y la pantalla funciona como siempre.
+- Si el script no responde, la pantalla **no se queda trancada en el login**: sigue con la caché.
+- EQUIVALENCIAS se sigue leyendo por CSV a propósito: no tiene nada sensible y sirve de respaldo.
+- La caché local cambió de nombre (`boparts_prod_v10`), así que el primer arranque de cada teléfono baja la
+  lista de nuevo.
 
 ## v21.1 — 2026-09-18 · Métodos de pago y aliados, desde la hoja
 **Code.gs v21.1.** Sin cambios en ningún HTML todavía (lo consume `boparts_ventas.html` en la parte 2).

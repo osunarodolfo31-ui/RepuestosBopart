@@ -1,6 +1,9 @@
 /**
  * Repuesto BoParts — Code.gs
- * VERSION: v21.1 (2026-09-18) | compatible con TODAS las pantallas actuales mientras CONFIG!B15 = NO
+ * VERSION: v21.2 (2026-09-18) | compatible con TODAS las pantallas actuales mientras CONFIG!B15 = NO
+ *
+ * v21.2: action=quienes devuelve los nombres activos para llenar el desplegable del login. Es la UNICA
+ *        accion que no exige sesion, porque hace falta antes de tener una. No entrega PIN, ni hash, ni token.
  *
  * v21.1: action=metodos devuelve los metodos de pago y los aliados desde las hojas METODOS_PAGO y ALIADOS,
  *        para que agregar un banco o cambiar una comision se haga en la hoja y no en el codigo. La primera
@@ -288,9 +291,26 @@ function doGet(e) {
 }
 
 function rutearGet_(e) {
-  // ---- BLOQUE D (v21): identidad antes que nada ----
   var ssA = SpreadsheetApp.getActiveSpreadsheet();
   var accion = String(e.parameter.action || '');
+
+  // Unica accion sin sesion: la pantalla de login necesita saber a quien ofrecer ANTES de tener token.
+  // Devuelve solo nombre y rol. Nunca PIN, hash ni token.
+  if (accion === 'quienes') {
+    var shQ = hojaUsuarios_(ssA);
+    var lista = [];
+    if (shQ.getLastRow() >= 2) {
+      shQ.getRange(2, 1, shQ.getLastRow() - 1, 3).getValues().forEach(function(r) {
+        var nom = String(r[0] || '').trim();
+        if (nom && String(r[2] || '').trim().toUpperCase() !== 'NO') {
+          lista.push({nombre:nom, rol:String(r[1] || 'VENDEDOR').toUpperCase()});
+        }
+      });
+    }
+    return json_({ok:true, usuarios:lista, authActiva:authActiva_(ssA)});
+  }
+
+  // ---- BLOQUE D (v21): identidad antes que nada ----
   var usr = auth_(ssA, e.parameter.token, rolDe_(PERMISOS_GET, accion));
 
   // Lista de productos por el script, para poder despublicar el CSV.

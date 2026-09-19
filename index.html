@@ -1,7 +1,10 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — index.html
-  VERSION: v9.6 (2026-09-12) — nav con Gerencia | tasa desde Apps Script v13
+  VERSION: v10 (2026-09-18) — requiere Apps Script v21.2
+  v10: la lista ya no se lee del CSV publicado de LISTA DE PRODUCTOS, sino por action=productos del script.
+       Eso permite despublicar esa hoja. Incluye la pantalla de login, que solo aparece cuando CONFIG!B15 = SI.
+       EQUIVALENCIAS se sigue leyendo por CSV: no tiene nada sensible y sirve de respaldo.
   v9.6: la tasa se lee de CONFIG (la fijan los socios en Gerencia); ya no se edita a mano en cada telefono
   v9.5: el carrusel de fotos usa desplazamiento nativo con flechas, contador y puntos; antes solo respondia a
         deslizar con el dedo (en la computadora del local no habia forma de pasar las fotos)
@@ -50,6 +53,26 @@
     --radius:14px;
     --radius-sm:8px;
   }
+  /* ===== LOGIN (bloque D) — identico en todas las pantallas ===== */
+  .login{display:none;position:fixed;inset:0;background:var(--bg);z-index:900;align-items:center;justify-content:center;padding:24px}
+  .login.open{display:flex}
+  .logincard{width:100%;max-width:340px;text-align:center}
+  .loginlogo{font-size:24px;font-weight:800;letter-spacing:-0.5px;margin-bottom:4px}
+  .loginlogo span{color:var(--brand)}
+  .loginsub{font-size:13px;color:var(--ink-muted);margin-bottom:26px}
+  .login .lgf{text-align:left;margin-bottom:14px}
+  .login label{display:block;font-size:11px;color:var(--ink-soft);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px}
+  .login select,.login input{width:100%;padding:13px;border-radius:var(--radius-sm);border:1.5px solid var(--border);
+    background:var(--card);color:var(--ink);font-size:16px;font-family:inherit;box-sizing:border-box}
+  .login input{letter-spacing:6px;text-align:center}
+  .login select:focus,.login input:focus{outline:none;border-color:var(--brand)}
+  .lgbtn{width:100%;padding:14px;border:none;border-radius:var(--radius-sm);background:var(--brand);color:#111;
+    font-size:15px;font-weight:700;font-family:inherit;cursor:pointer;margin-top:6px}
+  .lgbtn:disabled{opacity:0.5}
+  .lgerr{min-height:18px;font-size:13px;color:#FF6B6B;margin-top:12px}
+  .lgquien{font-size:11px;color:var(--ink-muted);margin-top:22px}
+  .lgquien b{color:var(--ink-soft);font-weight:600}
+
   html,body{height:100%;background:var(--bg);font-family:'Inter',sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased}
 
   /* HEADER */
@@ -195,6 +218,17 @@
 </style>
 </head>
 <body>
+<!-- ===== LOGIN (bloque D) ===== -->
+<div class="login" id="loginBox">
+  <div class="logincard">
+    <div class="loginlogo">Repuesto <span>BoParts</span></div>
+    <div class="loginsub">Entra con tu PIN para continuar</div>
+    <div class="lgf"><label>Quien eres</label><select id="lgUser"></select></div>
+    <div class="lgf"><label>Tu PIN</label><input type="password" id="lgPin" inputmode="numeric" autocomplete="off" placeholder="····"></div>
+    <button class="lgbtn" id="lgBtn" onclick="hacerLogin()">Entrar</button>
+    <div class="lgerr" id="lgErr"></div>
+  </div>
+</div>
 
 <div class="splash" id="splash">
   <img src="icon-512.png" alt="Repuesto BoParts">
@@ -250,7 +284,109 @@
 </div>
 
 <script>
-const CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRaAnGd-Bfaxo3LjUiGeV8p0F2weaKqHGwJ0hWibSMj02-h7dRAQPDMmGL5B8-XQg66Yjd3zgOAaz8X/pub?gid=2100998338&single=true&output=csv';
+/* ===================== SESION (bloque D) — identico en todas las pantallas =====================
+   Mientras CONFIG!B15 sea NO, nada de esto se activa y la pantalla funciona como siempre.       */
+var SES_KEY = 'boparts_sesion';
+function sesionActual() {
+  try {
+    var s = JSON.parse(localStorage.getItem(SES_KEY) || 'null');
+    if (s && s.token && s.vence > Date.now()) return s;
+  } catch (e) {}
+  return null;
+}
+function guardarSesion(s) { try { localStorage.setItem(SES_KEY, JSON.stringify(s)); } catch (e) {} }
+function olvidarSesion()  { try { localStorage.removeItem(SES_KEY); } catch (e) {} }
+function miToken()  { var s = sesionActual(); return s ? s.token  : ''; }
+function miNombre() { var s = sesionActual(); return s ? s.nombre : ''; }
+function soySocio() { var s = sesionActual(); return !!s && s.rol === 'SOCIO'; }
+
+// Agrega el token a una URL del script. Sin sesion la deja igual: con el login apagado el script no lo pide.
+function conToken(url) {
+  var t = miToken();
+  if (!t) return url;
+  return url + (url.indexOf('?') < 0 ? '?' : '&') + 'token=' + encodeURIComponent(t);
+}
+
+// Lee la respuesta del script. Si la sesion vencio, manda al login en vez de mostrar un error tecnico.
+function leerJSON(r) {
+  return r.text().then(function(t) {
+    var d;
+    try { d = JSON.parse(t); }
+    catch (e) { throw new Error('El script respondio: ' + String(t).replace(/<[^>]+>/g, ' ').slice(0, 120)); }
+    if (d && d.sesion)  { olvidarSesion(); mostrarLogin(); throw new Error('SESION'); }
+    if (d && d.permiso) { throw new Error(d.error || 'Eso es solo para los socios.'); }
+    return d;
+  });
+}
+
+function mostrarLogin() {
+  var box = document.getElementById('loginBox');
+  if (!box) return;
+  box.classList.add('open');
+  var sel = document.getElementById('lgUser');
+  if (sel && !sel.options.length) {
+    sel.innerHTML = '<option value="">Cargando...</option>';
+    fetch(SCRIPT_URL_SESION + '?action=quienes&t=' + Date.now())
+      .then(leerJSON)
+      .then(function(d) {
+        var us = (d && d.usuarios) || [];
+        sel.innerHTML = us.length
+          ? us.map(function(u) { return '<option>' + u.nombre.replace(/[<>&]/g, '') + '</option>'; }).join('')
+          : '<option value="">No hay usuarios configurados</option>';
+        var ult = '';
+        try { ult = localStorage.getItem('boparts_ultimo_usuario') || ''; } catch (e) {}
+        if (ult) sel.value = ult;
+        var pin = document.getElementById('lgPin'); if (pin) pin.focus();
+      })
+      .catch(function() { sel.innerHTML = '<option value="">Sin conexion con el script</option>'; });
+  }
+}
+
+function hacerLogin() {
+  var sel = document.getElementById('lgUser'), pin = document.getElementById('lgPin');
+  var btn = document.getElementById('lgBtn'), err = document.getElementById('lgErr');
+  var usuario = sel ? sel.value : '', clave = pin ? pin.value.trim() : '';
+  err.textContent = '';
+  if (!usuario) { err.textContent = 'Elige quien eres'; return; }
+  if (!clave)   { err.textContent = 'Escribe tu PIN'; pin.focus(); return; }
+  btn.disabled = true; btn.textContent = 'Entrando...';
+  fetch(SCRIPT_URL_SESION, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'},
+                            body:JSON.stringify({tipo:'login', usuario:usuario, pin:clave})})
+    .then(function(r) { return r.text(); })
+    .then(function(t) {
+      var d; try { d = JSON.parse(t); } catch (e) { throw new Error('El script no respondio bien'); }
+      if (!d.ok) throw new Error(d.error || 'No se pudo entrar');
+      guardarSesion({token:d.token, nombre:d.nombre, rol:d.rol, vence:Date.now() + 11.5 * 3600 * 1000});
+      try { localStorage.setItem('boparts_ultimo_usuario', d.nombre); } catch (e) {}
+      pin.value = '';
+      document.getElementById('loginBox').classList.remove('open');
+      btn.disabled = false; btn.textContent = 'Entrar';
+      if (typeof alEntrar === 'function') alEntrar();
+    })
+    .catch(function(e) {
+      btn.disabled = false; btn.textContent = 'Entrar';
+      err.textContent = e.message || 'No se pudo entrar';
+      pin.value = ''; pin.focus();
+    });
+}
+
+// Al abrir la pantalla: si el login esta activo y no hay sesion valida, se pide antes de cargar nada.
+// Si esta apagado, no se pide nada y todo sigue como hasta hoy.
+function revisarSesion(alTener) {
+  if (sesionActual()) { alTener(); return; }
+  fetch(SCRIPT_URL_SESION + '?action=quienes&t=' + Date.now())
+    .then(function(r) { return r.text(); })
+    .then(function(t) {
+      var d = {}; try { d = JSON.parse(t); } catch (e) {}
+      if (d && d.authActiva) mostrarLogin();
+      else alTener();
+    })
+    .catch(function() { alTener(); });   // sin respuesta, no se deja a nadie fuera de la tienda
+}
+
+// v10: la lista viene del script, no del CSV publicado. Asi LISTA DE PRODUCTOS puede dejar de estar publicada.
+const SCRIPT_URL_SESION = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
+const PROD_URL = SCRIPT_URL_SESION + '?action=productos';
 const EQUIV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRaAnGd-Bfaxo3LjUiGeV8p0F2weaKqHGwJ0hWibSMj02-h7dRAQPDMmGL5B8-XQg66Yjd3zgOAaz8X/pub?gid=1078159524&single=true&output=csv';
 
 let PRODUCTS = [];
@@ -278,7 +414,7 @@ function parseCSV(text) {
 }
 
 // v9: cache persistente. Se muestra lo guardado al instante y se actualiza por detras.
-var CACHE_KEY = 'boparts_csv_v9', EQUIV_KEY = 'boparts_equiv_v9';
+var CACHE_KEY = 'boparts_prod_v10', EQUIV_KEY = 'boparts_equiv_v9';
 
 // Pantalla de bienvenida: se queda al menos SPLASH_MIN ms y se va cuando la lista ya esta lista.
 // Si quieres que dure mas, sube este numero (3000 = 3 segundos).
@@ -309,10 +445,10 @@ function loadData(force) {
 
   // Las dos hojas se piden a la vez, pero la lista se muestra apenas llegan los PRODUCTOS:
   // las equivalencias solo sirven para buscar por codigo de otra marca y pueden llegar despues.
-  conTiempo(fetch(CSV_URL + '&t=' + Date.now()), 12000)
+  conTiempo(fetch(conToken(PROD_URL) + '&t=' + Date.now()), 12000)
     .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
     .then(function(text) {
-      if (!isValidCSV(text)) throw new Error('respuesta invalida de la hoja');
+      if (!isValidCSV(text)) throw new Error('respuesta invalida del script');
       guardarCache(CACHE_KEY, text);
       if (!mostrado || text !== cText) aplicarDatos(text, null);
       icon.classList.remove('spinning');
@@ -321,6 +457,7 @@ function loadData(force) {
     .catch(function(e) {
       icon.classList.remove('spinning');
       cerrarSplash();
+      if (e && e.message === 'SESION') return;          // ya se abrio el login
       if (!mostrado) showError(e.message);   // con cache: se queda con la ultima lista guardada
     });
 
@@ -355,9 +492,23 @@ function cargarEquivalencias(equivText) {
   }
 }
 
+// v10: el script responde JSON; el CSV se sigue entendiendo por si queda cache vieja en algun telefono.
+function filasDesde(text) {
+  var t = String(text || '').replace(/^\uFEFF/, '').trim();
+  if (t.charAt(0) === '{') {
+    var d = JSON.parse(t);
+    if (d.sesion)  { olvidarSesion(); mostrarLogin(); throw new Error('SESION'); }
+    if (!d.ok)     { throw new Error(d.error || 'el script no devolvio la lista'); }
+    // Dos filas delante para que los indices queden igual que en el CSV (los datos empiezan en 2)
+    var cab = [[ '', '', '', '', d.tasa || '' ], []];
+    return cab.concat(d.filas || []);
+  }
+  return parseCSV(text);
+}
+
 function aplicarDatos(text, equivText) {
   if (equivText) cargarEquivalencias(equivText);
-  var rows = parseCSV(text);
+  var rows = filasDesde(text);
   var tasaFromSheet = parseNum((rows[0] || [])[4]);
   if (tasaFromSheet && !localStorage.getItem('motoauto_tasa')) currentTasa = tasaFromSheet;
   updateTasaBadge();
@@ -592,7 +743,10 @@ document.getElementById('filters').addEventListener('click', e => {
 });
 
 updateTasaBadge();
-loadData();
+// v10: con el login encendido se pide la sesion antes de cargar; con el apagado arranca directo.
+// alEntrar() lo llama el modulo de sesion apenas el PIN es correcto.
+function alEntrar() { loadData(true); }
+revisarSesion(function() { loadData(); });
 sincronizarTasa();
 
 function shareProduct(idx) {
