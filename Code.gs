@@ -1,6 +1,10 @@
 /**
  * Repuesto BoParts — Code.gs
- * VERSION: v22 (2026-09-19) | el aliado es un cliente mas
+ * VERSION: v22.1 (2026-09-19) | el aliado es un cliente mas
+ *
+ * v22.1: las filas de notas de METODOS_PAGO aparecian como metodos de pago en la pantalla de venta. Un
+ *        metodo real tiene METODO y MONEDA; una nota solo tiene texto en la primera columna. Ahora se
+ *        exige lo primero, asi que cualquier fila suelta en esa hoja se ignora en vez de ensuciar la venta.
  *
  * v22 — LIQUIDACION DE ALIADOS. El aliado deja de ser una lista aparte y pasa a ser una fila de CLIENTES:
  *   CLIENTES gana tres columnas: J ALIADO (SI/NO), K COMISION_PCT, L NEGOCIO.
@@ -2296,10 +2300,16 @@ function metodosYAliados_(ss) {
   if (shM && shM.getLastRow() >= 2) {
     shM.getRange(2, 1, shM.getLastRow() - 1, 8).getValues().forEach(function(r) {
       var label = String(r[0] || '').trim();
+      var metodo = String(r[1] || '').trim();
+      var moneda = String(r[3] || '').trim().toUpperCase();
       if (!label) return;
+      // Un metodo de pago real tiene METODO y MONEDA. Una nota, un titulo o cualquier texto suelto que
+      // alguien deje en la hoja tiene solo la primera columna: se ignora en vez de salir en la venta.
+      if (!metodo) return;
+      if (moneda !== 'USD' && moneda !== 'BS') return;
+      if (label.length > 60) return;                        // una etiqueta no es un parrafo
       if (!siNo_(r[7], true)) return;                       // ACTIVO vacio = activo
-      metodos.push({label:label, metodo:String(r[1] || '').trim(), banco:String(r[2] || '').trim(),
-                    moneda:(String(r[3] || 'BS').trim().toUpperCase() === 'USD' ? 'USD' : 'BS'),
+      metodos.push({label:label, metodo:metodo, banco:String(r[2] || '').trim(), moneda:moneda,
                     fijo:Number(r[4]) || 0, pct:Number(r[5]) || 0, credito:siNo_(r[6], false)});
     });
   }
@@ -2313,7 +2323,8 @@ function metodosYAliados_(ss) {
     if (shA && shA.getLastRow() >= 2) {
       shA.getRange(2, 1, shA.getLastRow() - 1, 5).getValues().forEach(function(r) {
         var nom = String(r[1] || '').trim();
-        if (!nom || !siNo_(r[4], true)) return;
+        if (!nom || nom.length > 60 || !(Number(r[3]) > 0)) return;   // sin porcentaje no es un aliado
+        if (!siNo_(r[4], true)) return;
         aliados.push({id:String(r[0] || '').trim() || nom.toUpperCase(), nombre:nom,
                       negocio:String(r[2] || '').trim(), pct:Number(r[3]) || 0});
       });

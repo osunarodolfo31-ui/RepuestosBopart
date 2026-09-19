@@ -21,7 +21,7 @@ en el comentario del encabezado de cada HTML y en la cabecera de `Code.gs`.
 | boparts_devoluciones.html| v1.4   | **v21.5**            |
 | boparts_inventario.html | v1.4    | **v21.5**            |
 | boparts_reportes.html   | —       | **SE ELIMINA** (lo reemplazo gerencia) |
-| Code.gs (Apps Script)   | v22     | —                    |
+| Code.gs (Apps Script)   | v22.1   | —                    |
 
 Deployment ID (no cambia): `AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg`
 
@@ -61,6 +61,20 @@ una URL pública — ya no lo hacen. Piden `action=clientes` y `action=productos
 
 Con esto, las hojas que faltan por migrar son **LISTA DE PRODUCTOS** (compras, fotos, devoluciones) y
 **CATALOGO_PROVEEDORES** (demanda).
+
+## v22.1 — 2026-09-19 · Las notas de la hoja salían como métodos de pago
+El archivo que se pasó para llenar `METODOS_PAGO` traía las explicaciones de cada columna **en la misma hoja**,
+debajo de los datos. Al pegarlo completo, esas filas quedaron con texto en la columna LABEL, y el lector las
+tomaba por métodos: en la pantalla de venta aparecían *"Estos son EXACTAMENTE los métodos…"* y
+*"PCT comisión porcentual…"* como si fueran formas de pago.
+
+Un método de pago real tiene **METODO y MONEDA**. Una nota solo tiene texto en la primera columna. Ahora se
+exigen los dos, así que cualquier fila suelta en esa hoja se ignora en vez de ensuciar la venta. También se
+descartan las etiquetas de más de 60 caracteres y las monedas que no sean USD o BS.
+
+Mismo criterio en el respaldo de `ALIADOS`: sin porcentaje no es un aliado.
+
+Conviene borrar igual esas filas de la hoja, aunque ya no molesten.
 
 ## gerencia v2.6 / ventas v14.2 — 2026-09-19 · Liquidación de aliados (parte 2: pantallas)
 
