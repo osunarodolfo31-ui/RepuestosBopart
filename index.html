@@ -1,7 +1,9 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — index.html
-  VERSION: v10.2 (2026-09-18) — requiere Apps Script v21.4
+  VERSION: v10.3 (2026-09-18) | requiere Apps Script v21.5
+  v10.3: el token se agrega en un solo lugar (se envuelve fetch), asi tambien viaja en action=config.
+         Antes la tasa no cargaba con el login encendido.
   v10.2: el menu muestra que version de la app y del script estan corriendo de verdad. Sin eso, un archivo
          sin subir o una cache vieja se confunden con un error del codigo.
   v10.1: toda celda que llega del script se convierte a texto antes de usarla. La hoja entrega numeros y
@@ -316,11 +318,37 @@ function leerJSON(r) {
   return r.text().then(function(t) {
     var d;
     try { d = JSON.parse(t); }
-    catch (e) { throw new Error('El script respondio: ' + String(t).replace(/<[^>]+>/g, ' ').slice(0, 120)); }
+    catch (e) {
+      var limpio = String(t).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
+      throw new Error('El script no devolvio datos' + (limpio ? ': ' + limpio : '') +
+                      '. Revisa que Apps Script este desplegado como Nueva version.');
+    }
     if (d && d.sesion)  { olvidarSesion(); mostrarLogin(); throw new Error('SESION'); }
     if (d && d.permiso) { throw new Error(d.error || 'Eso es solo para los socios.'); }
     return d;
   });
+}
+
+
+/* Con sesion activa, los desplegables de "quien hace esto" se fijan en quien entro y se bloquean.
+   Regla: solo se toca un desplegable que YA ofrece ese nombre. Asi el de "Autoriza" de devoluciones,
+   que solo lista a los socios, no se fuerza con un vendedor que no puede autorizar. */
+function fijarPersonaDeSesion() {
+  var nom = miNombre();
+  if (!nom) return;
+  var sels = document.getElementsByTagName('select');
+  for (var i = 0; i < sels.length; i++) {
+    var sel = sels[i];
+    if (sel.disabled) continue;
+    for (var j = 0; j < sel.options.length; j++) {
+      if (String(sel.options[j].text).trim() !== nom) continue;
+      sel.value = sel.options[j].value || sel.options[j].text;
+      sel.disabled = true;
+      sel.style.opacity = '0.75';
+      sel.title = 'Registrado a nombre de quien inicio sesion';
+      break;
+    }
+  }
 }
 
 function mostrarLogin() {
@@ -366,6 +394,8 @@ function hacerLogin() {
       document.getElementById('loginBox').classList.remove('open');
       btn.disabled = false; btn.textContent = 'Entrar';
       if (typeof alEntrar === 'function') alEntrar();
+      fijarPersonaDeSesion();
+      setTimeout(fijarPersonaDeSesion, 800);   // por si la pantalla dibuja sus desplegables despues
     })
     .catch(function(e) {
       btn.disabled = false; btn.textContent = 'Entrar';
@@ -377,7 +407,12 @@ function hacerLogin() {
 // Al abrir la pantalla: si el login esta activo y no hay sesion valida, se pide antes de cargar nada.
 // Si esta apagado, no se pide nada y todo sigue como hasta hoy.
 function revisarSesion(alTener) {
-  if (sesionActual()) { alTener(); return; }
+  if (sesionActual()) {
+    alTener();
+    fijarPersonaDeSesion();
+    setTimeout(fijarPersonaDeSesion, 800);
+    return;
+  }
   fetch(SCRIPT_URL_SESION + '?action=quienes&t=' + Date.now())
     .then(function(r) { return r.text(); })
     .then(function(t) {
@@ -388,9 +423,39 @@ function revisarSesion(alTener) {
     .catch(function() { alTener(); });   // sin respuesta, no se deja a nadie fuera de la tienda
 }
 
+/* El token se agrega en un solo lugar: se envuelve fetch y se le pone a TODA llamada al script,
+   sea GET o POST. Asi no hay forma de olvidarlo en una pantalla con veinte llamadas.
+   Solo toca las URL del script: Cloudinary y los CSV que queden pasan intactos. */
+(function() {
+  if (window.__tokenEnFetch) return;
+  window.__tokenEnFetch = true;
+  var original = window.fetch.bind(window);
+  window.fetch = function(u, o) {
+    try {
+      // SCRIPT_URL_SESION se lee AQUI, no al instalar: cuando este modulo corre todavia no esta asignada.
+      if (typeof u === 'string' && u.indexOf(SCRIPT_URL_SESION) === 0) {
+        var t = miToken();
+        if (t) {
+          if (o && o.body && String(o.method || '').toUpperCase() === 'POST') {
+            var b = JSON.parse(o.body);
+            if (b && typeof b === 'object' && b.token === undefined) {
+              b.token = t;
+              var o2 = {}; for (var k in o) o2[k] = o[k];
+              o2.body = JSON.stringify(b); o = o2;
+            }
+          } else if (u.indexOf('token=') < 0) {
+            u += (u.indexOf('?') < 0 ? '?' : '&') + 'token=' + encodeURIComponent(t);
+          }
+        }
+      }
+    } catch (e) {}
+    return original(u, o);
+  };
+})();
+
 // v10: la lista viene del script, no del CSV publicado. Asi LISTA DE PRODUCTOS puede dejar de estar publicada.
 const SCRIPT_URL_SESION = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
-const APP_VERSION = 'v10.2';
+const APP_VERSION = 'v10.3';
 var VER_SCRIPT = '?';
 function sellarVersion(d) {
   if (d && d.v) VER_SCRIPT = d.v;
@@ -825,7 +890,7 @@ function marcarSlide(idx, slide) {
 <div class="nav-overlay" id="navOverlay" onclick="closeNav()"></div>
 <div class="nav-panel" id="navPanel">
   <div class="nav-panel-title">🔧 Repuesto BoParts</div>
-  <div id="verTag" style="font-size:10px;color:var(--ink-muted);margin:-8px 0 10px;letter-spacing:0.3px">app v10.2 · script ?</div>
+  <div id="verTag" style="font-size:10px;color:var(--ink-muted);margin:-8px 0 10px;letter-spacing:0.3px">app v10.3 · script ?</div>
   <div class="nav-grid">
     <a class="nav-card cur" href="index.html">
       <span class="nav-icon">📋</span>

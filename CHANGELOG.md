@@ -9,19 +9,19 @@ en el comentario del encabezado de cada HTML y en la cabecera de `Code.gs`.
 
 | Archivo                 | Versión | Requiere Apps Script |
 |-------------------------|---------|----------------------|
-| index.html              | v10.2   | **v21.4**            |
-| boparts_ventas.html     | v14.1   | **v21.4**            |
-| boparts_cobros.html     | v2.5    | **v20**              |
-| boparts_compras.html    | v2.4    | **v20**              |
-| boparts_gastos.html     | v1.6    | **v20**              |
-| boparts_fotos.html      | v8.3    | **v11.5**            |
-| boparts_demanda.html    | v8.5    | v7 o superior        |
-| boparts_gerencia.html   | v2.3    | **v20**              |
-| boparts_apartados.html  | v1.5    | **v21.4**            |
-| boparts_devoluciones.html| v1.3   | **v20**              |
-| boparts_inventario.html | v1.3    | **v20**              |
-| boparts_reportes.html   | v8      | ninguno (lo reemplaza gerencia) |
-| Code.gs (Apps Script)   | v21.4   | —                    |
+| index.html              | v10.3   | **v21.5**            |
+| boparts_ventas.html     | v14.1   | **v21.5**            |
+| boparts_cobros.html     | v2.6    | **v21.5**            |
+| boparts_compras.html    | v2.5    | **v21.5**            |
+| boparts_gastos.html     | v1.7    | **v21.5**            |
+| boparts_fotos.html      | v9      | **v21.5**            |
+| boparts_demanda.html    | v8.6    | **v21.5**            |
+| boparts_gerencia.html   | v2.4    | **v21.5**            |
+| boparts_apartados.html  | v1.5    | **v21.5**            |
+| boparts_devoluciones.html| v1.4   | **v21.5**            |
+| boparts_inventario.html | v1.4    | **v21.5**            |
+| boparts_reportes.html   | —       | **SE ELIMINA** (lo reemplazo gerencia) |
+| Code.gs (Apps Script)   | v21.5   | —                    |
 
 Deployment ID (no cambia): `AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg`
 
@@ -61,6 +61,37 @@ una URL pública — ya no lo hacen. Piden `action=clientes` y `action=productos
 
 Con esto, las hojas que faltan por migrar son **LISTA DE PRODUCTOS** (compras, fotos, devoluciones) y
 **CATALOGO_PROVEEDORES** (demanda).
+
+## Bloque D, parte 2 completa — 2026-09-18 · Ninguna pantalla depende ya de una hoja publicada
+**Code.gs v21.5** + las once pantallas.
+
+Con esta tanda, **ningún HTML lee un CSV publicado**, salvo EQUIVALENCIAS en la lista de precios, que no
+tiene nada sensible y sirve de respaldo si el script no responde.
+
+| Pantalla | Qué cambió |
+|---|---|
+| index v10.3 | el token también viaja en `action=config`; antes la tasa no cargaba con el login encendido |
+| compras v2.5 | productos por `action=productos` |
+| devoluciones v1.4 | productos por `action=productos` |
+| demanda v8.6 | catálogo de proveedores por `action=catalogo` |
+| fotos v9 | productos por `action=productos`, y **la fila la dice el script** |
+| gastos v1.7 · cobros v2.6 · inventario v1.4 | no leían CSV; se les agregó el login |
+| gerencia v2.4 | con el login encendido, un socio que ya entró **no tiene que meter dos claves** |
+
+**Lo de fotos merece una nota.** Calculaba la fila de cada producto contando filas del CSV. La respuesta del
+script omite las filas sin producto, así que esa cuenta se habría corrido y una foto podía caer en otro
+producto. Ahora `action=productos` devuelve el número de fila real y la app no adivina nada.
+**Requiere el script v21.5**: con el v21.4, fotos guardaría en la fila equivocada.
+
+**Gerencia y las dos puertas.** Tenía su propio PIN en el navegador. Con el login encendido, un socio que ya
+inició sesión entra directo; a un vendedor que se meta por la URL, el servidor le niega cada dato igual, que
+es donde debe negarse. Con el login apagado, ese PIN sigue siendo la única puerta y se pide como siempre.
+
+Pendiente para cerrar el bloque D:
+1. Borrar `boparts_reportes.html` del repo — es el único que todavía lee el CSV de VENTAS.
+2. Despublicar LISTA DE PRODUCTOS, CLIENTES, CATALOGO_PROVEEDORES, VENTAS, CONFIG, METODOS_PAGO, ALIADOS
+   y DEMANDA_NO_ATENDIDA. Queda publicada solo EQUIVALENCIAS.
+3. Poner `CONFIG!B15 = SI` y probar con los tres usuarios.
 
 ## v21.4 / index v10.2 — 2026-09-18 · Saber qué versión está corriendo
 Dos veces esta noche un error se vio igual que un fallo de código cuando en realidad era un archivo sin subir

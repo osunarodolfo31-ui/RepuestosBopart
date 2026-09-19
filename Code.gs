@@ -1,6 +1,10 @@
 /**
  * Repuesto BoParts — Code.gs
- * VERSION: v21.4 (2026-09-18) | compatible con TODAS las pantallas actuales mientras CONFIG!B15 = NO
+ * VERSION: v21.5 (2026-09-18) | compatible con TODAS las pantallas actuales mientras CONFIG!B15 = NO
+ *
+ * v21.5: cada fila de action=productos lleva al final su NUMERO DE FILA real en la hoja. boparts_fotos.html
+ *        la calculaba contando filas del CSV; como esta respuesta omite las filas sin producto, esa cuenta
+ *        se habria corrido y una foto podia caer en otro producto.
  *
  * v21.4: cada respuesta del script incluye su version (campo "v"). Asi, cuando una pantalla falla, se sabe en
  *        un vistazo si el script desplegado es el que corresponde o quedo uno viejo. Es el error mas comun al
@@ -2029,6 +2033,7 @@ function listaProductos_(ss, conCosto) {
     var f = [];
     for (var c = 0; c < 14; c++) f.push(comoTexto_(r[c]));
     if (!conCosto) { f[COL_COSTO - 1] = ''; f[COL_DESC - 1] = ''; f[COL_COSTO_FINAL - 1] = ''; }
+    f[14] = i + 3;     // fila real en la hoja (los datos empiezan en la 3). La usa boparts_fotos.html.
     filas.push(f);
   }
   return {ok:true, tasa:leerTasa_(ss), conCosto:!!conCosto, filas:filas};

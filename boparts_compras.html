@@ -1,7 +1,9 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_compras.html
-  VERSION: v2.4 (2026-09-18) — cada foto de factura sube con nombre unico (antes todas se sobreescribian)
+  VERSION: v2.5 (2026-09-18) | requiere Apps Script v21.4
+  v2.5: la lista de productos se pide al script (action=productos) en vez del CSV publicado; login incluido.
+  v2.4: cada foto de factura sube con nombre unico (antes todas se sobreescribian)
   VERSION anterior: v2.3 (2026-09-17) | requiere Apps Script v20
   v2.3: cambiar un costo o precio ya no reinicia la condicion de pago, los dias ni quien costea; si la compra ya
         estaba costeada, el script lo rechaza y la app lo avisa en vez de duplicar la deuda
@@ -30,6 +32,26 @@
   --green:#22C55E;--red:#EF4444;
   --radius:14px;--radius-sm:8px;
 }
+  /* ===== LOGIN (bloque D) — identico en todas las pantallas ===== */
+  .login{display:none;position:fixed;inset:0;background:var(--bg);z-index:900;align-items:center;justify-content:center;padding:24px}
+  .login.open{display:flex}
+  .logincard{width:100%;max-width:340px;text-align:center}
+  .loginlogo{font-size:24px;font-weight:800;letter-spacing:-0.5px;margin-bottom:4px}
+  .loginlogo span{color:var(--brand)}
+  .loginsub{font-size:13px;color:var(--ink-muted);margin-bottom:26px}
+  .login .lgf{text-align:left;margin-bottom:14px}
+  .login label{display:block;font-size:11px;color:var(--ink-soft);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px}
+  .login select,.login input{width:100%;padding:13px;border-radius:var(--radius-sm);border:1.5px solid var(--border);
+    background:var(--card);color:var(--ink);font-size:16px;font-family:inherit;box-sizing:border-box}
+  .login input{letter-spacing:6px;text-align:center}
+  .login select:focus,.login input:focus{outline:none;border-color:var(--brand)}
+  .lgbtn{width:100%;padding:14px;border:none;border-radius:var(--radius-sm);background:var(--brand);color:#111;
+    font-size:15px;font-weight:700;font-family:inherit;cursor:pointer;margin-top:6px}
+  .lgbtn:disabled{opacity:0.5}
+  .lgerr{min-height:18px;font-size:13px;color:#FF6B6B;margin-top:12px}
+  .lgquien{font-size:11px;color:var(--ink-muted);margin-top:22px}
+  .lgquien b{color:var(--ink-soft);font-weight:600}
+
 html,body{min-height:100%;background:var(--bg);font-family:'Inter',sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased}
 header{background:var(--bg2);border-bottom:2px solid var(--brand);padding:12px 16px;display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:50}
 .logo{height:34px;width:auto}
@@ -185,6 +207,17 @@ select option{background:#1E1E1E;color:var(--ink)}
 </style>
 </head>
 <body>
+<!-- ===== LOGIN (bloque D) ===== -->
+<div class="login" id="loginBox">
+  <div class="logincard">
+    <div class="loginlogo">Repuesto <span>BoParts</span></div>
+    <div class="loginsub">Entra con tu PIN para continuar</div>
+    <div class="lgf"><label>Quien eres</label><select id="lgUser"></select></div>
+    <div class="lgf"><label>Tu PIN</label><input type="password" id="lgPin" inputmode="numeric" autocomplete="off" placeholder="····"></div>
+    <button class="lgbtn" id="lgBtn" onclick="hacerLogin()">Entrar</button>
+    <div class="lgerr" id="lgErr"></div>
+  </div>
+</div>
 
 <header>
   <img src="logo-header.png" alt="BoParts" class="logo">
@@ -294,6 +327,7 @@ select option{background:#1E1E1E;color:var(--ink)}
 <div class="nav-ov" id="navOv" onclick="closeNav()"></div>
 <div class="nav-pan" id="navPan">
   <div class="nav-t">Repuesto BoParts</div>
+  <div id="verTag" style="font-size:10px;color:var(--ink-muted);margin:-6px 0 10px;letter-spacing:0.3px">app v2.5 · script ?</div>
   <div class="nav-g">
     <a class="ncard" href="index.html">
       <span class="nicon">📋</span>
@@ -354,27 +388,207 @@ select option{background:#1E1E1E;color:var(--ink)}
 </div>
 
 <script>
-var CSV_URL    = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRaAnGd-Bfaxo3LjUiGeV8p0F2weaKqHGwJ0hWibSMj02-h7dRAQPDMmGL5B8-XQg66Yjd3zgOAaz8X/pub?gid=2100998338&single=true&output=csv';
+/* ===================== SESION (bloque D) — identico en todas las pantallas =====================
+   Mientras CONFIG!B15 sea NO, nada de esto se activa y la pantalla funciona como siempre.       */
+var SES_KEY = 'boparts_sesion';
+function sesionActual() {
+  try {
+    var s = JSON.parse(localStorage.getItem(SES_KEY) || 'null');
+    if (s && s.token && s.vence > Date.now()) return s;
+  } catch (e) {}
+  return null;
+}
+function guardarSesion(s) { try { localStorage.setItem(SES_KEY, JSON.stringify(s)); } catch (e) {} }
+function olvidarSesion()  { try { localStorage.removeItem(SES_KEY); } catch (e) {} }
+function miToken()  { var s = sesionActual(); return s ? s.token  : ''; }
+function miNombre() { var s = sesionActual(); return s ? s.nombre : ''; }
+function soySocio() { var s = sesionActual(); return !!s && s.rol === 'SOCIO'; }
+
+// Agrega el token a una URL del script. Sin sesion la deja igual: con el login apagado el script no lo pide.
+function conToken(url) {
+  var t = miToken();
+  if (!t) return url;
+  return url + (url.indexOf('?') < 0 ? '?' : '&') + 'token=' + encodeURIComponent(t);
+}
+
+// Lee la respuesta del script. Si la sesion vencio, manda al login en vez de mostrar un error tecnico.
+function leerJSON(r) {
+  return r.text().then(function(t) {
+    var d;
+    try { d = JSON.parse(t); }
+    catch (e) {
+      var limpio = String(t).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
+      throw new Error('El script no devolvio datos' + (limpio ? ': ' + limpio : '') +
+                      '. Revisa que Apps Script este desplegado como Nueva version.');
+    }
+    if (d && d.sesion)  { olvidarSesion(); mostrarLogin(); throw new Error('SESION'); }
+    if (d && d.permiso) { throw new Error(d.error || 'Eso es solo para los socios.'); }
+    return d;
+  });
+}
+
+
+/* Con sesion activa, los desplegables de "quien hace esto" se fijan en quien entro y se bloquean.
+   Regla: solo se toca un desplegable que YA ofrece ese nombre. Asi el de "Autoriza" de devoluciones,
+   que solo lista a los socios, no se fuerza con un vendedor que no puede autorizar. */
+function fijarPersonaDeSesion() {
+  var nom = miNombre();
+  if (!nom) return;
+  var sels = document.getElementsByTagName('select');
+  for (var i = 0; i < sels.length; i++) {
+    var sel = sels[i];
+    if (sel.disabled) continue;
+    for (var j = 0; j < sel.options.length; j++) {
+      if (String(sel.options[j].text).trim() !== nom) continue;
+      sel.value = sel.options[j].value || sel.options[j].text;
+      sel.disabled = true;
+      sel.style.opacity = '0.75';
+      sel.title = 'Registrado a nombre de quien inicio sesion';
+      break;
+    }
+  }
+}
+
+function mostrarLogin() {
+  var box = document.getElementById('loginBox');
+  if (!box) return;
+  box.classList.add('open');
+  var sel = document.getElementById('lgUser');
+  if (sel && !sel.options.length) {
+    sel.innerHTML = '<option value="">Cargando...</option>';
+    fetch(SCRIPT_URL_SESION + '?action=quienes&t=' + Date.now())
+      .then(leerJSON)
+      .then(function(d) {
+        var us = (d && d.usuarios) || [];
+        sel.innerHTML = us.length
+          ? us.map(function(u) { return '<option>' + u.nombre.replace(/[<>&]/g, '') + '</option>'; }).join('')
+          : '<option value="">No hay usuarios configurados</option>';
+        var ult = '';
+        try { ult = localStorage.getItem('boparts_ultimo_usuario') || ''; } catch (e) {}
+        if (ult) sel.value = ult;
+        var pin = document.getElementById('lgPin'); if (pin) pin.focus();
+      })
+      .catch(function() { sel.innerHTML = '<option value="">Sin conexion con el script</option>'; });
+  }
+}
+
+function hacerLogin() {
+  var sel = document.getElementById('lgUser'), pin = document.getElementById('lgPin');
+  var btn = document.getElementById('lgBtn'), err = document.getElementById('lgErr');
+  var usuario = sel ? sel.value : '', clave = pin ? pin.value.trim() : '';
+  err.textContent = '';
+  if (!usuario) { err.textContent = 'Elige quien eres'; return; }
+  if (!clave)   { err.textContent = 'Escribe tu PIN'; pin.focus(); return; }
+  btn.disabled = true; btn.textContent = 'Entrando...';
+  fetch(SCRIPT_URL_SESION, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'},
+                            body:JSON.stringify({tipo:'login', usuario:usuario, pin:clave})})
+    .then(function(r) { return r.text(); })
+    .then(function(t) {
+      var d; try { d = JSON.parse(t); } catch (e) { throw new Error('El script no respondio bien'); }
+      if (!d.ok) throw new Error(d.error || 'No se pudo entrar');
+      guardarSesion({token:d.token, nombre:d.nombre, rol:d.rol, vence:Date.now() + 11.5 * 3600 * 1000});
+      try { localStorage.setItem('boparts_ultimo_usuario', d.nombre); } catch (e) {}
+      pin.value = '';
+      document.getElementById('loginBox').classList.remove('open');
+      btn.disabled = false; btn.textContent = 'Entrar';
+      if (typeof alEntrar === 'function') alEntrar();
+      fijarPersonaDeSesion();
+      setTimeout(fijarPersonaDeSesion, 800);   // por si la pantalla dibuja sus desplegables despues
+    })
+    .catch(function(e) {
+      btn.disabled = false; btn.textContent = 'Entrar';
+      err.textContent = e.message || 'No se pudo entrar';
+      pin.value = ''; pin.focus();
+    });
+}
+
+// Al abrir la pantalla: si el login esta activo y no hay sesion valida, se pide antes de cargar nada.
+// Si esta apagado, no se pide nada y todo sigue como hasta hoy.
+function revisarSesion(alTener) {
+  if (sesionActual()) {
+    alTener();
+    fijarPersonaDeSesion();
+    setTimeout(fijarPersonaDeSesion, 800);
+    return;
+  }
+  fetch(SCRIPT_URL_SESION + '?action=quienes&t=' + Date.now())
+    .then(function(r) { return r.text(); })
+    .then(function(t) {
+      var d = {}; try { d = JSON.parse(t); } catch (e) {}
+      if (d && d.authActiva) mostrarLogin();
+      else alTener();
+    })
+    .catch(function() { alTener(); });   // sin respuesta, no se deja a nadie fuera de la tienda
+}
+
+/* El token se agrega en un solo lugar: se envuelve fetch y se le pone a TODA llamada al script,
+   sea GET o POST. Asi no hay forma de olvidarlo en una pantalla con veinte llamadas.
+   Solo toca las URL del script: Cloudinary y los CSV que queden pasan intactos. */
+(function() {
+  if (window.__tokenEnFetch) return;
+  window.__tokenEnFetch = true;
+  var original = window.fetch.bind(window);
+  window.fetch = function(u, o) {
+    try {
+      // SCRIPT_URL_SESION se lee AQUI, no al instalar: cuando este modulo corre todavia no esta asignada.
+      if (typeof u === 'string' && u.indexOf(SCRIPT_URL_SESION) === 0) {
+        var t = miToken();
+        if (t) {
+          if (o && o.body && String(o.method || '').toUpperCase() === 'POST') {
+            var b = JSON.parse(o.body);
+            if (b && typeof b === 'object' && b.token === undefined) {
+              b.token = t;
+              var o2 = {}; for (var k in o) o2[k] = o[k];
+              o2.body = JSON.stringify(b); o = o2;
+            }
+          } else if (u.indexOf('token=') < 0) {
+            u += (u.indexOf('?') < 0 ? '?' : '&') + 'token=' + encodeURIComponent(t);
+          }
+        }
+      }
+    } catch (e) {}
+    return original(u, o);
+  };
+})();
+
 var SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
+var SCRIPT_URL_SESION = SCRIPT_URL;
+var VER_SCRIPT = '?';
+function sellarVersion(d) {
+  if (d && d.v) VER_SCRIPT = d.v;
+  var t = document.getElementById('verTag');
+  if (t) t.textContent = 'app ' + APP_VERSION + ' \u00b7 script ' + VER_SCRIPT;
+  return d;
+}
+function txt_(v) { return v == null ? '' : String(v); }
 var CLOUD = 'c7jufi9v', PRESET = 'boparts_productos';
-var APP_VERSION = 'v2.4';
+var APP_VERSION = 'v2.5';
 
 var PRODUCTS = [], PROVEEDORES = [], lineas = [], provSel = null, fotoUrl = '';
 document.getElementById('fechaHdr').textContent = APP_VERSION + ' · ' + new Date().toLocaleDateString('es-VE', {weekday:'long', day:'numeric', month:'long'});
 
-// ---- productos (CSV publicado) ----
-fetch(CSV_URL + '&t=' + Date.now()).then(function(r) { return r.text(); }).then(function(txt) {
-  if (!isValidCSV(txt)) return;
-  var rows = parseCSV(txt), cats = {}, marcas = {};
-  for (var i = 2; i < rows.length; i++) {
-    var r = rows[i]; var prod = (r[2] || '').trim(); if (!prod) continue;
-    PRODUCTS.push({codigo:(r[0]||'').trim(), marca:(r[1]||'').trim(), producto:prod, categoria:(r[3]||'').trim()});
-    if (r[3]) cats[r[3].trim()] = 1;
-    if (r[1]) marcas[r[1].trim().toUpperCase()] = 1;
-  }
-  document.getElementById('catList').innerHTML = Object.keys(cats).sort().map(function(c) { return '<option value="' + escHtml(c) + '">'; }).join('');
-  document.getElementById('marcaList').innerHTML = Object.keys(marcas).sort().map(function(c) { return '<option value="' + escHtml(c) + '">'; }).join('');
-}).catch(function() { toast('No cargo la lista de productos', 'err'); });
+// ---- productos (v2.5: por el script, para poder despublicar LISTA DE PRODUCTOS) ----
+function cargarProductos() {
+  fetch(SCRIPT_URL + '?action=productos&t=' + Date.now()).then(leerJSON).then(function(d) {
+    sellarVersion(d);
+    if (!d || !d.ok) throw new Error(d && d.error ? d.error : 'sin lista');
+    PRODUCTS.length = 0;
+    var cats = {}, marcas = {};
+    (d.filas || []).forEach(function(r) {
+      var prod = txt_(r[2]).trim(); if (!prod) return;
+      PRODUCTS.push({codigo:txt_(r[0]).trim(), marca:txt_(r[1]).trim(), producto:prod, categoria:txt_(r[3]).trim()});
+      if (txt_(r[3]).trim()) cats[txt_(r[3]).trim()] = 1;
+      if (txt_(r[1]).trim()) marcas[txt_(r[1]).trim().toUpperCase()] = 1;
+    });
+    document.getElementById('catList').innerHTML = Object.keys(cats).sort().map(function(c) { return '<option value="' + escHtml(c) + '">'; }).join('');
+    document.getElementById('marcaList').innerHTML = Object.keys(marcas).sort().map(function(c) { return '<option value="' + escHtml(c) + '">'; }).join('');
+  }).catch(function(e) {
+    if (e && e.message === 'SESION') return;
+    toast('No cargo la lista de productos', 'err');
+  });
+}
+function alEntrar() { cargarProductos(); }
+revisarSesion(cargarProductos);
 
 // ---- proveedores (via Apps Script; la hoja no esta publicada) ----
 try { PROVEEDORES = JSON.parse(localStorage.getItem('boparts_proveedores') || '[]'); } catch (e) {}
