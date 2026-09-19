@@ -10,14 +10,14 @@ en el comentario del encabezado de cada HTML y en la cabecera de `Code.gs`.
 | Archivo                 | Versión | Requiere Apps Script |
 |-------------------------|---------|----------------------|
 | index.html              | v10.2   | **v21.4**            |
-| boparts_ventas.html     | v13.3   | **v20**              |
+| boparts_ventas.html     | v14     | **v21.4**            |
 | boparts_cobros.html     | v2.5    | **v20**              |
 | boparts_compras.html    | v2.4    | **v20**              |
 | boparts_gastos.html     | v1.6    | **v20**              |
 | boparts_fotos.html      | v8.3    | **v11.5**            |
 | boparts_demanda.html    | v8.5    | v7 o superior        |
 | boparts_gerencia.html   | v2.3    | **v20**              |
-| boparts_apartados.html  | v1.3    | **v20**              |
+| boparts_apartados.html  | v1.4    | **v21.4**            |
 | boparts_devoluciones.html| v1.3   | **v20**              |
 | boparts_inventario.html | v1.3    | **v20**              |
 | boparts_reportes.html   | v8      | ninguno (lo reemplaza gerencia) |
@@ -30,6 +30,26 @@ Para volver atrás:
 - Apps Script: Implementar → Administrar implementaciones → lápiz → elegir la versión anterior → Implementar.
 
 ---
+
+## ventas v14 / apartados v1.4 — 2026-09-18 · Bloque D, parte 2 (2 de 3): se va el CSV de CLIENTES
+**boparts_ventas.html v14 · boparts_apartados.html v1.4** — requieren Apps Script v21.4
+
+Las dos pantallas que leían el CSV publicado de **CLIENTES** — cédulas y teléfonos de todos los clientes en
+una URL pública — ya no lo hacen. Piden `action=clientes` y `action=productos` al script.
+
+- **El token se agrega en un solo lugar.** Se envuelve `fetch` y se le pone a toda llamada al script, GET o
+  POST. En una pantalla con veinte llamadas no hay forma de olvidarlo en una.
+- **Con sesión activa, el vendedor es quien inició sesión.** En `ventas.html` el selector se fija y se bloquea.
+  Hasta ahora cualquiera podía registrar una venta a nombre de Reinaldo cambiando un desplegable, y eso
+  contamina las comisiones y el reporte por vendedor. El servidor también lo impone.
+- El costo se sigue leyendo para la línea de venta cuando quien vende es socio; cuando es vendedor, no viaja
+  al teléfono y lo pone el servidor al guardar (v21).
+- Ambas muestran `app · script` en el menú.
+- `ventas.html` guarda la lista en el teléfono (`boparts_prod_v14`), así que se puede seguir vendiendo
+  mientras el script tarda.
+
+Con esto, las hojas que faltan por migrar son **LISTA DE PRODUCTOS** (compras, fotos, devoluciones) y
+**CATALOGO_PROVEEDORES** (demanda).
 
 ## v21.4 / index v10.2 — 2026-09-18 · Saber qué versión está corriendo
 Dos veces esta noche un error se vio igual que un fallo de código cuando en realidad era un archivo sin subir

@@ -1,7 +1,11 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_ventas.html
-  VERSION: v13.3 (2026-09-17) | requiere Apps Script v20
+  VERSION: v14 (2026-09-18) | requiere Apps Script v21.4
+  v14: ni la lista de productos ni la de clientes se leen ya de un CSV publicado. Todo pasa por el script
+       (action=productos, action=clientes), lo que permite despublicar LISTA DE PRODUCTOS y CLIENTES.
+       Incluye la pantalla de login; solo aparece cuando CONFIG!B15 = SI. Con sesion activa, el vendedor
+       es quien inicio sesion: el selector deja de poder registrar ventas a nombre de otro.
   v13.3: el ID de la venta se conserva mientras no cambie el carrito, asi un reintento no crea otra venta;
          la factura queda guardada en la venta (numero y control) y reimprimir no consume numeracion nueva
   v13.1: interruptor "Facturar": encendido agrega el IVA y habilita la factura fiscal; apagado la venta va sin IVA
@@ -50,6 +54,26 @@
   --green:#22C55E;--red:#EF4444;
   --radius:14px;--radius-sm:8px;
 }
+  /* ===== LOGIN (bloque D) — identico en todas las pantallas ===== */
+  .login{display:none;position:fixed;inset:0;background:var(--bg);z-index:900;align-items:center;justify-content:center;padding:24px}
+  .login.open{display:flex}
+  .logincard{width:100%;max-width:340px;text-align:center}
+  .loginlogo{font-size:24px;font-weight:800;letter-spacing:-0.5px;margin-bottom:4px}
+  .loginlogo span{color:var(--brand)}
+  .loginsub{font-size:13px;color:var(--ink-muted);margin-bottom:26px}
+  .login .lgf{text-align:left;margin-bottom:14px}
+  .login label{display:block;font-size:11px;color:var(--ink-soft);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px}
+  .login select,.login input{width:100%;padding:13px;border-radius:var(--radius-sm);border:1.5px solid var(--border);
+    background:var(--card);color:var(--ink);font-size:16px;font-family:inherit;box-sizing:border-box}
+  .login input{letter-spacing:6px;text-align:center}
+  .login select:focus,.login input:focus{outline:none;border-color:var(--brand)}
+  .lgbtn{width:100%;padding:14px;border:none;border-radius:var(--radius-sm);background:var(--brand);color:#111;
+    font-size:15px;font-weight:700;font-family:inherit;cursor:pointer;margin-top:6px}
+  .lgbtn:disabled{opacity:0.5}
+  .lgerr{min-height:18px;font-size:13px;color:#FF6B6B;margin-top:12px}
+  .lgquien{font-size:11px;color:var(--ink-muted);margin-top:22px}
+  .lgquien b{color:var(--ink-soft);font-weight:600}
+
 html,body{min-height:100%;background:var(--bg);font-family:'Inter',sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased}
 header{background:var(--bg2);border-bottom:2px solid var(--brand);padding:12px 16px;display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:50}
 .logo{height:34px;width:auto}
@@ -184,6 +208,17 @@ select option{background:#1E1E1E;color:var(--ink)}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 </head>
 <body>
+<!-- ===== LOGIN (bloque D) ===== -->
+<div class="login" id="loginBox">
+  <div class="logincard">
+    <div class="loginlogo">Repuesto <span>BoParts</span></div>
+    <div class="loginsub">Entra con tu PIN para continuar</div>
+    <div class="lgf"><label>Quien eres</label><select id="lgUser"></select></div>
+    <div class="lgf"><label>Tu PIN</label><input type="password" id="lgPin" inputmode="numeric" autocomplete="off" placeholder="····"></div>
+    <button class="lgbtn" id="lgBtn" onclick="hacerLogin()">Entrar</button>
+    <div class="lgerr" id="lgErr"></div>
+  </div>
+</div>
 
 <header>
   <img src="logo-header.png" alt="BoParts" class="logo">
@@ -401,6 +436,7 @@ select option{background:#1E1E1E;color:var(--ink)}
 <div class="nav-ov" id="navOv" onclick="closeNav()"></div>
 <div class="nav-pan" id="navPan">
   <div class="nav-t">Repuesto BoParts</div>
+  <div id="verTag" style="font-size:10px;color:var(--ink-muted);margin:-6px 0 10px;letter-spacing:0.3px">app v14 · script ?</div>
   <div class="nav-g">
     <a class="ncard" href="index.html">
       <span class="nicon">📋</span>
@@ -461,13 +497,153 @@ select option{background:#1E1E1E;color:var(--ink)}
 </div>
 
 <script>
+/* ===================== SESION (bloque D) — identico en todas las pantallas =====================
+   Mientras CONFIG!B15 sea NO, nada de esto se activa y la pantalla funciona como siempre.       */
+var SES_KEY = 'boparts_sesion';
+function sesionActual() {
+  try {
+    var s = JSON.parse(localStorage.getItem(SES_KEY) || 'null');
+    if (s && s.token && s.vence > Date.now()) return s;
+  } catch (e) {}
+  return null;
+}
+function guardarSesion(s) { try { localStorage.setItem(SES_KEY, JSON.stringify(s)); } catch (e) {} }
+function olvidarSesion()  { try { localStorage.removeItem(SES_KEY); } catch (e) {} }
+function miToken()  { var s = sesionActual(); return s ? s.token  : ''; }
+function miNombre() { var s = sesionActual(); return s ? s.nombre : ''; }
+function soySocio() { var s = sesionActual(); return !!s && s.rol === 'SOCIO'; }
+
+// Agrega el token a una URL del script. Sin sesion la deja igual: con el login apagado el script no lo pide.
+function conToken(url) {
+  var t = miToken();
+  if (!t) return url;
+  return url + (url.indexOf('?') < 0 ? '?' : '&') + 'token=' + encodeURIComponent(t);
+}
+
+// Lee la respuesta del script. Si la sesion vencio, manda al login en vez de mostrar un error tecnico.
+function leerJSON(r) {
+  return r.text().then(function(t) {
+    var d;
+    try { d = JSON.parse(t); }
+    catch (e) {
+      var limpio = String(t).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
+      throw new Error('El script no devolvio datos' + (limpio ? ': ' + limpio : '') +
+                      '. Revisa que Apps Script este desplegado como Nueva version.');
+    }
+    if (d && d.sesion)  { olvidarSesion(); mostrarLogin(); throw new Error('SESION'); }
+    if (d && d.permiso) { throw new Error(d.error || 'Eso es solo para los socios.'); }
+    return d;
+  });
+}
+
+function mostrarLogin() {
+  var box = document.getElementById('loginBox');
+  if (!box) return;
+  box.classList.add('open');
+  var sel = document.getElementById('lgUser');
+  if (sel && !sel.options.length) {
+    sel.innerHTML = '<option value="">Cargando...</option>';
+    fetch(SCRIPT_URL_SESION + '?action=quienes&t=' + Date.now())
+      .then(leerJSON)
+      .then(function(d) {
+        var us = (d && d.usuarios) || [];
+        sel.innerHTML = us.length
+          ? us.map(function(u) { return '<option>' + u.nombre.replace(/[<>&]/g, '') + '</option>'; }).join('')
+          : '<option value="">No hay usuarios configurados</option>';
+        var ult = '';
+        try { ult = localStorage.getItem('boparts_ultimo_usuario') || ''; } catch (e) {}
+        if (ult) sel.value = ult;
+        var pin = document.getElementById('lgPin'); if (pin) pin.focus();
+      })
+      .catch(function() { sel.innerHTML = '<option value="">Sin conexion con el script</option>'; });
+  }
+}
+
+function hacerLogin() {
+  var sel = document.getElementById('lgUser'), pin = document.getElementById('lgPin');
+  var btn = document.getElementById('lgBtn'), err = document.getElementById('lgErr');
+  var usuario = sel ? sel.value : '', clave = pin ? pin.value.trim() : '';
+  err.textContent = '';
+  if (!usuario) { err.textContent = 'Elige quien eres'; return; }
+  if (!clave)   { err.textContent = 'Escribe tu PIN'; pin.focus(); return; }
+  btn.disabled = true; btn.textContent = 'Entrando...';
+  fetch(SCRIPT_URL_SESION, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'},
+                            body:JSON.stringify({tipo:'login', usuario:usuario, pin:clave})})
+    .then(function(r) { return r.text(); })
+    .then(function(t) {
+      var d; try { d = JSON.parse(t); } catch (e) { throw new Error('El script no respondio bien'); }
+      if (!d.ok) throw new Error(d.error || 'No se pudo entrar');
+      guardarSesion({token:d.token, nombre:d.nombre, rol:d.rol, vence:Date.now() + 11.5 * 3600 * 1000});
+      try { localStorage.setItem('boparts_ultimo_usuario', d.nombre); } catch (e) {}
+      pin.value = '';
+      document.getElementById('loginBox').classList.remove('open');
+      btn.disabled = false; btn.textContent = 'Entrar';
+      if (typeof alEntrar === 'function') alEntrar();
+    })
+    .catch(function(e) {
+      btn.disabled = false; btn.textContent = 'Entrar';
+      err.textContent = e.message || 'No se pudo entrar';
+      pin.value = ''; pin.focus();
+    });
+}
+
+// Al abrir la pantalla: si el login esta activo y no hay sesion valida, se pide antes de cargar nada.
+// Si esta apagado, no se pide nada y todo sigue como hasta hoy.
+function revisarSesion(alTener) {
+  if (sesionActual()) { alTener(); return; }
+  fetch(SCRIPT_URL_SESION + '?action=quienes&t=' + Date.now())
+    .then(function(r) { return r.text(); })
+    .then(function(t) {
+      var d = {}; try { d = JSON.parse(t); } catch (e) {}
+      if (d && d.authActiva) mostrarLogin();
+      else alTener();
+    })
+    .catch(function() { alTener(); });   // sin respuesta, no se deja a nadie fuera de la tienda
+}
+
+/* El token se agrega en un solo lugar: se envuelve fetch y se le pone a TODA llamada al script,
+   sea GET o POST. Asi no hay forma de olvidarlo en una pantalla con veinte llamadas.
+   Solo toca las URL del script: Cloudinary y los CSV que queden pasan intactos. */
+(function() {
+  if (window.__tokenEnFetch) return;
+  window.__tokenEnFetch = true;
+  var original = window.fetch.bind(window);
+  window.fetch = function(u, o) {
+    try {
+      // SCRIPT_URL_SESION se lee AQUI, no al instalar: cuando este modulo corre todavia no esta asignada.
+      if (typeof u === 'string' && u.indexOf(SCRIPT_URL_SESION) === 0) {
+        var t = miToken();
+        if (t) {
+          if (o && o.body && String(o.method || '').toUpperCase() === 'POST') {
+            var b = JSON.parse(o.body);
+            if (b && typeof b === 'object' && b.token === undefined) {
+              b.token = t;
+              var o2 = {}; for (var k in o) o2[k] = o[k];
+              o2.body = JSON.stringify(b); o = o2;
+            }
+          } else if (u.indexOf('token=') < 0) {
+            u += (u.indexOf('?') < 0 ? '?' : '&') + 'token=' + encodeURIComponent(t);
+          }
+        }
+      }
+    } catch (e) {}
+    return original(u, o);
+  };
+})();
+
 // ============================================================
 // CONFIG
 // ============================================================
-var CSV_URL     = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRaAnGd-Bfaxo3LjUiGeV8p0F2weaKqHGwJ0hWibSMj02-h7dRAQPDMmGL5B8-XQg66Yjd3zgOAaz8X/pub?gid=2100998338&single=true&output=csv';
-var CLIENTES_URL= 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRaAnGd-Bfaxo3LjUiGeV8p0F2weaKqHGwJ0hWibSMj02-h7dRAQPDMmGL5B8-XQg66Yjd3zgOAaz8X/pub?gid=647304383&single=true&output=csv';
 var SCRIPT_URL  = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
-var APP_VERSION = 'v13.3';
+var SCRIPT_URL_SESION = SCRIPT_URL;   // el modulo de sesion usa este nombre en todas las pantallas
+var VER_SCRIPT = '?';                 // version del script que respondio, para el sello del menu
+function sellarVersion(d) {
+  if (d && d.v) VER_SCRIPT = d.v;
+  var t = document.getElementById('verTag');
+  if (t) t.textContent = 'app ' + APP_VERSION + ' \u00b7 script ' + VER_SCRIPT;
+  return d;
+}
+var APP_VERSION = 'v14';
 var TASA        = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
 var TASA_ORIGEN = TASA ? 'guardada' : 'ninguna';
 
@@ -533,10 +709,31 @@ var lastCart  = [];
 document.getElementById('fechaHdr').textContent =
   APP_VERSION + ' · ' + new Date().toLocaleDateString('es-VE', {weekday:'long', day:'numeric', month:'long'});
 
-loadProducts();
-sincronizarTasa();
-loadClientes();
+// v14: con el login encendido se pide la sesion antes de cargar; con el apagado arranca directo.
+function alEntrar() { arrancarVenta(); }
+function arrancarVenta() {
+  loadProducts();
+  sincronizarTasa();
+  loadClientes();
+  fijarVendedorDeSesion();
+}
 addPago();
+revisarSesion(arrancarVenta);
+
+// Con sesion activa el vendedor es quien entro, y el selector se bloquea: nadie registra a nombre de otro.
+// (El servidor tambien lo impone, asi que esto es solo para que la pantalla diga la verdad.)
+function fijarVendedorDeSesion() {
+  var nom = miNombre();
+  if (!nom) return;
+  var sel = document.getElementById('selV');
+  if (!sel) return;
+  var existe = false;
+  for (var i = 0; i < sel.options.length; i++) if (sel.options[i].text === nom) existe = true;
+  if (!existe) sel.insertAdjacentHTML('beforeend', '<option>' + escHtml(nom) + '</option>');
+  sel.value = nom;
+  sel.disabled = true;
+  sel.style.opacity = '0.75';
+}
 
 // ============================================================
 // CSV PARSER
@@ -569,24 +766,36 @@ function isValidCSV(txt) {
 // LOAD PRODUCTS
 // ============================================================
 function loadProducts() {
-  // Use sessionStorage cache from index.html first
-  var cached = sessionStorage.getItem('motoauto_csv');
-  if (cached && isValidCSV(cached)) {
-    parseProducts(cached);
-  }
-  // Always refresh in background
-  fetch(CSV_URL + '&t=' + Date.now())
+  // Arranca con lo ultimo que se bajo en este telefono, para poder vender aunque el script tarde
+  var cached = sessionStorage.getItem('boparts_prod_v14');
+  if (cached) { try { parseProducts(cached); } catch (e) {} }
+  fetch(SCRIPT_URL + '?action=productos&t=' + Date.now())
     .then(function(r) { return r.text(); })
     .then(function(txt) {
-      if (!isValidCSV(txt)) return;
-      sessionStorage.setItem('motoauto_csv', txt);
+      if (!txt || txt.charAt(0) !== '{') return;
+      try { sessionStorage.setItem('boparts_prod_v14', txt); } catch (e) {}
       parseProducts(txt);
     })
     .catch(function() {});
 }
 
+// v14: el script responde JSON. Se convierte a la misma forma de filas que traia el CSV para no tocar
+// nada mas abajo, y toda celda se pasa a texto (la hoja entrega numeros donde el CSV entregaba texto).
+function filasProductos(txt) {
+  var t = String(txt || '').trim();
+  if (t.charAt(0) !== '{') return parseCSV(txt);
+  var d = JSON.parse(t);
+  if (d.sesion) { olvidarSesion(); mostrarLogin(); throw new Error('SESION'); }
+  if (!d.ok) throw new Error(d.error || 'el script no devolvio la lista');
+  sellarVersion(d);
+  var filas = (d.filas || []).map(function(f) {
+    return f.map(function(v) { return v == null ? '' : String(v); });
+  });
+  return [[ '', '', '', '', d.tasa || '' ], []].concat(filas);
+}
+
 function parseProducts(txt) {
-  var rows = parseCSV(txt);
+  var rows = filasProductos(txt);
   var loaded = [];
   // Tasa de respaldo: fila 1, columna E de la hoja (misma celda que usa index.html)
   var tasaHoja = parseNum(rows[0] && rows[0][4]);
@@ -627,28 +836,21 @@ function clientesCargados(loaded, origen) {
   if (loaded.length) { CLIENTES = loaded; try { localStorage.setItem('boparts_clientes', JSON.stringify(loaded)); } catch (e) {} }
   clientesListos = true; clientesEstado = 'ok (' + origen + ', ' + loaded.length + ')';
 }
+// v14: solo por el script. El CSV de CLIENTES llevaba cedulas y telefonos de todos los clientes en una
+// URL publica; esa hoja se despublica.
 function loadClientes() {
   clientesIntentos++;
-  fetch(CLIENTES_URL + '&t=' + Date.now())
-    .then(function(r) { if (!r.ok) throw new Error('CSV HTTP ' + r.status); return r.text(); })
-    .then(function(txt) {
-      if (!isValidCSV(txt)) throw new Error('CSV invalido');
-      var rows = parseCSV(txt), loaded = [];
-      for (var i = 1; i < rows.length; i++) { var c = filaCliente(rows[i]); if (c.nombre) loaded.push(c); }
-      clientesCargados(loaded, 'hoja');
+  fetch(SCRIPT_URL + '?action=clientes&t=' + Date.now())
+    .then(leerJSON)
+    .then(function(d) {
+      sellarVersion(d);
+      if (!d || !d.ok || !d.clientes) throw new Error('el script no devolvio los clientes');
+      clientesCargados(d.clientes.map(filaCliente), 'script');
     })
-    .catch(function(e1) {
-      // Respaldo: pedir la lista a Apps Script (v10.5+). Si tampoco, reintentar en 5 s.
-      fetch(SCRIPT_URL + '?action=clientes&t=' + Date.now())
-        .then(leerJSON)
-        .then(function(d) {
-          if (!d || !d.ok || !d.clientes) throw new Error('script sin clientes');
-          clientesCargados(d.clientes.map(filaCliente), 'script');
-        })
-        .catch(function(e2) {
-          clientesEstado = 'error: ' + (e1 && e1.message ? e1.message : e1) + ' / ' + (e2 && e2.message ? e2.message : e2);
-          if (clientesIntentos < 6) setTimeout(loadClientes, 5000);
-        });
+    .catch(function(e) {
+      if (e && e.message === 'SESION') return;          // ya se abrio el login
+      clientesEstado = 'error: ' + (e && e.message ? e.message : e);
+      if (clientesIntentos < 6) setTimeout(loadClientes, 5000);
     });
 }
 var clientesListos = false;
@@ -1988,15 +2190,8 @@ function closeNav() {
 
 // Lee la respuesta del script con cuidado: si Apps Script devuelve su pagina de error (HTML),
 // r.json() explota con "Unexpected token '<'". Asi se explica que pasa en vez de mostrar eso.
-function leerJSON(r) {
-  return r.text().then(function(t) {
-    try { return JSON.parse(t); }
-    catch (e) {
-      var limpio = String(t).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
-      throw new Error('El script no devolvio datos' + (limpio ? ': ' + limpio : '') + '. Revisa que Apps Script este desplegado como Nueva version.');
-    }
-  });
-}
+// leerJSON vive ahora en el modulo de sesion, al final del archivo: mismo nombre, y ademas manda al
+// login cuando la sesion vence en vez de mostrar un error tecnico a mitad de una venta.
 </script>
 </body>
 </html>
