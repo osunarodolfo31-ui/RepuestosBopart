@@ -1,6 +1,25 @@
 /**
  * Repuesto BoParts — Code.gs
- * VERSION: v21.6 (2026-09-19) | compatible con TODAS las pantallas actuales mientras CONFIG!B15 = NO
+ * VERSION: v22 (2026-09-19) | el aliado es un cliente mas
+ *
+ * v22 — LIQUIDACION DE ALIADOS. El aliado deja de ser una lista aparte y pasa a ser una fila de CLIENTES:
+ *   CLIENTES gana tres columnas: J ALIADO (SI/NO), K COMISION_PCT, L NEGOCIO.
+ *
+ *   Por que importa: cuando un aliado se lleva mercancia a credito, esa deuda vive en CXC_MOV a nombre del
+ *   cliente, y su comision vive en COMISIONES a nombre del aliado. Siendo dos registros distintos, se le
+ *   podia pagar la comision completa a alguien que debia mercancia y nada avisaba. Ahora es la misma persona,
+ *   con la misma cedula, y la liquidacion resta.
+ *
+ *   - El PORCENTAJE lo pone el servidor, no el telefono: se lee de CLIENTES al guardar la venta. Asi no se
+ *     puede alterar desde el navegador y no hace falta mandarselo al telefono de un vendedor.
+ *   - SIN AUTOCOMISION: si el aliado de la venta es el mismo cliente que compra, no se genera comision.
+ *   - COMISIONES gana COMISION_USD (columna N): la comision se guardaba solo en Bs y la deuda esta en USD.
+ *     Sin eso, restar una de otra dependia de la tasa del dia en que se liquida, no la de la venta.
+ *   - action=liquidacion: por aliado, comisiones cobrables + deuda + neto a pagar.
+ *   - tipo=liquidar_aliado: marca las comisiones PAGADA, abona la deuda con metodo COMPENSACION (no es
+ *     dinero que entro: si entrara como cobro normal, la caja cuadraria de mas) y deja el neto pagado.
+ *
+ * v21.6 (2026-09-19): una recepcion reenviada ya no se duplica.
  *
  * v21.6: una recepcion reenviada ya no se duplica. Era el mismo fallo que se corrigio en ventas con v20, que
  *        quedo fuera en compras. Ahora se identifica por ID_COMPRA y, si ya existe, no se escribe nada y se
@@ -177,19 +196,70 @@ var HORAS_SESION = 12;
 // USUARIOS: A NOMBRE, B ROL, C ACTIVO, D PIN_NUEVO, E PIN_HASH, F TOKEN, G TOKEN_VENCE, H ULTIMO_ACCESO
 var U_NOMBRE = 1, U_ROL = 2, U_ACTIVO = 3, U_PIN_NUEVO = 4, U_HASH = 5, U_TOKEN = 6, U_VENCE = 7, U_ULT = 8;
 
+// CLIENTES: A NOMBRE, B RIF, C TEL, D DIR, E NOTA, F CREADO, G CREDITO, H LIMITE, I DIAS,
+//           J ALIADO (SI/NO), K COMISION_PCT, L NEGOCIO     <- las tres ultimas, v22
+var CLI_COLS = 12, CLI_ALIADO = 10, CLI_PCT = 11, CLI_NEGOCIO = 12;
+
+// Se asegura de que CLIENTES tenga las tres columnas nuevas, con su encabezado.
+function prepararClientes_(ss) {
+  var sh = ss.getSheetByName('CLIENTES');
+  if (!sh) return null;
+  var cab = ['ALIADO', 'COMISION_PCT', 'NEGOCIO'];
+  for (var i = 0; i < cab.length; i++) {
+    var col = CLI_ALIADO + i;
+    if (!String(sh.getRange(1, col).getValue() || '').trim()) sh.getRange(1, col).setValue(cab[i]);
+  }
+  return sh;
+}
+
+// Un cliente marcado como aliado. Devuelve null si no lo es.
+function aliadoPorClave_(ss, nombre, cedula) {
+  var sh = prepararClientes_(ss);
+  if (!sh || sh.getLastRow() < 2) return null;
+  var ced = soloDigitos_(cedula), nom = String(nombre || '').trim().toUpperCase();
+  var vals = sh.getRange(2, 1, sh.getLastRow() - 1, CLI_COLS).getValues();
+  for (var i = 0; i < vals.length; i++) {
+    if (String(vals[i][CLI_ALIADO - 1] || '').trim().toUpperCase() !== 'SI') continue;
+    var c2 = soloDigitos_(vals[i][1]);
+    var coincide = (ced && c2 && c2 === ced) || (!ced && nom && String(vals[i][0] || '').trim().toUpperCase() === nom);
+    if (coincide) {
+      return {fila:i + 2, nombre:String(vals[i][0] || ''), cedula:String(vals[i][1] || ''),
+              pct:Number(vals[i][CLI_PCT - 1]) || 0, negocio:String(vals[i][CLI_NEGOCIO - 1] || '')};
+    }
+  }
+  return null;
+}
+
+// Todos los aliados activos, para el desplegable de la venta.
+function listaAliados_(ss) {
+  var sh = prepararClientes_(ss);
+  var out = [];
+  if (!sh || sh.getLastRow() < 2) return out;
+  sh.getRange(2, 1, sh.getLastRow() - 1, CLI_COLS).getValues().forEach(function(r) {
+    if (String(r[CLI_ALIADO - 1] || '').trim().toUpperCase() !== 'SI') return;
+    var nom = String(r[0] || '').trim();
+    if (!nom) return;
+    out.push({id:String(r[1] || '').trim() || nom.toUpperCase(), nombre:nom,
+              negocio:String(r[CLI_NEGOCIO - 1] || '').trim(), pct:Number(r[CLI_PCT - 1]) || 0,
+              cedula:String(r[1] || '').trim()});
+  });
+  return out;
+}
+
 // Rol minimo de cada accion. Lo que no este aqui exige SOCIO: se niega por defecto, no se permite por defecto.
 var PERMISOS_GET = {
   config:'VENDEDOR', nextNota:'VENDEDOR', nextCot:'VENDEDOR', nextFactura:'VENDEDOR', nota:'VENDEDOR',
   apartados:'VENDEDOR', proveedores:'VENDEDOR', stock:'VENDEDOR', conteos:'VENDEDOR', clientes:'VENDEDOR',
   cxc:'VENDEDOR', productos:'VENDEDOR', catalogo:'VENDEDOR', metodos:'VENDEDOR',
-  ventas:'SOCIO', socios:'SOCIO', cxp:'SOCIO', cliente_stats:'SOCIO', compras:'SOCIO', diag:'SOCIO'
+  ventas:'SOCIO', socios:'SOCIO', cxp:'SOCIO', cliente_stats:'SOCIO', compras:'SOCIO', diag:'SOCIO',
+  liquidacion:'SOCIO'
 };
 var PERMISOS_POST = {
   fotos:'VENDEDOR', cliente:'VENDEDOR', demanda:'VENDEDOR', conteo:'VENDEDOR', gasto:'VENDEDOR',
   proveedor:'VENDEDOR', compra:'VENDEDOR', cotizacion:'VENDEDOR', abono:'VENDEDOR', venta:'VENDEDOR',
   factura_venta:'VENDEDOR', apartado:'VENDEDOR', apartado_abono:'VENDEDOR', apartado_entregar:'VENDEDOR',
   costeo:'SOCIO', cxp_abono:'SOCIO', conteo_revision:'SOCIO', devolucion:'SOCIO', apartado_cerrar:'SOCIO',
-  tasa:'SOCIO', socio:'SOCIO'
+  tasa:'SOCIO', socio:'SOCIO', liquidar_aliado:'SOCIO'
 };
 
 function authActiva_(ss) {
@@ -347,6 +417,9 @@ function rutearGet_(e) {
   if (accion === 'metodos') {
     return json_(metodosYAliados_(ssA));
   }
+  if (accion === 'liquidacion') {
+    return json_(estadoLiquidacion_(ssA));
+  }
 
   if (e.parameter.action === 'nextNota') {
     var lock = LockService.getScriptLock();
@@ -446,9 +519,15 @@ function rutearGet_(e) {
     return json_(conteosPendientes_(SpreadsheetApp.getActiveSpreadsheet()));
   }
   if (e.parameter.action === 'clientes') {
-    var shC = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('CLIENTES');
+    var shC = prepararClientes_(ssA);
     var n = shC ? shC.getLastRow() : 0;
-    var vals = n >= 2 ? shC.getRange(2, 1, n - 1, 9).getValues().map(function(r) { return r.map(function(v) { return String(v == null ? '' : v); }); }) : [];
+    var esSocio = (usr.rol === 'SOCIO');
+    var vals = n >= 2 ? shC.getRange(2, 1, n - 1, CLI_COLS).getValues().map(function(r) {
+      var f = r.map(function(v) { return String(v == null ? '' : v); });
+      // El porcentaje de comision es informacion de socios: no viaja al telefono de un vendedor.
+      if (!esSocio) f[CLI_PCT - 1] = '';
+      return f;
+    }) : [];
     return json_({ok:true, clientes:vals});
   }
   if (e.parameter.action === 'cliente_stats') {
@@ -550,6 +629,13 @@ function doPost(e) {
     if (data.tipo === 'cxp_abono') {
       movCxp_(ss, data, 'ABONO');
       return json_({ok:true, tipo:'cxp_abono'});
+    }
+
+    // ---- LIQUIDACION DE UN ALIADO (v22) ----
+    if (data.tipo === 'liquidar_aliado') {
+      var lockA = LockService.getScriptLock(); lockA.waitLock(15000);
+      try { return json_(liquidarAliado_(ss, data)); }
+      finally { lockA.releaseLock(); }
     }
 
     // ---- FACTURA ASOCIADA A UNA VENTA (v20) ----
@@ -809,12 +895,28 @@ function guardarVenta_(ss, data) {
     formatoFecha_(fx, fx.getLastRow(), 3);
   }
 
-  // Comisión de aliado: igual que v7, + L = ID_VENTA. A crédito queda 'PENDIENTE COBRO'.
+  // Comision de aliado. v22: el porcentaje y el monto los calcula el SERVIDOR desde CLIENTES.
+  // Lo que mande el telefono se ignora: no se puede alterar desde el navegador.
   if (data.aliado) {
-    const sc = ss.getSheetByName('COMISIONES');
-    const ciclo = Math.ceil(new Date().getDate()/15) === 1 ? '1-15' : '16-fin';
-    const mes = new Date().toLocaleDateString('es-VE',{month:'long',year:'numeric'});
-    sc.appendRow([data.fecha,'',data.aliado,data.fecha,data.productos,data.totalBS,data.aliadoPct,data.aliadoComision,ciclo+' '+mes, esCredito ? 'PENDIENTE COBRO' : 'PENDIENTE','',idVenta]);
+    var ali = aliadoPorClave_(ss, data.aliado, data.aliadoCedula);
+    var cedCli = data.cliente ? soloDigitos_(data.cliente.rif) : '';
+    // Sin autocomision: si el aliado es el mismo que esta comprando, no gana nada por su propia compra.
+    var esElMismo = !!(ali && cedCli && soloDigitos_(ali.cedula) === cedCli);
+    if (ali && !esElMismo && ali.pct > 0) {
+      var totalBs = Number(data.totalBS) || 0;
+      var comBs = Math.round(totalBs * ali.pct / 100);
+      var tasaV = Number(data.tasa) || 0;
+      var comUsd = tasaV ? round2_(comBs / tasaV) : 0;
+      const sc = ss.getSheetByName('COMISIONES');
+      const ciclo = Math.ceil(new Date().getDate()/15) === 1 ? '1-15' : '16-fin';
+      const mes = new Date().toLocaleDateString('es-VE',{month:'long',year:'numeric'});
+      // N (14) = COMISION_USD: la deuda esta en USD y la comision se guardaba solo en Bs. Sin este dato,
+      // restar una de otra dependia de la tasa del dia en que se liquida, no de la de la venta.
+      sc.appendRow([data.fecha,'',ali.nombre,data.fecha,data.productos,totalBs,ali.pct,comBs,
+                    ciclo+' '+mes, esCredito ? 'PENDIENTE COBRO' : 'PENDIENTE','',idVenta,
+                    soloDigitos_(ali.cedula), comUsd]);
+      if (!sc.getRange(1, 13).getValue()) { sc.getRange(1, 13).setValue('CEDULA'); sc.getRange(1, 14).setValue('COMISION_USD'); }
+    }
   }
 
   // Cargo en cuentas por cobrar (v9)
@@ -1554,7 +1656,7 @@ function soloDigitos_(v) { return String(v == null ? '' : v).replace(/[^0-9]/g, 
 
 // Cedula y telefono son unicos: si ya existe, se actualiza en vez de crear otro.
 function guardarCliente_(ss, d) {
-  var sh = ss.getSheetByName('CLIENTES');
+  var sh = prepararClientes_(ss);
   if (!sh) throw new Error('No existe la hoja CLIENTES');
   if (!d.nombre) throw new Error('Falta el nombre');
   var ced = soloDigitos_(d.rif), tel = soloDigitos_(d.tel);
@@ -1577,16 +1679,22 @@ function guardarCliente_(ss, d) {
   var datos = [d.nombre, conserva(d.rif, 2), conserva(d.tel, 3), conserva(d.dir, 4), conserva(d.nota, 5), creado,
                (d.credito === undefined ? (fila ? String(sh.getRange(fila, 7).getValue() || '') : '') : (d.credito ? 'SI' : 'NO')),
                (d.limite === undefined || d.limite === '') ? (fila ? sh.getRange(fila, 8).getValue() : '') : Number(d.limite) || 0,
-               (d.dias === undefined || d.dias === '') ? (fila ? sh.getRange(fila, 9).getValue() : '') : Number(d.dias) || 0];
+               (d.dias === undefined || d.dias === '') ? (fila ? sh.getRange(fila, 9).getValue() : '') : Number(d.dias) || 0,
+               // v22: aliado, su porcentaje y el nombre de su negocio
+               (d.aliado === undefined ? (fila ? String(sh.getRange(fila, CLI_ALIADO).getValue() || '') : '') : (d.aliado ? 'SI' : 'NO')),
+               (d.comisionPct === undefined || d.comisionPct === '') ? (fila ? sh.getRange(fila, CLI_PCT).getValue() : '') : Number(d.comisionPct) || 0,
+               conserva(d.negocio, CLI_NEGOCIO)];
   var eraNuevo = !fila;
-  if (fila) sh.getRange(fila, 1, 1, 9).setValues([datos]);
+  if (fila) sh.getRange(fila, 1, 1, CLI_COLS).setValues([datos]);
   else { sh.appendRow(datos); fila = sh.getLastRow(); }
   formatoFecha_(sh, fila, 6);
-  var final = sh.getRange(fila, 1, 1, 9).getValues()[0];
+  var final = sh.getRange(fila, 1, 1, CLI_COLS).getValues()[0];
   return {ok:true, tipo:'cliente', nuevo:eraNuevo, actualizado:!eraNuevo, fila:fila,
           cliente:{nombre:String(final[0]||''), rif:String(final[1]||''), tel:String(final[2]||''),
                    credito:String(final[6]||'').toUpperCase() === 'SI',
-                   limite:Number(final[7]) || 0, dias:Number(final[8]) || 0}};
+                   limite:Number(final[7]) || 0, dias:Number(final[8]) || 0,
+                   aliado:String(final[CLI_ALIADO-1]||'').toUpperCase() === 'SI',
+                   comisionPct:Number(final[CLI_PCT-1]) || 0, negocio:String(final[CLI_NEGOCIO-1]||'')}};
 }
 
 // Metricas por cliente, calculadas de VENTAS (monto y fecha) y VENTAS_DETALLE (margen y productos).
@@ -2196,18 +2304,22 @@ function metodosYAliados_(ss) {
     });
   }
 
-  var shA = hojaSemilla_(ss, 'ALIADOS', ['ID','NOMBRE','NEGOCIO','PCT','ACTIVO'], ALIADOS_DEFECTO);
-  if (!shA) avisos.push('La hoja ALIADOS tiene otras columnas; se estan usando los aliados de siempre. ' +
-                        'Encabezados que espera la app: ID, NOMBRE, NEGOCIO, PCT, ACTIVO.');
-  var aliados = [];
-  if (shA && shA.getLastRow() >= 2) {
-    shA.getRange(2, 1, shA.getLastRow() - 1, 5).getValues().forEach(function(r) {
-      var nom = String(r[1] || '').trim();
-      if (!nom) return;
-      if (!siNo_(r[4], true)) return;
-      aliados.push({id:String(r[0] || '').trim() || nom.toUpperCase(), nombre:nom,
-                    negocio:String(r[2] || '').trim(), pct:Number(r[3]) || 0});
-    });
+  // v22: los aliados salen de CLIENTES (columna ALIADO = SI). La hoja ALIADOS solo se usa si todavia
+  // no hay ningun cliente marcado, para que nada se rompa el dia que se instala esta version.
+  var aliados = listaAliados_(ss);
+  var shA = null;
+  if (!aliados.length) {
+    shA = hojaSemilla_(ss, 'ALIADOS', ['ID','NOMBRE','NEGOCIO','PCT','ACTIVO'], ALIADOS_DEFECTO);
+    if (shA && shA.getLastRow() >= 2) {
+      shA.getRange(2, 1, shA.getLastRow() - 1, 5).getValues().forEach(function(r) {
+        var nom = String(r[1] || '').trim();
+        if (!nom || !siNo_(r[4], true)) return;
+        aliados.push({id:String(r[0] || '').trim() || nom.toUpperCase(), nombre:nom,
+                      negocio:String(r[2] || '').trim(), pct:Number(r[3]) || 0});
+      });
+    }
+    avisos.push('Todavia no hay ningun cliente marcado como aliado; se esta usando la hoja ALIADOS. ' +
+                'Marca ALIADO = SI en CLIENTES y pon su porcentaje en COMISION_PCT.');
   }
 
   // Si alguien deja las hojas sin una sola fila utilizable, se responde con lo de siempre en vez de
@@ -2218,8 +2330,129 @@ function metodosYAliados_(ss) {
       return {label:r[0], metodo:r[1], banco:r[2], moneda:r[3], fijo:r[4], pct:r[5], credito:r[6] === 'SI'};
     });
   }
-  if (!aliados.length && !shA) {
+  if (!aliados.length) {
     aliados = ALIADOS_DEFECTO.map(function(r) { return {id:r[0], nombre:r[1], negocio:r[2], pct:r[3]}; });
   }
   return {ok:true, metodos:metodos, aliados:aliados, deHoja:deHoja, avisos:avisos};
+}
+
+
+// ============================================================
+// LIQUIDACION DE ALIADOS (v22)
+// ============================================================
+// COMISIONES: A FECHA, B -, C ALIADO, D FECHA, E PRODUCTOS, F TOTAL_BS, G PCT, H COMISION_BS, I CICLO,
+//             J ESTADO, K FECHA_PAGO, L ID_VENTA, M CEDULA, N COMISION_USD
+var COM_ALIADO = 3, COM_BS = 8, COM_ESTADO = 10, COM_FPAGO = 11, COM_CEDULA = 13, COM_USD = 14;
+
+// Comisiones de un aliado que TODAVIA no se le han pagado.
+// 'PENDIENTE COBRO' no entra: esa venta fue a credito y el cliente aun no paga. Pagar una comision por
+// plata que no entro es adelantarle dinero al aliado sin decidirlo.
+function comisionesDe_(ss, nombre, cedula, tasaHoy) {
+  var sh = ss.getSheetByName('COMISIONES');
+  var out = {cobrables:[], porCobrar:0, totalUSD:0, aproximadas:0};
+  if (!sh || sh.getLastRow() < 2) return out;
+  var ced = soloDigitos_(cedula), nom = String(nombre || '').trim().toUpperCase();
+  var ancho = Math.max(sh.getLastColumn(), COM_USD);
+  var vals = sh.getRange(2, 1, sh.getLastRow() - 1, ancho).getValues();
+  for (var i = 0; i < vals.length; i++) {
+    var r = vals[i];
+    var c2 = soloDigitos_(r[COM_CEDULA - 1]);
+    var mismo = (ced && c2 && c2 === ced) || String(r[COM_ALIADO - 1] || '').trim().toUpperCase() === nom;
+    if (!mismo) continue;
+    var estado = String(r[COM_ESTADO - 1] || '').trim().toUpperCase();
+    if (estado.indexOf('PAGADA') === 0 || estado.indexOf('ANULADA') === 0) continue;
+
+    var usd = Number(r[COM_USD - 1]) || 0;
+    var aprox = false;
+    if (!usd) {                       // comision vieja, guardada solo en Bs: se convierte con la tasa de hoy
+      usd = tasaHoy ? round2_((Number(r[COM_BS - 1]) || 0) / tasaHoy) : 0;
+      aprox = true;
+    }
+    if (estado === 'PENDIENTE COBRO') { out.porCobrar += usd; continue; }
+    out.cobrables.push({fila:i + 2, fecha:iso_(r[0]), producto:String(r[4] || ''), bs:Number(r[COM_BS - 1]) || 0,
+                        usd:usd, aprox:aprox, idVenta:String(r[11] || '')});
+    out.totalUSD += usd;
+    if (aprox) out.aproximadas++;
+  }
+  out.totalUSD = round2_(out.totalUSD);
+  out.porCobrar = round2_(out.porCobrar);
+  return out;
+}
+
+// Lo que cada aliado tiene ganado y lo que debe, para la pantalla de liquidacion.
+function estadoLiquidacion_(ss) {
+  var tasa = leerTasa_(ss);
+  var deudas = estadoCxc_(ss, '');
+  var porNombre = {};
+  (deudas || []).forEach(function(c) { porNombre[String(c.cliente || '').trim().toUpperCase()] = c; });
+
+  var out = [];
+  listaAliados_(ss).forEach(function(a) {
+    var com = comisionesDe_(ss, a.nombre, a.cedula, tasa);
+    var d = porNombre[String(a.nombre).trim().toUpperCase()];
+    var deuda = d ? round2_(Number(d.saldoUSD) || 0) : 0;
+    out.push({nombre:a.nombre, cedula:a.cedula, negocio:a.negocio, pct:a.pct,
+              comisiones:com.totalUSD, ventas:com.cobrables.length, porCobrar:com.porCobrar,
+              aproximadas:com.aproximadas, deuda:deuda, neto:round2_(com.totalUSD - deuda)});
+  });
+  out.sort(function(x, y) { return y.neto - x.neto; });
+  return {ok:true, tasa:tasa, aliados:out};
+}
+
+// Cierra la cuenta de un aliado: marca sus comisiones como pagadas, abona su deuda con lo ganado y
+// deja constancia de lo que salio en efectivo.
+function liquidarAliado_(ss, d) {
+  var tasa = Number(d.tasa) || leerTasa_(ss);
+  var ali = aliadoPorClave_(ss, d.aliado, d.cedula);
+  if (!ali) throw new Error('No se encontro el aliado ' + (d.aliado || ''));
+  if (!d.quien) throw new Error('Falta quien liquida');
+
+  var com = comisionesDe_(ss, ali.nombre, ali.cedula, tasa);
+  if (!com.cobrables.length) throw new Error('Ese aliado no tiene comisiones por pagar');
+
+  var deudas = estadoCxc_(ss, ali.nombre);
+  var deuda = 0;
+  (deudas || []).forEach(function(c) {
+    if (String(c.cliente || '').trim().toUpperCase() === String(ali.nombre).trim().toUpperCase()) deuda = Number(c.saldoUSD) || 0;
+  });
+
+  var ganado = com.totalUSD;
+  var compensa = round2_(Math.min(ganado, deuda));    // lo que se le descuenta de la deuda
+  var neto = round2_(ganado - compensa);              // lo que sale en efectivo o pago movil
+  var hoy = new Date();
+  var fechaHoy = Utilities.formatDate(hoy, TZ_VE, 'dd/MM/yyyy');
+  var idLiq = 'LQ' + Utilities.formatDate(hoy, TZ_VE, 'yyyyMMdd-HHmmss');
+
+  // 1. Las comisiones quedan pagadas, con su fecha y el numero de liquidacion
+  var sc = ss.getSheetByName('COMISIONES');
+  com.cobrables.forEach(function(c) {
+    sc.getRange(c.fila, COM_ESTADO).setValue('PAGADA');
+    sc.getRange(c.fila, COM_FPAGO).setValue(fechaHoy);
+    sc.getRange(c.fila, 15).setValue(idLiq);          // O = LIQUIDACION
+  });
+  if (!sc.getRange(1, 15).getValue()) sc.getRange(1, 15).setValue('LIQUIDACION');
+
+  // 2. Si tenia deuda, se abona con lo ganado. Metodo COMPENSACION a proposito: NO es dinero que entro.
+  //    Si entrara como un cobro normal, al conciliar la caja sobraria ese monto.
+  if (compensa > 0) {
+    var cx = hojaCxc_(ss);
+    // Mismas columnas que un abono normal: MONTO_USD en la 8. Metodo COMPENSACION y MONTO_PAGADO en 0,
+    // porque no entro dinero: si entrara como cobro normal, al conciliar la caja sobraria ese monto.
+    cx.appendRow([fechaVE_(fechaHoy), Utilities.formatDate(hoy, TZ_VE, 'HH:mm'), ali.nombre, ali.cedula,
+                  'ABONO', idLiq, '', compensa, 'USD', 0, tasa, 'COMPENSACION', '', 0, d.quien,
+                  'Comisiones aplicadas a su deuda (liquidacion ' + idLiq + ')', '']);
+    formatoFecha_(cx, cx.getLastRow(), 1);
+  }
+
+  // 3. Constancia de la liquidacion
+  var lq = hojaAp_(ss, 'LIQUIDACIONES', ['ID','FECHA','HORA','ALIADO','CEDULA','COMISIONES_USD','VENTAS',
+    'APLICADO_A_DEUDA_USD','PAGADO_USD','METODO','TASA','LIQUIDADO_POR','NOTAS']);
+  lq.appendRow([idLiq, fechaVE_(fechaHoy), Utilities.formatDate(hoy, TZ_VE, 'HH:mm'), ali.nombre, ali.cedula,
+                ganado, com.cobrables.length, compensa, neto, neto > 0 ? (d.metodo || '') : '', tasa,
+                d.quien, d.notas || '']);
+  formatoFecha_(lq, lq.getLastRow(), 2);
+
+  return {ok:true, tipo:'liquidar_aliado', id:idLiq, aliado:ali.nombre, comisiones:ganado,
+          ventas:com.cobrables.length, aplicado:compensa, pagado:neto,
+          deudaAntes:round2_(deuda), deudaDespues:round2_(deuda - compensa)};
 }

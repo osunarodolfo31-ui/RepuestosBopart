@@ -21,7 +21,7 @@ en el comentario del encabezado de cada HTML y en la cabecera de `Code.gs`.
 | boparts_devoluciones.html| v1.4   | **v21.5**            |
 | boparts_inventario.html | v1.4    | **v21.5**            |
 | boparts_reportes.html   | —       | **SE ELIMINA** (lo reemplazo gerencia) |
-| Code.gs (Apps Script)   | v21.6   | —                    |
+| Code.gs (Apps Script)   | v22     | —                    |
 
 Deployment ID (no cambia): `AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg`
 
@@ -61,6 +61,39 @@ una URL pública — ya no lo hacen. Piden `action=clientes` y `action=productos
 
 Con esto, las hojas que faltan por migrar son **LISTA DE PRODUCTOS** (compras, fotos, devoluciones) y
 **CATALOGO_PROVEEDORES** (demanda).
+
+## v22 — 2026-09-19 · El aliado es un cliente más (parte 1: servidor)
+**Code.gs v22.** Todavía sin pantallas: se instala y no cambia nada visible.
+
+`CLIENTES` gana tres columnas — **J ALIADO (SI/NO) · K COMISION_PCT · L NEGOCIO** — y se crean solas al
+desplegar. Con eso, el aliado deja de ser una lista aparte: es una fila de clientes, con su cédula.
+
+**El problema que esto resuelve.** Cuando un aliado se llevaba mercancía a crédito, esa deuda quedaba en
+`CXC_MOV` a nombre del cliente y su comisión en `COMISIONES` a nombre del aliado. Dos registros que nadie
+cruzaba: se le podía pagar la comisión completa a alguien que debía mercancía y nada avisaba.
+
+- **El porcentaje lo pone el servidor**, leído de `CLIENTES` al guardar la venta. Lo que mande el teléfono se
+  ignora, así que no se puede alterar desde el navegador — y no hace falta mandárselo al teléfono de un
+  vendedor. `action=clientes` se lo entrega en blanco a quien no es socio.
+- **Sin autocomisión**: si el aliado de la venta es el mismo cliente que compra, no se genera comisión.
+- **`COMISIONES` gana `COMISION_USD`** (columna N). La comisión se guardaba solo en Bs y la deuda está en USD;
+  sin ese dato, restar una de otra dependía de la tasa del día en que se liquida, no de la de la venta. Las
+  comisiones viejas se convierten con la tasa actual y la pantalla las marcará como aproximadas.
+- **`action=liquidacion`** — por aliado: comisiones cobrables, lo que está pendiente de cobro, su deuda y el
+  neto a pagar.
+- **`tipo=liquidar_aliado`** — marca las comisiones PAGADA, abona la deuda con método **COMPENSACION** y deja
+  constancia en la hoja `LIQUIDACIONES`.
+
+**Por qué COMPENSACION y no un abono normal:** ese dinero no entró. Si entrara como cobro, el día que concilies
+la caja te sobraría ese monto sin explicación.
+
+**Una comisión de una venta a crédito no se liquida** mientras el cliente final no pague — queda como
+`PENDIENTE COBRO` y se muestra aparte. Pagarla sería adelantarle dinero al aliado sin haberlo decidido.
+
+Si el aliado debe más de lo que ganó, no se le paga nada y el saldo en contra se arrastra al siguiente ciclo.
+
+Mientras no haya ningún cliente marcado como aliado, se sigue usando la hoja `ALIADOS` para que nada se rompa
+al instalar. Esa hoja queda obsoleta en cuanto marques a Luis y a David en `CLIENTES`.
 
 ## gerencia v2.5 — 2026-09-19 · Relación de gastos, línea por línea
 Gerencia mostraba el total de gastos del período y la barra por categoría, pero no **qué** se gastó. Y esa es
