@@ -9,7 +9,7 @@ en el comentario del encabezado de cada HTML y en la cabecera de `Code.gs`.
 
 | Archivo                 | Versión | Requiere Apps Script |
 |-------------------------|---------|----------------------|
-| index.html              | v11     | **v24**              |
+| index.html              | v11.1   | **v24**              |
 | boparts_ventas.html     | v14.2   | **v22**              |
 | boparts_cobros.html     | v2.6    | **v21.5**            |
 | boparts_compras.html    | v2.6    | **v21.6**            |
@@ -62,8 +62,24 @@ una URL pública — ya no lo hacen. Piden `action=clientes` y `action=productos
 Con esto, las hojas que faltan por migrar son **LISTA DE PRODUCTOS** (compras, fotos, devoluciones) y
 **CATALOGO_PROVEEDORES** (demanda).
 
+## index v11.1 — 2026-09-19 · El selector de tasa pasa al encabezado
+En v11 el selector quedó al final de la lista: para cambiar de modo había que recorrer 400 productos.
+Ahora vive donde antes salía el número de la tasa.
+
+- El badge del encabezado dice **Tasa**, y **Tasa · BCV** (resaltado) cuando se está dando precios a BCV.
+  Así el modo activo se ve siempre, sin bajar.
+- Al tocarlo se abre una ventana con las dos opciones, cada una con un ejemplo hecho con las tasas
+  reales del día: *"Dólares — tasa de trabajo 1.000: $10,00 son Bs 10.000"* /
+  *"BCV — esos mismos Bs 10.000 a tasa BCV 846,51: $11,81"*. No hay que adivinar cuál es cuál.
+- Al elegir, la ventana se cierra sola y la lista se repinta.
+- Si todavía no hay tasa BCV cargada, la opción aparece apagada y dice quién la carga.
+- **Se eliminó el editor de tasa local** (`applyTasa`), que ya estaba muerto desde que la tasa se
+  sincroniza desde Gerencia. Era una vía de escape para que un teléfono diera precios con una tasa
+  distinta a la del sistema.
+- Sigue intacto lo importante: `motoauto_tasa` (la tasa que lee Registrar Venta) no se toca.
+
 ## index v11 — 2026-09-19 · Dar precios en Dólares o en BCV
-Interruptor arriba de la lista de precios: **Dólares** (como siempre) o **BCV**.
+Interruptor en la lista de precios: **Dólares** (como siempre) o **BCV**.
 
 **Los bolívares no cambian nunca.** Lo único que cambia es en qué dólar se expresa ese mismo precio:
 

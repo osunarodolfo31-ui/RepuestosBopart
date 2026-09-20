@@ -63,12 +63,16 @@
     --radius:14px;
     --radius-sm:8px;
   }
-  .modo-wrap{max-width:720px;margin:0 auto;padding:10px 16px 0}
-  .modo-tabs{display:flex;gap:6px}
-  .modo-tab{flex:1;padding:9px 12px;border-radius:999px;border:1.5px solid var(--border);background:transparent;
-    color:var(--ink-soft);font-size:13px;font-weight:700;font-family:inherit;cursor:pointer}
-  .modo-tab.on{background:var(--brand);border-color:var(--brand);color:#111}
-  .modo-nota{font-size:10px;color:var(--ink-muted);margin-top:6px;text-align:center;line-height:1.4}
+  /* v11.1: el selector de modo vive en el badge del encabezado, no al final de la lista */
+  .modo-op{display:block;width:100%;text-align:left;background:var(--card);border:1.5px solid var(--border);
+    border-radius:12px;padding:12px 14px;margin-bottom:10px;font-family:inherit;cursor:pointer;color:var(--ink)}
+  .modo-op.on{border-color:var(--brand);background:var(--brand-soft)}
+  .modo-op-top{display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .modo-op-t{font-size:14px;font-weight:700;color:var(--ink)}
+  .modo-op-check{font-size:13px;font-weight:700;color:var(--brand);opacity:0}
+  .modo-op.on .modo-op-check{opacity:1}
+  .modo-op-s{font-size:11px;color:var(--ink-soft);line-height:1.45;margin-top:4px}
+  .modo-nota{font-size:10px;color:var(--ink-muted);margin:2px 0 14px;text-align:center;line-height:1.45}
   .bcvtag{font-size:10px;font-weight:700;color:var(--brand);letter-spacing:.3px}
   /* ===== LOGIN (bloque D) — identico en todas las pantallas ===== */
   .login{display:none;position:fixed;inset:0;background:var(--bg);z-index:900;align-items:center;justify-content:center;padding:24px}
@@ -99,6 +103,7 @@
   .header-right{margin-left:auto;display:flex;align-items:center;gap:6px}
   .tasa-badge{font-size:11px;color:var(--brand);background:var(--brand-soft);border:1px solid rgba(245,168,0,0.3);border-radius:20px;padding:4px 10px;cursor:pointer;white-space:nowrap;font-weight:600}
   .tasa-badge:active{opacity:.7}
+  .tasa-badge.bcv{background:var(--brand);color:#111;border-color:var(--brand)}
   .refresh-btn{background:none;border:none;cursor:pointer;color:var(--ink-muted);padding:4px;border-radius:6px;display:flex;align-items:center}
   .refresh-btn:active{color:var(--brand)}
   .refresh-btn svg{width:16px;height:16px}
@@ -257,7 +262,7 @@
   <div class="logo-row">
     <img src="logo-header.png" alt="Repuesto BoParts" class="logo-img">
     <div class="header-right">
-      <div class="tasa-badge" id="tasaBadge" onclick="avisoTasa()">Bs <span id="tasaVal">…</span></div>
+      <div class="tasa-badge" id="tasaBadge" onclick="abrirModoTasa()"><span id="tasaVal">Tasa</span></div>
       <button class="refresh-btn" id="refreshBtn" onclick="loadData(true)" title="Actualizar">
         <svg id="refreshIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
       </button>
@@ -288,22 +293,21 @@
   <div class="sheet-body" id="sheetBody"></div>
 </div>
 
-<div class="modo-wrap">
-  <div class="modo-tabs">
-    <button class="modo-tab on" id="modoUsd" onclick="ponerModo('usd')">Dólares</button>
-    <button class="modo-tab" id="modoBcv" onclick="ponerModo('bcv')">BCV</button>
-  </div>
-  <div class="modo-nota" id="modoNota"></div>
-</div>
-
-<div class="tasa-modal" id="tasaModal">
+<div class="tasa-modal" id="tasaModal" onclick="if(event.target===this)cerrarModoTasa()">
   <div class="tasa-box">
-    <h3>Tasa del dólar</h3>
-    <p>Ingresa la tasa BCV actual. Los precios en Bs se recalculan al instante.</p>
-    <input type="number" id="tasaInput" min="1" placeholder="1000">
+    <h3>¿Con cuál tasa damos precios?</h3>
+    <p>Cambia solo cómo se ve esta lista. El registro de ventas sigue igual.</p>
+    <button class="modo-op" id="modoUsd" onclick="ponerModo('usd')">
+      <div class="modo-op-top"><span class="modo-op-t">Dólares</span><span class="modo-op-check">✓</span></div>
+      <div class="modo-op-s" id="ejUsd"></div>
+    </button>
+    <button class="modo-op" id="modoBcv" onclick="ponerModo('bcv')">
+      <div class="modo-op-top"><span class="modo-op-t">BCV</span><span class="modo-op-check">✓</span></div>
+      <div class="modo-op-s" id="ejBcv"></div>
+    </button>
+    <div class="modo-nota" id="modoNota"></div>
     <div class="tasa-actions">
-      <button class="btn-cancel" onclick="closeTasaEditor()">Cancelar</button>
-      <button class="btn-apply" onclick="applyTasa()">Aplicar</button>
+      <button class="btn-cancel" onclick="cerrarModoTasa()">Cerrar</button>
     </div>
   </div>
 </div>
@@ -474,7 +478,7 @@ function revisarSesion(alTener) {
 
 // v10: la lista viene del script, no del CSV publicado. Asi LISTA DE PRODUCTOS puede dejar de estar publicada.
 const SCRIPT_URL_SESION = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
-const APP_VERSION = 'v11';
+const APP_VERSION = 'v11.1';
 var VER_SCRIPT = '?';
 function sellarVersion(d) {
   if (d && d.v) VER_SCRIPT = d.v;
@@ -505,11 +509,20 @@ function precioMostrado(p) {
 }
 function marcaModo() { return modoPrecio === 'bcv' ? ' BCV' : ''; }
 
+/* v11.1: el modo se elige desde el badge "Tasa" del encabezado. */
+function abrirModoTasa() {
+  pintarModo();
+  document.getElementById('tasaModal').classList.add('show');
+}
+function cerrarModoTasa() {
+  document.getElementById('tasaModal').classList.remove('show');
+}
 function ponerModo(m) {
   if (m === 'bcv' && !hayBCV()) { avisoSinBCV(); return; }
   modoPrecio = m;
   try { localStorage.setItem('boparts_modo_precio', m); } catch (e) {}
   pintarModo();
+  cerrarModoTasa();
   search();
   const ov = document.getElementById('overlay');
   if (ov && ov.classList.contains('show') && detalleAbierto >= 0) openDetail(detalleAbierto);
@@ -518,15 +531,32 @@ function avisoSinBCV() {
   alert('Todavia no hay tasa BCV cargada.\nLa fija un socio desde Gerencia, en el engranaje del encabezado.');
 }
 function pintarModo() {
+  // El badge del encabezado es el que muestra con cual tasa se esta trabajando.
+  const badge = document.getElementById('tasaBadge');
+  if (badge) badge.classList.toggle('bcv', modoPrecio === 'bcv');
+  const tv = document.getElementById('tasaVal');
+  if (tv) tv.textContent = modoPrecio === 'bcv' ? 'Tasa · BCV' : 'Tasa';
+
   const b1 = document.getElementById('modoUsd'), b2 = document.getElementById('modoBcv');
   if (!b1) return;
   b1.classList.toggle('on', modoPrecio === 'usd');
   b2.classList.toggle('on', modoPrecio === 'bcv');
   b2.style.opacity = hayBCV() ? '1' : '.45';
+
+  // Ejemplo con las tasas reales, para no tener que adivinar cual conviene.
+  const ref = 10, bsRef = Math.round(ref * currentTasa);
+  const e1 = document.getElementById('ejUsd'), e2 = document.getElementById('ejBcv');
+  if (e1) e1.textContent = 'Como siempre. Tasa de trabajo ' + currentTasa.toLocaleString('es-VE') +
+    ': $' + ref.toFixed(2) + ' son Bs ' + bsRef.toLocaleString('es-VE') + '.';
+  if (e2) e2.textContent = hayBCV()
+    ? 'Esos mismos Bs ' + bsRef.toLocaleString('es-VE') + ' a tasa BCV ' + TASA_BCV.toLocaleString('es-VE') +
+      ': $' + (bsRef / TASA_BCV).toFixed(2) + '. Los bolivares no cambian.'
+    : 'Falta cargar la tasa BCV. La fija un socio desde Gerencia.';
+
   const t = document.getElementById('modoNota');
-  if (t) t.textContent = modoPrecio === 'bcv'
-    ? 'Precios en dolares a tasa BCV ' + (TASA_BCV ? TASA_BCV.toLocaleString('es-VE') : '') + ' · los bolivares no cambian'
-    : 'Precios en dolares de la lista · Bs a tasa ' + currentTasa.toLocaleString('es-VE');
+  const fch = (typeof TASA_FECHA === 'string') ? TASA_FECHA : '';
+  if (t) t.textContent = 'Las dos tasas las fijan Rodolfo o Javier desde Gerencia.' +
+    (fch ? ' Ultima vez: ' + fch : '');
 }
 var detalleAbierto = -1;
 let query = '';
@@ -671,14 +701,8 @@ function aplicarDatos(text, equivText) {
   search();
 }
 
-function updateTasaBadge() {
-  document.getElementById('tasaVal').textContent = currentTasa.toLocaleString('es-VE');
-}
-// La tasa ya no se edita en cada telefono: la fijan los socios en Gerencia y se sincroniza sola.
-function avisoTasa() {
-  alert('La tasa la fijan Rodolfo o Javier desde Gerencia y se actualiza sola en todos los dispositivos.' +
-        (TASA_FECHA ? '\n\nUltima vez: ' + TASA_FECHA : ''));
-}
+// v11.1: el badge ya no muestra el numero de la tasa, muestra con cual se esta trabajando.
+function updateTasaBadge() { pintarModo(); }
 var TASA_FECHA = localStorage.getItem('boparts_tasa_fecha') || '';
 function sincronizarTasa() {
   fetch(SCRIPT_URL_CONFIG + '?action=config&t=' + Date.now())
@@ -704,19 +728,9 @@ function sincronizarTasa() {
     .catch(() => {});
 }
 var SCRIPT_URL_CONFIG = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
-function closeTasaEditor() {
-  document.getElementById('tasaModal').classList.remove('show');
-}
-function applyTasa() {
-  const val = parseFloat(document.getElementById('tasaInput').value);
-  if (!val || val < 1) return;
-  currentTasa = val;
-  localStorage.setItem('motoauto_tasa', val);
-  PRODUCTS.forEach(p => { p.bs = p.precio ? Math.round(p.precio * val) : 0 });
-  updateTasaBadge();
-  closeTasaEditor();
-  render(lastFiltered);
-}
+/* v11.1: se elimino el editor de tasa local (applyTasa). La tasa de trabajo ya solo viene
+   de Gerencia via sincronizarTasa; dejarlo abierto en cada telefono era una via de escape
+   para que alguien diera precios con una tasa distinta a la del sistema. */
 
 function normalize(s) {
   return (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
