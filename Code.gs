@@ -1,6 +1,15 @@
 /**
  * Repuesto BoParts — Code.gs
- * VERSION: v23 (2026-09-19) | ficha del producto y cambio de precio con registro
+ * VERSION: v24 (2026-09-19) | quien sube cada foto, y datos para medir rendimiento
+ *
+ * v24:
+ *   - Hoja FOTOS_LOG: cada carga de fotos deja quien, cuando, que producto, cuantas fotos NUEVAS y cuantas
+ *     reemplazo. Hasta ahora una foto se escribia en la fila del producto y no quedaba rastro de nada: no
+ *     habia forma de saber quien trabajo el catalogo ni cuanto.
+ *   - action=ventas devuelve tambien conteos y demanda del periodo, para poder medir por persona sin pedir
+ *     otra vez lo mismo.
+ *
+ * v23 (2026-09-19): ficha del producto y cambio de precio con registro.
  *
  * v23 — INVENTARIO PARTIDO EN DOS, como compras:
  *   - action=producto&codigo=X: la ficha completa de un producto. Stock, costo, precio, margen y el
@@ -613,10 +622,32 @@ function doPost(e) {
           return json_({ok:false, error:'La fila ' + fila + ' es "' + enHoja + '", no coincide. Recarga la lista.'});
         }
       }
+      // v24: se mira que habia ANTES para saber cuantas fotos son nuevas de verdad y cuantas reemplazan.
+      // Para medir el trabajo sobre el catalogo, lo que cuenta es lo nuevo, no lo que se volvio a subir.
+      var antes = sheet.getRange(fila, 12, 1, 3).getValues()[0];
+      var nuevas = 0, reemplazadas = 0;
+      [data.imagen, data.imagen2, data.imagen3].forEach(function(url, i) {
+        if (!url) return;
+        if (String(antes[i] || '').trim()) reemplazadas++; else nuevas++;
+      });
       if (data.imagen)  sheet.getRange(fila, 12).setValue(data.imagen);
       if (data.imagen2) sheet.getRange(fila, 13).setValue(data.imagen2);
       if (data.imagen3) sheet.getRange(fila, 14).setValue(data.imagen3);
-      return json_({ok:true,tipo:'fotos',fila:fila});
+
+      var ahora = new Date();
+      var fl = hojaAp_(ss, 'FOTOS_LOG', ['FECHA','HORA','CODIGO','PRODUCTO','FOTOS_NUEVAS','FOTOS_REEMPLAZADAS',
+                                         'TOTAL_DESPUES','QUIEN']);
+      var totalDespues = sheet.getRange(fila, 12, 1, 3).getValues()[0]
+        .filter(function(u) { return String(u || '').trim(); }).length;
+      fl.appendRow([fechaVE_(Utilities.formatDate(ahora, TZ_VE, 'dd/MM/yyyy')),
+                    Utilities.formatDate(ahora, TZ_VE, 'HH:mm'),
+                    String(sheet.getRange(fila, 1).getValue() || ''),
+                    String(sheet.getRange(fila, 3).getValue() || ''),
+                    nuevas, reemplazadas, totalDespues,
+                    (quien && quien.nombre) ? quien.nombre : (data.quien || '')]);
+      formatoFecha_(fl, fl.getLastRow(), 1);
+
+      return json_({ok:true,tipo:'fotos',fila:fila,nuevas:nuevas,reemplazadas:reemplazadas,total:totalDespues});
     }
 
     // ---- CLIENTE (sin cambios) ----
@@ -1287,7 +1318,7 @@ function iso_(v) {
 // Formato compacto (arrays) para que el telefono descargue lo menos posible.
 function datosVentas_(ss, desde, hasta) {
   var d1 = desde || '0000-00-00', d2 = hasta || '9999-99-99';
-  var out = {ok:true, desde:d1, hasta:d2, lineas:[], ventas:[], gastos:[]};
+  var out = {ok:true, desde:d1, hasta:d2, lineas:[], ventas:[], gastos:[], conteos:[], demanda:[], fotos:[]};
 
   var det = ss.getSheetByName(SH_DETALLE);
   if (det && det.getLastRow() >= 2) {
@@ -1321,6 +1352,35 @@ function datosVentas_(ss, desde, hasta) {
       var f = iso_(r[1]); if (!f || f < d1 || f > d2) return;
       // 0 fecha, 1 categoria, 2 descripcion, 3 montoUSD, 4 montoBS, 5 pagadoPor
       out.gastos.push([f, String(r[3]||''), String(r[4]||''), Number(r[8])||0, Number(r[9])||0, String(r[12]||'')]);
+    });
+  }
+
+  // v24: lo que hace falta para medir a cada persona, sin pedir otra vez lo mismo.
+  var ct = ss.getSheetByName('CONTEOS');
+  if (ct && ct.getLastRow() >= 2) {
+    ct.getRange(2, 1, ct.getLastRow() - 1, 15).getValues().forEach(function(r) {
+      var f = iso_(r[0]); if (!f || f < d1 || f > d2) return;
+      // 0 fecha, 1 codigo, 2 contadoPor, 3 diferencia, 4 tipo
+      out.conteos.push([f, String(r[2]||''), String(r[8]||''),
+                        (r[6] === '' || r[6] === null) ? null : Number(r[6]) || 0, String(r[7]||'')]);
+    });
+  }
+
+  var dm = ss.getSheetByName('DEMANDA_NO_ATENDIDA');
+  if (dm && dm.getLastRow() >= 2) {
+    dm.getRange(2, 1, dm.getLastRow() - 1, 17).getValues().forEach(function(r) {
+      var f = iso_(r[0]); if (!f || f < d1 || f > d2) return;
+      // 0 fecha, 1 vendedor, 2 producto, 3 cliente
+      out.demanda.push([f, String(r[2]||''), String(r[3]||''), String(r[6]||'')]);
+    });
+  }
+
+  var fl = ss.getSheetByName('FOTOS_LOG');
+  if (fl && fl.getLastRow() >= 2) {
+    fl.getRange(2, 1, fl.getLastRow() - 1, 8).getValues().forEach(function(r) {
+      var f = iso_(r[0]); if (!f || f < d1 || f > d2) return;
+      // 0 fecha, 1 quien, 2 nuevas, 3 reemplazadas
+      out.fotos.push([f, String(r[7]||''), Number(r[4])||0, Number(r[5])||0]);
     });
   }
   return out;

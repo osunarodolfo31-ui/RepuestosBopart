@@ -1,7 +1,10 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_gerencia.html
-  VERSION: v2.6 (2026-09-19) | requiere Apps Script v22
+  VERSION: v2.7 (2026-09-19) | requiere Apps Script v24
+  v2.7: rendimiento por persona. Ventas, margen y ticket salen de VENTAS_DETALLE, que guarda el vendedor
+        en cada linea desde el v8; el trabajo sobre el catalogo sale de FOTOS_LOG, CONTEOS y DEMANDA.
+        Nada de esto son datos nuevos: estaban ahi y nadie los miraba.
   v2.6: en la ficha del cliente se marca si es aliado y con que porcentaje. Pantalla de liquidacion:
         comisiones cobrables menos lo que debe, en un solo movimiento.
   v2.5: relacion de gastos linea por linea. El detalle (fecha, descripcion, quien pago) ya venia en la
@@ -261,6 +264,18 @@ select option{background:#1E1E1E;color:var(--ink)}
 .liqd b.mut{color:var(--ink-muted)}
 .liqd small{color:var(--ink-muted);font-size:10px;flex-basis:100%;text-align:right;margin-top:-3px}
 .liqm{margin-top:8px;font-size:12px;color:var(--ink-muted)}
+.per{background:var(--card2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;margin-bottom:8px}
+.perh{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:10px}
+.perh .nm{font-size:14px;font-weight:600;color:var(--ink)}
+.perh .rt{font-size:17px;font-weight:700;color:var(--ink);text-align:right;white-space:nowrap}
+.perh .rt small{display:block;font-size:10px;font-weight:500;color:var(--ink-muted);text-transform:uppercase;letter-spacing:.3px}
+.perg{display:flex;flex-wrap:wrap;gap:8px 16px;border-top:1px solid var(--border);padding-top:8px}
+.perg>div{min-width:72px}
+.perg span{display:block;font-size:10px;color:var(--ink-muted);text-transform:uppercase;letter-spacing:.3px}
+.perg b{font-size:14px;color:var(--ink);font-weight:600}
+.perg b.flo{color:var(--brand)}
+.perc{margin-top:9px;font-size:11px;color:var(--ink-soft);border-top:1px solid var(--border);padding-top:8px;line-height:1.5}
+.perc b{color:var(--ink)}
 .chip.cr{background:var(--brand-soft);color:var(--brand)}
 .chip.no{background:rgba(255,255,255,.07);color:var(--ink-muted)}
 .chip.al{background:rgba(239,68,68,.15);color:var(--red)}
@@ -393,7 +408,7 @@ select option{background:#1E1E1E;color:var(--ink)}
 <div class="nav-ov" id="navOv" onclick="closeNav()"></div>
 <div class="nav-pan" id="navPan">
   <div class="nav-t">Repuesto BoParts</div>
-  <div id="verTag" style="font-size:10px;color:var(--ink-muted);margin:-6px 0 10px;letter-spacing:0.3px">app v2.6 · script ?</div>
+  <div id="verTag" style="font-size:10px;color:var(--ink-muted);margin:-6px 0 10px;letter-spacing:0.3px">app v2.7 · script ?</div>
   <div class="nav-g">
     <a class="ncard" href="index.html">
       <span class="nicon">📋</span>
@@ -626,7 +641,7 @@ function sellarVersion(d) {
   if (t) t.textContent = 'app ' + APP_VERSION + ' \u00b7 script ' + VER_SCRIPT;
   return d;
 }
-var APP_VERSION = 'v2.6';
+var APP_VERSION = 'v2.7';
 var TASA = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
 var periodo = 'hoy', DATA = null;
 
@@ -1185,6 +1200,60 @@ function render(r) {
     });
   });
   if (Object.keys(mp).length) h += '<div class="section"><div class="stitle">Como pagaron</div>' + barras(mp, 10, true) + '</div>';
+
+  // ===== Rendimiento por persona (v2.7) =====
+  // Tres bloques separados a proposito: un puntaje unico se manipula solo.
+  var P = {};
+  function per(n) {
+    var k = String(n || '').trim(); if (!k) return null;
+    return P[k] || (P[k] = {nombre:k, ventas:0, utilidad:0, unidades:0, tickets:{},
+                            fotos:0, conteos:0, difer:0, demanda:0});
+  }
+  L.forEach(function(l) {
+    var p = per(l[2]); if (!p) return;
+    p.ventas += num(l[9]); p.utilidad += num(l[11]); p.unidades += num(l[6]);
+    if (l[0]) p.tickets[l[0]] = 1;
+  });
+  (DATA.fotos || []).forEach(function(f) { var p = per(f[1]); if (p) p.fotos += num(f[2]); });
+  (DATA.conteos || []).forEach(function(c) {
+    var p = per(c[2]); if (!p) return;
+    p.conteos++; if (c[3] !== null && c[3] !== undefined && num(c[3]) !== 0) p.difer++;
+  });
+  (DATA.demanda || []).forEach(function(d) { var p = per(d[1]); if (p) p.demanda++; });
+
+  var gente = Object.keys(P).map(function(k) { return P[k]; });
+  if (gente.length) {
+    gente.forEach(function(p) {
+      p.nTickets = Object.keys(p.tickets).length;
+      p.margen = p.ventas > 0 ? (p.utilidad / p.ventas) * 100 : 0;
+      p.ticket = p.nTickets ? p.ventas / p.nTickets : 0;
+      p.porTicket = p.nTickets ? p.unidades / p.nTickets : 0;
+    });
+    gente.sort(function(a, b) { return b.ventas - a.ventas; });
+    h += '<div class="section"><div class="stitle">Rendimiento por persona</div>';
+    gente.forEach(function(p) {
+      h += '<div class="per">' +
+        '<div class="perh"><div class="nm">' + escHtml(p.nombre) + '</div>' +
+          '<div class="rt">' + usd(p.ventas) + '<small>vendido</small></div></div>' +
+        '<div class="perg">' +
+          '<div><span>Utilidad</span><b>' + usd(p.utilidad) + '</b></div>' +
+          '<div><span>Margen</span><b class="' + (p.margen < 20 ? 'flo' : '') + '">' + p.margen.toFixed(0) + '%</b></div>' +
+          '<div><span>Ventas</span><b>' + p.nTickets + '</b></div>' +
+          '<div><span>Ticket</span><b>' + usd(p.ticket) + '</b></div>' +
+          '<div><span>Prod./venta</span><b>' + p.porTicket.toFixed(1) + '</b></div>' +
+        '</div>' +
+        '<div class="perc">' +
+          'Catalogo: <b>' + p.fotos + '</b> foto' + (p.fotos === 1 ? '' : 's') + ' nueva' + (p.fotos === 1 ? '' : 's') +
+          ' · <b>' + p.conteos + '</b> conteo' + (p.conteos === 1 ? '' : 's') +
+          (p.difer ? ' (' + p.difer + ' con diferencia)' : '') +
+          ' · <b>' + p.demanda + '</b> demanda registrada' +
+        '</div>' +
+      '</div>';
+    });
+    h += '<div class="aviso" style="margin-top:10px">El margen es lo que separa vender de despachar: dos personas ' +
+         'con el mismo total vendido pueden dejar utilidades muy distintas. El cumplimiento de tareas y la ' +
+         'iniciativa llegan con el modulo de tareas.</div></div>';
+  }
 
   // Gastos
   if (G.length) {

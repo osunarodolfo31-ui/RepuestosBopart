@@ -1,7 +1,10 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_fotos.html
-  VERSION: v9 (2026-09-18) | requiere Apps Script v21.5
+  VERSION: v9.1 (2026-09-19) | requiere Apps Script v24
+  v9.1: pestanas Sin foto / Solo 1 / Con foto / Todas, con el contador arriba. 'Sin foto' es la cola de
+        trabajo: se abre, se sube, y el producto desaparece de la lista. Cada carga queda en FOTOS_LOG
+        con quien la hizo: hasta ahora no habia forma de saber quien trabajo el catalogo ni cuanto.
   v9: la lista de productos se pide al script (action=productos) en vez del CSV publicado, y la fila de
       cada producto la dice el script. Antes se contaba desde el CSV; con esta respuesta esa cuenta se
       habria corrido y una foto podia caer en otro producto. Login incluido.
@@ -25,6 +28,23 @@
     --bg:#111;--bg2:#1A1A1A;--card:#1E1E1E;--border:#2E2E2E;
     --ink:#F0F0F0;--ink-soft:#AAA;--ink-muted:#666;
     --radius:14px;--radius-sm:8px;--green:#22C55E;--red:#EF4444;
+  }
+  .ftabs{display:flex;gap:6px;overflow-x:auto;margin-bottom:10px;padding-bottom:2px}
+  .ftabs::-webkit-scrollbar{display:none}
+  .ftab{flex:0 0 auto;padding:7px 13px;border-radius:999px;border:1.5px solid var(--border);background:transparent;
+    color:var(--ink-soft);font-size:12px;font-weight:600;font-family:inherit;cursor:pointer;white-space:nowrap}
+  .ftab.on{background:var(--brand);border-color:var(--brand);color:#111}
+  .fcount{font-size:11px;color:var(--ink-muted);margin-bottom:10px}
+  .fcount b{color:var(--ink)}
+  .frow{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--card);
+    border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:6px}
+  .frow .fn{font-size:13px;color:var(--ink);line-height:1.3;min-width:0}
+  .frow .fm{font-size:10px;color:var(--ink-muted);margin-top:2px}
+  .fdot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--border);margin-right:3px}
+  .fdot.on{background:var(--green)}
+  .fbtn{flex:0 0 auto;padding:7px 12px;border-radius:var(--radius-sm);border:1.5px solid var(--brand);
+    background:transparent;color:var(--brand);font-size:12px;font-weight:600;font-family:inherit;cursor:pointer}
+  .fvacio{text-align:center;padding:22px;color:var(--ink-muted);font-size:13px
   }
   /* ===== LOGIN (bloque D) — identico en todas las pantallas ===== */
   .login{display:none;position:fixed;inset:0;background:var(--bg);z-index:900;align-items:center;justify-content:center;padding:24px}
@@ -159,6 +179,15 @@
     <input type="search" id="searchInput" placeholder="Buscar producto por nombre o código…" autocomplete="off">
     <div class="dropdown" id="dropdown"></div>
   </div>
+
+  <div class="ftabs" id="fTabs">
+    <button class="ftab on" data-f="sin">Sin foto</button>
+    <button class="ftab" data-f="una">Solo 1</button>
+    <button class="ftab" data-f="con">Con foto</button>
+    <button class="ftab" data-f="todos">Todos</button>
+  </div>
+  <div id="conteoFotos" class="fcount">Cargando...</div>
+  <div id="listaFotos"></div>
 
   <div class="selected-product" id="selectedProduct">
     <button class="sp-clear" onclick="clearSelection()">×</button>
@@ -383,6 +412,7 @@ async function loadProducts() {
         imagen3: txt_(r[13]).trim(),
       });
     });
+    pintarListaFotos();
     showToast(`${PRODUCTS.length} productos cargados`, 'success');
   } catch(e) {
     showToast('Error cargando productos', 'error');
@@ -406,6 +436,59 @@ function parseCSV(text) {
 // ── BÚSQUEDA ──────────────────────────────────────────────────
 function normalize(s) {
   return (s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+}
+
+// ===== Cola de trabajo por estado de foto (v9.1) =====
+var filtroFoto = 'sin';
+document.getElementById('fTabs').addEventListener('click', function(e) {
+  var b = e.target.closest('.ftab'); if (!b) return;
+  [].forEach.call(document.querySelectorAll('#fTabs .ftab'), function(t) { t.classList.remove('on'); });
+  b.classList.add('on'); filtroFoto = b.dataset.f; pintarListaFotos();
+});
+
+function cuantasFotos(p) {
+  return [p.imagen, p.imagen2, p.imagen3].filter(function(u) { return String(u || '').trim(); }).length;
+}
+
+function pintarListaFotos() {
+  var sin = 0, una = 0, con = 0;
+  PRODUCTS.forEach(function(p) {
+    var n = cuantasFotos(p);
+    if (n === 0) sin++; else { con++; if (n === 1) una++; }
+  });
+  document.getElementById('conteoFotos').innerHTML =
+    '<b>' + con + '</b> de <b>' + PRODUCTS.length + '</b> productos con foto · ' +
+    '<b>' + sin + '</b> sin ninguna · <b>' + una + '</b> con una sola';
+
+  var lista = PRODUCTS.filter(function(p) {
+    var n = cuantasFotos(p);
+    if (filtroFoto === 'sin') return n === 0;
+    if (filtroFoto === 'una') return n === 1;
+    if (filtroFoto === 'con') return n > 0;
+    return true;
+  });
+  var box = document.getElementById('listaFotos');
+  if (!lista.length) {
+    box.innerHTML = '<div class="fvacio">' +
+      (filtroFoto === 'sin' ? 'No queda ningun producto sin foto.' : 'Sin resultados') + '</div>';
+    return;
+  }
+  var h = lista.slice(0, 60).map(function(p) {
+    var n = cuantasFotos(p);
+    var dots = '';
+    for (var i = 0; i < 3; i++) dots += '<span class="fdot' + (i < n ? ' on' : '') + '"></span>';
+    return '<div class="frow"><div><div class="fn">' + escapeHtml(p.producto) + '</div>' +
+      '<div class="fm">' + dots + ' ' + escapeHtml(p.codigo || 'sin codigo') +
+      (p.categoria ? ' · ' + escapeHtml(p.categoria) : '') + '</div></div>' +
+      '<button class="fbtn" onclick="selectProduct(' + PRODUCTS.indexOf(p) + ')">' +
+      (n === 0 ? 'Subir' : 'Agregar') + '</button></div>';
+  }).join('');
+  if (lista.length > 60) h += '<div class="fvacio" style="padding:12px">y ' + (lista.length - 60) + ' mas. Usa el buscador de arriba.</div>';
+  box.innerHTML = h;
+}
+
+function escapeHtml(t) {
+  return String(t == null ? '' : t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
 const searchInput = document.getElementById('searchInput');
@@ -584,6 +667,7 @@ async function saveToSheet() {
       body: JSON.stringify({
         row: selectedProduct.row,
         codigo: selectedProduct.codigo,          // el script prefiere el codigo: si alguien ordena la hoja, la fila cambia
+        quien: miNombre(),                       // v9.1: con sesion, el servidor lo sobreescribe con quien entro
         producto: selectedProduct.producto,
         imagen: uploadedUrls[0] || '',
         imagen2: uploadedUrls[1] || '',
@@ -593,11 +677,13 @@ async function saveToSheet() {
     const txt = await r.text();
     let d; try { d = JSON.parse(txt); } catch(e) { throw new Error('El script respondió: ' + txt.replace(/<[^>]+>/g,' ').slice(0,80)); }
     if (!d || d.ok !== true) throw new Error(d && d.error ? d.error : 'Respuesta inesperada');
-    showToast('¡Guardado en catálogo! ✓', 'success');
+    showToast(d.nuevas ? `¡Guardado! ${d.nuevas} foto${d.nuevas === 1 ? '' : 's'} nueva${d.nuevas === 1 ? '' : 's'} ✓`
+                       : '¡Guardado en catálogo! ✓', 'success');
     // Update local data
     selectedProduct.imagen = uploadedUrls[0] || selectedProduct.imagen;
     selectedProduct.imagen2 = uploadedUrls[1] || selectedProduct.imagen2;
     selectedProduct.imagen3 = uploadedUrls[2] || selectedProduct.imagen3;
+    pintarListaFotos();        // el producto sale de la cola "Sin foto" al instante
     setTimeout(clearSelection, 1500);
   } catch(e) {
     showToast('NO se guardó: ' + e.message, 'error');
@@ -616,7 +702,7 @@ function showToast(msg, type='') {
 }
 
 // ── INIT ──────────────────────────────────────────────────────
-const APP_VERSION = 'v9';
+const APP_VERSION = 'v9.1';
 const hdrP = document.querySelector('.header-text p, header p');
 if (hdrP) hdrP.textContent = APP_VERSION + ' · ' + hdrP.textContent;
 [0,1,2].forEach(i => renderSlot(i));
@@ -630,7 +716,7 @@ revisarSesion(loadProducts);
 <div class="nav-overlay" id="navOverlay" onclick="closeNav()"></div>
 <div class="nav-panel" id="navPanel">
   <div class="nav-panel-title">Repuesto BoParts</div>
-  <div id="verTag" style="font-size:10px;color:#666;margin:-10px 0 12px;text-align:center;letter-spacing:.3px">app v9 · script ?</div>
+  <div id="verTag" style="font-size:10px;color:#666;margin:-10px 0 12px;text-align:center;letter-spacing:.3px">app v9.1 · script ?</div>
   <div class="nav-grid">
     <a class="nav-card" href="index.html">
       <span class="nav-icon">📋</span>

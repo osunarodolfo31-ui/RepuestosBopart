@@ -14,14 +14,14 @@ en el comentario del encabezado de cada HTML y en la cabecera de `Code.gs`.
 | boparts_cobros.html     | v2.6    | **v21.5**            |
 | boparts_compras.html    | v2.6    | **v21.6**            |
 | boparts_gastos.html     | v1.7    | **v21.5**            |
-| boparts_fotos.html      | v9      | **v21.5**            |
+| boparts_fotos.html      | v9.1    | **v24**              |
 | boparts_demanda.html    | v8.6    | **v21.5**            |
-| boparts_gerencia.html   | v2.6    | **v22**              |
+| boparts_gerencia.html   | v2.7    | **v24**              |
 | boparts_apartados.html  | v1.5    | **v21.5**            |
 | boparts_devoluciones.html| v1.4   | **v21.5**            |
 | boparts_inventario.html | v2      | **v23**              |
 | boparts_reportes.html   | —       | **SE ELIMINA** (lo reemplazo gerencia) |
-| Code.gs (Apps Script)   | v23     | —                    |
+| Code.gs (Apps Script)   | v24     | —                    |
 
 Deployment ID (no cambia): `AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg`
 
@@ -61,6 +61,37 @@ una URL pública — ya no lo hacen. Piden `action=clientes` y `action=productos
 
 Con esto, las hojas que faltan por migrar son **LISTA DE PRODUCTOS** (compras, fotos, devoluciones) y
 **CATALOGO_PROVEEDORES** (demanda).
+
+## v24 / fotos v9.1 / gerencia v2.7 — 2026-09-19 · Quién trabajó el catálogo, y rendimiento por persona
+
+### Cargar Fotos: la cola de trabajo
+Pestañas **Sin foto · Solo 1 · Con foto · Todos**, con el contador arriba:
+*"312 de 798 productos con foto · 486 sin ninguna · 94 con una sola"*.
+
+"Sin foto" es la cola: se abre, se sube, y el producto **desaparece de la lista al instante**. "Solo 1" es una
+cola distinta y vale la pena: un producto con una sola imagen se ve pobre en la lista de precios y en
+Mercado Libre.
+
+### FOTOS_LOG
+Hasta ahora una foto se escribía en la fila del producto y **no quedaba rastro de nada**: ni quién, ni cuándo.
+Ahora cada carga deja fecha, hora, producto, quién, y — lo que importa para medir — cuántas fotos son
+**nuevas** y cuántas **reemplazan** una que ya estaba. Para medir trabajo sobre el catálogo cuenta lo nuevo,
+no lo que se volvió a subir.
+
+### Rendimiento por persona (Gerencia)
+Nada de esto son datos nuevos. `VENTAS_DETALLE` guarda el vendedor en cada línea desde el v8 y nadie lo
+miraba. Por persona y por período:
+
+- Vendido, utilidad y **margen** · ventas (no líneas), ticket promedio y productos por venta
+- Fotos nuevas, conteos hechos (y cuántos con diferencia), demanda registrada
+
+**Tres bloques separados a propósito, sin puntaje único.** Un número solo se manipula solo: la persona
+encuentra la métrica más barata y llena el puntaje con esa.
+
+El margen va marcado cuando baja de 20%: es lo que separa vender de despachar. Dos personas con el mismo
+total vendido pueden dejar utilidades muy distintas.
+
+`action=ventas` devuelve ahora también conteos, demanda y fotos del período, para no pedir lo mismo dos veces.
 
 ## v23 / inventario v2 — 2026-09-19 · Ficha del producto y cambio de precio con registro
 **Code.gs v23 · boparts_inventario.html v2**
