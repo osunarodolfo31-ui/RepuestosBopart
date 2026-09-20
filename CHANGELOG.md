@@ -14,7 +14,7 @@ en el comentario del encabezado de cada HTML y en la cabecera de `Code.gs`.
 | boparts_cobros.html     | v2.6    | **v21.5**            |
 | boparts_compras.html    | v2.6    | **v21.6**            |
 | boparts_gastos.html     | v1.7    | **v21.5**            |
-| boparts_fotos.html      | v9.1    | **v24**              |
+| boparts_fotos.html      | v9.2    | **v24**              |
 | boparts_demanda.html    | v8.6    | **v21.5**            |
 | boparts_gerencia.html   | v2.7    | **v24**              |
 | boparts_apartados.html  | v1.5    | **v21.5**            |
@@ -61,6 +61,17 @@ una URL pública — ya no lo hacen. Piden `action=clientes` y `action=productos
 
 Con esto, las hojas que faltan por migrar son **LISTA DE PRODUCTOS** (compras, fotos, devoluciones) y
 **CATALOGO_PROVEEDORES** (demanda).
+
+## fotos v9.2 — 2026-09-19 · El botón Subir parecía no hacer nada
+Sí hacía: seleccionaba el producto y abría su panel. Pero el panel está **debajo** de la cola, y con 446
+productos sin foto quedaba a cientos de filas de distancia, fuera de pantalla. Desde el teléfono se veía
+como un botón muerto.
+
+Ahora, al elegir un producto, la cola se esconde y la pantalla sube. Al cerrar el producto, la cola vuelve
+y se repinta ya sin él.
+
+**Por qué no lo detectaron las pruebas:** llamaban a la función directamente en vez de hacer clic en el botón,
+así que comprobaban el estado y nunca si eso se veía. La prueba ahora hace clic de verdad.
 
 ## v24 / fotos v9.1 / gerencia v2.7 — 2026-09-19 · Quién trabajó el catálogo, y rendimiento por persona
 

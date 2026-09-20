@@ -1,7 +1,9 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_fotos.html
-  VERSION: v9.1 (2026-09-19) | requiere Apps Script v24
+  VERSION: v9.2 (2026-09-19) | requiere Apps Script v24
+  v9.2: al elegir un producto de la cola, la cola se esconde y la pantalla sube. Con 446 productos en la
+        lista, el panel del producto quedaba muy por debajo y parecia que el boton no hacia nada.
   v9.1: pestanas Sin foto / Solo 1 / Con foto / Todas, con el contador arriba. 'Sin foto' es la cola de
         trabajo: se abre, se sube, y el producto desaparece de la lista. Cada carga queda en FOTOS_LOG
         con quien la hizo: hasta ahora no habia forma de saber quien trabajo el catalogo ni cuanto.
@@ -533,6 +535,18 @@ function selectProduct(idx) {
   document.getElementById('saveBtn').classList.add('show');
   // Show existing images
   [0,1,2].forEach(i => renderSlot(i));
+  // v9.2: la cola se esconde mientras se trabaja un producto. Con cientos de filas debajo, el panel
+  // quedaba fuera de pantalla y parecia que el boton no hacia nada.
+  verCola(false);
+}
+
+// Muestra u oculta la cola de trabajo (pestanas, contador y lista)
+function verCola(ver) {
+  ['fTabs', 'conteoFotos', 'listaFotos'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) el.style.display = ver ? '' : 'none';
+  });
+  if (!ver) window.scrollTo({top:0, behavior:'smooth'});
 }
 
 function clearSelection() {
@@ -543,6 +557,8 @@ function clearSelection() {
   document.getElementById('photosGrid').style.display = 'none';
   document.getElementById('saveBtn').classList.remove('show');
   [0,1,2].forEach(i => renderSlot(i));
+  verCola(true);
+  pintarListaFotos();
 }
 
 // Botones separados: la camara necesita capture="environment"; sin el, Android abre solo la galeria.
@@ -702,7 +718,7 @@ function showToast(msg, type='') {
 }
 
 // ── INIT ──────────────────────────────────────────────────────
-const APP_VERSION = 'v9.1';
+const APP_VERSION = 'v9.2';
 const hdrP = document.querySelector('.header-text p, header p');
 if (hdrP) hdrP.textContent = APP_VERSION + ' · ' + hdrP.textContent;
 [0,1,2].forEach(i => renderSlot(i));
@@ -716,7 +732,7 @@ revisarSesion(loadProducts);
 <div class="nav-overlay" id="navOverlay" onclick="closeNav()"></div>
 <div class="nav-panel" id="navPanel">
   <div class="nav-panel-title">Repuesto BoParts</div>
-  <div id="verTag" style="font-size:10px;color:#666;margin:-10px 0 12px;text-align:center;letter-spacing:.3px">app v9.1 · script ?</div>
+  <div id="verTag" style="font-size:10px;color:#666;margin:-10px 0 12px;text-align:center;letter-spacing:.3px">app v9.2 · script ?</div>
   <div class="nav-grid">
     <a class="nav-card" href="index.html">
       <span class="nav-icon">📋</span>
