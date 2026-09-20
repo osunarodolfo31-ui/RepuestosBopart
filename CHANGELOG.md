@@ -9,7 +9,7 @@ en el comentario del encabezado de cada HTML y en la cabecera de `Code.gs`.
 
 | Archivo                 | Versión | Requiere Apps Script |
 |-------------------------|---------|----------------------|
-| index.html              | v10.3   | **v21.5**            |
+| index.html              | v11     | **v24**              |
 | boparts_ventas.html     | v14.2   | **v22**              |
 | boparts_cobros.html     | v2.6    | **v21.5**            |
 | boparts_compras.html    | v2.6    | **v21.6**            |
@@ -61,6 +61,32 @@ una URL pública — ya no lo hacen. Piden `action=clientes` y `action=productos
 
 Con esto, las hojas que faltan por migrar son **LISTA DE PRODUCTOS** (compras, fotos, devoluciones) y
 **CATALOGO_PROVEEDORES** (demanda).
+
+## index v11 — 2026-09-19 · Dar precios en Dólares o en BCV
+Interruptor arriba de la lista de precios: **Dólares** (como siempre) o **BCV**.
+
+**Los bolívares no cambian nunca.** Lo único que cambia es en qué dólar se expresa ese mismo precio:
+
+| Modo | Dólares | Bolívares |
+|---|---|---|
+| Dólares | $8,00 | Bs 8.000 |
+| BCV | $9,45 | Bs 8.000 |
+
+La cuenta es `Bs ÷ tasa BCV`. El número es más alto porque quien paga con un dólar valorado a BCV necesita
+más dólares para cubrir los mismos bolívares.
+
+**Es solo presentación.** No toca `motoauto_tasa`, que es la tasa de trabajo que lee Registrar Venta. Si la
+tocara, el modo de dar precios se colaría en el registro de ventas, las comisiones y el margen.
+
+Para que nadie cotice en el modo equivocado:
+- El interruptor va arriba, grande, y dice debajo qué tasa está usando
+- Cada precio en la lista lleva la marca **BCV** al lado
+- El detalle dice "Dólares a BCV" en vez de "Dólares"
+- El mensaje de WhatsApp dice *"Equivalente en divisa a BCV"*, y no promete el precio preferencial por pagar
+  en dólares, que en ese modo sería falso
+
+El modo se recuerda entre aperturas. Si no hay tasa BCV cargada en Gerencia, el botón no deja pasar y lo avisa.
+La tasa BCV llega por `action=config`, que ya se pedía.
 
 ## fotos v9.2 — 2026-09-19 · El botón Subir parecía no hacer nada
 Sí hacía: seleccionaba el producto y abría su panel. Pero el panel está **debajo** de la cola, y con 446

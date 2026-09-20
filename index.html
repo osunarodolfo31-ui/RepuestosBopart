@@ -1,7 +1,11 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — index.html
-  VERSION: v10.3 (2026-09-18) | requiere Apps Script v21.5
+  VERSION: v11 (2026-09-19) | requiere Apps Script v24
+  v11: interruptor Dolares / BCV para dar precios. Los BOLIVARES NO CAMBIAN nunca: lo unico que cambia
+       es en que dolar se expresa ese mismo precio. BCV = Bs / tasa BCV, que da un numero mas alto
+       porque quien paga con un dolar a BCV necesita mas dolares para cubrir los mismos bolivares.
+       Es SOLO presentacion: no toca la tasa guardada (motoauto_tasa) ni nada de ventas.
   v10.3: el token se agrega en un solo lugar (se envuelve fetch), asi tambien viaja en action=config.
          Antes la tasa no cargaba con el login encendido.
   v10.2: el menu muestra que version de la app y del script estan corriendo de verdad. Sin eso, un archivo
@@ -59,6 +63,13 @@
     --radius:14px;
     --radius-sm:8px;
   }
+  .modo-wrap{max-width:720px;margin:0 auto;padding:10px 16px 0}
+  .modo-tabs{display:flex;gap:6px}
+  .modo-tab{flex:1;padding:9px 12px;border-radius:999px;border:1.5px solid var(--border);background:transparent;
+    color:var(--ink-soft);font-size:13px;font-weight:700;font-family:inherit;cursor:pointer}
+  .modo-tab.on{background:var(--brand);border-color:var(--brand);color:#111}
+  .modo-nota{font-size:10px;color:var(--ink-muted);margin-top:6px;text-align:center;line-height:1.4}
+  .bcvtag{font-size:10px;font-weight:700;color:var(--brand);letter-spacing:.3px}
   /* ===== LOGIN (bloque D) — identico en todas las pantallas ===== */
   .login{display:none;position:fixed;inset:0;background:var(--bg);z-index:900;align-items:center;justify-content:center;padding:24px}
   .login.open{display:flex}
@@ -277,6 +288,14 @@
   <div class="sheet-body" id="sheetBody"></div>
 </div>
 
+<div class="modo-wrap">
+  <div class="modo-tabs">
+    <button class="modo-tab on" id="modoUsd" onclick="ponerModo('usd')">Dólares</button>
+    <button class="modo-tab" id="modoBcv" onclick="ponerModo('bcv')">BCV</button>
+  </div>
+  <div class="modo-nota" id="modoNota"></div>
+</div>
+
 <div class="tasa-modal" id="tasaModal">
   <div class="tasa-box">
     <h3>Tasa del dólar</h3>
@@ -455,7 +474,7 @@ function revisarSesion(alTener) {
 
 // v10: la lista viene del script, no del CSV publicado. Asi LISTA DE PRODUCTOS puede dejar de estar publicada.
 const SCRIPT_URL_SESION = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
-const APP_VERSION = 'v10.3';
+const APP_VERSION = 'v11';
 var VER_SCRIPT = '?';
 function sellarVersion(d) {
   if (d && d.v) VER_SCRIPT = d.v;
@@ -469,6 +488,47 @@ const EQUIV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRaAnGd-Bfaxo
 let PRODUCTS = [];
 let EQUIVALENCIAS = []; // {codigoExterno, miCodigo}
 let currentTasa = parseFloat(localStorage.getItem('motoauto_tasa') || '1000');
+
+/* ===== Modo de precio (v11) =====
+   'usd' = como siempre: el precio en dolares de la lista.
+   'bcv' = el MISMO precio en bolivares, expresado en dolares a la tasa del BCV.
+   Es solo presentacion. No toca currentTasa ni 'motoauto_tasa', que es la que lee Registrar Venta:
+   si esto tocara esa tasa, se colaria en el registro de ventas. */
+let TASA_BCV = parseFloat(localStorage.getItem('boparts_bcv') || '0') || 0;
+let modoPrecio = localStorage.getItem('boparts_modo_precio') === 'bcv' ? 'bcv' : 'usd';
+
+function hayBCV() { return TASA_BCV > 0 && currentTasa > 0; }
+// El dolar que se muestra segun el modo. Los bolivares son los mismos en los dos.
+function precioMostrado(p) {
+  if (modoPrecio === 'bcv' && hayBCV() && p.bs) return p.bs / TASA_BCV;
+  return p.precio;
+}
+function marcaModo() { return modoPrecio === 'bcv' ? ' BCV' : ''; }
+
+function ponerModo(m) {
+  if (m === 'bcv' && !hayBCV()) { avisoSinBCV(); return; }
+  modoPrecio = m;
+  try { localStorage.setItem('boparts_modo_precio', m); } catch (e) {}
+  pintarModo();
+  search();
+  const ov = document.getElementById('overlay');
+  if (ov && ov.classList.contains('show') && detalleAbierto >= 0) openDetail(detalleAbierto);
+}
+function avisoSinBCV() {
+  alert('Todavia no hay tasa BCV cargada.\nLa fija un socio desde Gerencia, en el engranaje del encabezado.');
+}
+function pintarModo() {
+  const b1 = document.getElementById('modoUsd'), b2 = document.getElementById('modoBcv');
+  if (!b1) return;
+  b1.classList.toggle('on', modoPrecio === 'usd');
+  b2.classList.toggle('on', modoPrecio === 'bcv');
+  b2.style.opacity = hayBCV() ? '1' : '.45';
+  const t = document.getElementById('modoNota');
+  if (t) t.textContent = modoPrecio === 'bcv'
+    ? 'Precios en dolares a tasa BCV ' + (TASA_BCV ? TASA_BCV.toLocaleString('es-VE') : '') + ' · los bolivares no cambian'
+    : 'Precios en dolares de la lista · Bs a tasa ' + currentTasa.toLocaleString('es-VE');
+}
+var detalleAbierto = -1;
 let query = '';
 let activeCat = 'TODOS';
 
@@ -625,6 +685,12 @@ function sincronizarTasa() {
     .then(r => r.json())
     .then(d => {
       if (!d || !d.ok || !(d.tasa > 0)) return;
+      if (d.bcv > 0 && d.bcv !== TASA_BCV) {
+        TASA_BCV = d.bcv;
+        try { localStorage.setItem('boparts_bcv', String(TASA_BCV)); } catch (e) {}
+        pintarModo();
+        if (modoPrecio === 'bcv') search();
+      }
       TASA_FECHA = d.fecha || '';
       try { localStorage.setItem('boparts_tasa_fecha', TASA_FECHA); } catch (e) {}
       if (d.tasa === currentTasa) return;
@@ -632,6 +698,7 @@ function sincronizarTasa() {
       try { localStorage.setItem('motoauto_tasa', String(currentTasa)); } catch (e) {}
       PRODUCTS.forEach(p => { p.bs = p.precio ? Math.round(p.precio * currentTasa) : 0; });
       updateTasaBadge();
+      pintarModo();
       search();
     })
     .catch(() => {});
@@ -729,7 +796,7 @@ function render(filtered) {
       <div class="card-top">
         <div class="card-name">${highlight(p.producto, terms)}</div>
         <div class="card-price">
-          <div class="usd">${fmtUSD(p.precio)}</div>
+          <div class="usd">${fmtUSD(precioMostrado(p))}${modoPrecio === 'bcv' ? ' <span class="bcvtag">BCV</span>' : ''}</div>
           <div class="bs">${fmtBS(p.bs)}</div>
         </div>
       </div>
@@ -752,6 +819,7 @@ const sheet = document.getElementById('sheet');
 function openDetail(idx) {
   const p = PRODUCTS[idx];
   if (!p) return;
+  detalleAbierto = idx;
   const imgs = [p.imagen, p.imagen2, p.imagen3].filter(Boolean);
   let imgHtml = '';
   if (imgs.length > 0) {
@@ -773,8 +841,8 @@ function openDetail(idx) {
     <div class="sheet-marca">${escHtml(p.marca) || '&nbsp;'}</div>
     <div class="sheet-prices">
       <div class="price-box featured">
-        <div class="label">Dólares</div>
-        <div class="amount">${fmtUSD(p.precio)}</div>
+        <div class="label">${modoPrecio === 'bcv' ? 'Dólares a BCV' : 'Dólares'}</div>
+        <div class="amount">${fmtUSD(precioMostrado(p))}</div>
       </div>
       <div class="price-box">
         <div class="label">Bolívares</div>
@@ -829,6 +897,8 @@ updateTasaBadge();
 // v10: con el login encendido se pide la sesion antes de cargar; con el apagado arranca directo.
 // alEntrar() lo llama el modulo de sesion apenas el PIN es correcto.
 function alEntrar() { loadData(true); }
+if (modoPrecio === 'bcv' && !hayBCV()) modoPrecio = 'usd';   // sin tasa BCV no se puede dar ese precio
+pintarModo();
 revisarSesion(function() { loadData(); });
 sincronizarTasa();
 
@@ -838,11 +908,17 @@ function shareProduct(idx) {
   const nombre = p.producto;
   const codigo = p.codigo ? `📦 Código: ${p.codigo}\n` : '';
   const bs = p.bs ? `Bs ${Math.round(p.bs).toLocaleString('es-VE')}` : '—';
-  const usd = p.precio ? `$${Number(p.precio).toFixed(2)}` : '—';
+  // El mensaje dice de que dolar habla: dos precios distintos para el mismo producto, sin decir cual es cual,
+  // es exactamente lo que termina en una discusion con el cliente.
+  const pm = precioMostrado(p);
+  const usd = pm ? `$${Number(pm).toFixed(2)}${modoPrecio === 'bcv' ? ' (tasa BCV)' : ''}` : '—';
   const imgs = [p.imagen, p.imagen2, p.imagen3].filter(Boolean);
   const fotoLinks = imgs.length ? '\n🖼️ ' + imgs.join('\n🖼️ ') : '';
 
-  const msg = `🔧 *${nombre}*\n${codigo}\n💵 Precio: ${bs}\n🤑 Oferta en Divisa: ${usd}\n\n_Cancelando en dólares obtienes un precio preferencial_ 😉${fotoLinks}\n\n📍 *Repuesto BoParts*\n📞 0412-3185778 / 0414-9536708`;
+  const lineaUsd = modoPrecio === 'bcv'
+    ? `💵 Precio: ${bs}\n💲 Equivalente en divisa a BCV: ${usd}`
+    : `💵 Precio: ${bs}\n🤑 Oferta en Divisa: ${usd}\n\n_Cancelando en dólares obtienes un precio preferencial_ 😉`;
+  const msg = `🔧 *${nombre}*\n${codigo}\n${lineaUsd}${fotoLinks}\n\n📍 *Repuesto BoParts*\n📞 0412-3185778 / 0414-9536708`;
 
   const url = 'https://wa.me/?text=' + encodeURIComponent(msg);
   window.open(url, '_blank');
@@ -890,7 +966,7 @@ function marcarSlide(idx, slide) {
 <div class="nav-overlay" id="navOverlay" onclick="closeNav()"></div>
 <div class="nav-panel" id="navPanel">
   <div class="nav-panel-title">🔧 Repuesto BoParts</div>
-  <div id="verTag" style="font-size:10px;color:var(--ink-muted);margin:-8px 0 10px;letter-spacing:0.3px">app v10.3 · script ?</div>
+  <div id="verTag" style="font-size:10px;color:var(--ink-muted);margin:-8px 0 10px;letter-spacing:0.3px">app v11 · script ?</div>
   <div class="nav-grid">
     <a class="nav-card cur" href="index.html">
       <span class="nav-icon">📋</span>
