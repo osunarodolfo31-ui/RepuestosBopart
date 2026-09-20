@@ -1,6 +1,17 @@
 /**
  * Repuesto BoParts — Code.gs
- * VERSION: v22.1 (2026-09-19) | el aliado es un cliente mas
+ * VERSION: v23 (2026-09-19) | ficha del producto y cambio de precio con registro
+ *
+ * v23 — INVENTARIO PARTIDO EN DOS, como compras:
+ *   - action=producto&codigo=X: la ficha completa de un producto. Stock, costo, precio, margen y el
+ *     historial de todo lo que le paso: ventas, devoluciones, compras y conteos, en una sola linea de tiempo.
+ *     Solo socios: lleva el costo.
+ *   - tipo=precio: cambia el precio de venta de un producto. Es la primera vez que se puede hacer sin abrir
+ *     la hoja a mano. Cada cambio queda en PRECIOS_LOG con quien, cuando, de cuanto a cuanto y por que.
+ *     Hasta ahora un precio cambiaba sin dejar rastro: cuando el margen de un producto se movia, no habia
+ *     forma de saber si fue el costo o alguien que toco el precio.
+ *
+ * v22.1 (2026-09-19): las notas de METODOS_PAGO salian como metodos de pago.
  *
  * v22.1: las filas de notas de METODOS_PAGO aparecian como metodos de pago en la pantalla de venta. Un
  *        metodo real tiene METODO y MONEDA; una nota solo tiene texto en la primera columna. Ahora se
@@ -255,6 +266,7 @@ var PERMISOS_GET = {
   config:'VENDEDOR', nextNota:'VENDEDOR', nextCot:'VENDEDOR', nextFactura:'VENDEDOR', nota:'VENDEDOR',
   apartados:'VENDEDOR', proveedores:'VENDEDOR', stock:'VENDEDOR', conteos:'VENDEDOR', clientes:'VENDEDOR',
   cxc:'VENDEDOR', productos:'VENDEDOR', catalogo:'VENDEDOR', metodos:'VENDEDOR',
+  producto:'SOCIO',
   ventas:'SOCIO', socios:'SOCIO', cxp:'SOCIO', cliente_stats:'SOCIO', compras:'SOCIO', diag:'SOCIO',
   liquidacion:'SOCIO'
 };
@@ -263,7 +275,7 @@ var PERMISOS_POST = {
   proveedor:'VENDEDOR', compra:'VENDEDOR', cotizacion:'VENDEDOR', abono:'VENDEDOR', venta:'VENDEDOR',
   factura_venta:'VENDEDOR', apartado:'VENDEDOR', apartado_abono:'VENDEDOR', apartado_entregar:'VENDEDOR',
   costeo:'SOCIO', cxp_abono:'SOCIO', conteo_revision:'SOCIO', devolucion:'SOCIO', apartado_cerrar:'SOCIO',
-  tasa:'SOCIO', socio:'SOCIO', liquidar_aliado:'SOCIO'
+  tasa:'SOCIO', socio:'SOCIO', liquidar_aliado:'SOCIO', precio:'SOCIO'
 };
 
 function authActiva_(ss) {
@@ -423,6 +435,9 @@ function rutearGet_(e) {
   }
   if (accion === 'liquidacion') {
     return json_(estadoLiquidacion_(ssA));
+  }
+  if (accion === 'producto') {
+    return json_(fichaProducto_(ssA, e.parameter.codigo));
   }
 
   if (e.parameter.action === 'nextNota') {
@@ -633,6 +648,13 @@ function doPost(e) {
     if (data.tipo === 'cxp_abono') {
       movCxp_(ss, data, 'ABONO');
       return json_({ok:true, tipo:'cxp_abono'});
+    }
+
+    // ---- CAMBIO DE PRECIO (v23) ----
+    if (data.tipo === 'precio') {
+      var lockP = LockService.getScriptLock(); lockP.waitLock(10000);
+      try { return json_(cambiarPrecio_(ss, data, quien)); }
+      finally { lockP.releaseLock(); }
     }
 
     // ---- LIQUIDACION DE UN ALIADO (v22) ----
@@ -2466,4 +2488,131 @@ function liquidarAliado_(ss, d) {
   return {ok:true, tipo:'liquidar_aliado', id:idLiq, aliado:ali.nombre, comisiones:ganado,
           ventas:com.cobrables.length, aplicado:compensa, pagado:neto,
           deudaAntes:round2_(deuda), deudaDespues:round2_(deuda - compensa)};
+}
+
+
+// ============================================================
+// FICHA DEL PRODUCTO (v23)
+// ============================================================
+// Todo lo que le paso a un producto, en una sola linea de tiempo: de aqui sale la explicacion de por que
+// el stock dice lo que dice. Si el numero no cuadra con el estante, el historial muestra donde se rompio.
+function fichaProducto_(ss, codigo) {
+  var cod = String(codigo || '').trim().toUpperCase();
+  if (!cod) throw new Error('Falta el codigo del producto');
+
+  var sh = ss.getSheetByName('LISTA DE PRODUCTOS');
+  var fila = filaProducto_(sh, cod);
+  if (!fila) throw new Error('No se encontro el producto ' + codigo);
+  var r = sh.getRange(fila, 1, 1, 16).getValues()[0];
+
+  var est = calcularStock_(ss, cod);
+  var p = (est.productos || [])[0] || {};
+
+  var movs = [];
+
+  // Ventas y devoluciones (las devoluciones vienen con cantidad negativa)
+  var det = ss.getSheetByName(SH_DETALLE);
+  if (det && det.getLastRow() >= 2) {
+    var anchoD = Math.max(det.getLastColumn(), 16);
+    det.getRange(2, 1, det.getLastRow() - 1, anchoD).getValues().forEach(function(d) {
+      if (String(d[5] || '').trim().toUpperCase() !== cod) return;
+      var cant = Number(d[7]) || 0;
+      movs.push({fecha:iso_(d[1]), hora:String(d[2] || ''), tipo:cant < 0 ? 'DEVOLUCION' : 'VENTA',
+                 cantidad:cant, precio:Number(d[8]) || 0, quien:String(d[3] || ''),
+                 ref:d[15] ? ('nota ' + d[15]) : String(d[0] || '')});
+    });
+  }
+
+  // Compras recibidas
+  var com = ss.getSheetByName('COMPRAS_DETALLE');
+  if (com && com.getLastRow() >= 2) {
+    com.getRange(2, 1, com.getLastRow() - 1, 10).getValues().forEach(function(d) {
+      if (String(d[3] || '').trim().toUpperCase() !== cod) return;
+      movs.push({fecha:iso_(d[1]), hora:'', tipo:'COMPRA', cantidad:Number(d[5]) || 0,
+                 precio:Number(d[6]) || 0, quien:String(d[2] || ''), ref:String(d[0] || '')});
+    });
+  }
+
+  // Conteos fisicos
+  var ct = ss.getSheetByName('CONTEOS');
+  if (ct && ct.getLastRow() >= 2) {
+    ct.getRange(2, 1, ct.getLastRow() - 1, 15).getValues().forEach(function(d) {
+      if (String(d[2] || '').trim().toUpperCase() !== cod) return;
+      movs.push({fecha:iso_(d[0]), hora:String(d[1] || ''), tipo:'CONTEO', cantidad:Number(d[4]) || 0,
+                 precio:0, quien:String(d[8] || ''),
+                 ref:(d[7] === 'INICIAL' ? 'conteo inicial' : 'recuento') +
+                     (d[6] !== '' && d[6] !== null ? ' · diferencia ' + d[6] : '')});
+    });
+  }
+
+  // Cambios de precio
+  var pl = ss.getSheetByName('PRECIOS_LOG');
+  if (pl && pl.getLastRow() >= 2) {
+    pl.getRange(2, 1, pl.getLastRow() - 1, 8).getValues().forEach(function(d) {
+      if (String(d[2] || '').trim().toUpperCase() !== cod) return;
+      movs.push({fecha:iso_(d[0]), hora:String(d[1] || ''), tipo:'PRECIO', cantidad:0,
+                 precio:Number(d[5]) || 0, quien:String(d[6] || ''),
+                 ref:'de ' + (Number(d[4]) || 0) + ' a ' + (Number(d[5]) || 0) + (d[7] ? ' · ' + d[7] : '')});
+    });
+  }
+
+  // Mas reciente primero
+  movs.sort(function(a, b) {
+    var k = String(b.fecha) + ' ' + String(b.hora), j = String(a.fecha) + ' ' + String(a.hora);
+    return k.localeCompare(j);
+  });
+
+  var costo = Number(r[7]) || 0, precio = Number(r[8]) || 0;
+  return {ok:true, producto:{
+    codigo:String(r[0] || ''), marca:String(r[1] || ''), nombre:String(r[2] || ''), categoria:String(r[3] || ''),
+    costo:costo, precio:precio, margen:(costo > 0 && precio > 0) ? Math.round((precio / costo - 1) * 100) : null,
+    ref:String(r[10] || ''), fila:fila,
+    contado:(p.contado === undefined ? null : p.contado), fechaConteo:p.fechaConteo || '',
+    vendido:p.vendido || 0, comprado:p.comprado || 0, stock:(p.stock === undefined ? null : p.stock)
+  }, movimientos:movs.slice(0, 100), total:movs.length};
+}
+
+// ============================================================
+// CAMBIO DE PRECIO (v23)
+// ============================================================
+function cambiarPrecio_(ss, d, quien) {
+  var cod = String(d.codigo || '').trim().toUpperCase();
+  var nuevo = Number(d.precio);
+  if (!cod) throw new Error('Falta el codigo');
+  if (!(nuevo > 0)) throw new Error('El precio tiene que ser mayor que cero');
+
+  var sh = ss.getSheetByName('LISTA DE PRODUCTOS');
+  var fila = filaProducto_(sh, cod);
+  if (!fila) throw new Error('No se encontro el producto ' + d.codigo);
+
+  var anterior = Number(sh.getRange(fila, 9).getValue()) || 0;
+  var costo = Number(sh.getRange(fila, 8).getValue()) || 0;
+  if (Math.abs(anterior - nuevo) < 0.0001) {
+    return {ok:true, tipo:'precio', sinCambio:true, codigo:cod, precio:anterior};
+  }
+  // Vender por debajo del costo puede ser una decision (liquidar algo parado), pero nunca un descuido:
+  // tiene que venir marcado a proposito desde la pantalla.
+  if (costo > 0 && nuevo < costo && !d.bajoCostoOk) {
+    throw new Error('Ese precio (' + nuevo + ') esta por debajo del costo (' + costo + '). ' +
+                    'Si es a proposito, confirmalo en la pantalla.');
+  }
+
+  sh.getRange(fila, 9).setValue(nuevo);
+  // El producto deja de estar marcado como nuevo sin precio
+  var ref = String(sh.getRange(fila, 11).getValue() || '');
+  if (/NUEVO\s*-\s*SIN\s*PRECIO/i.test(ref)) sh.getRange(fila, 11).setValue('');
+
+  var hoy = new Date();
+  var lg = hojaAp_(ss, 'PRECIOS_LOG', ['FECHA','HORA','CODIGO','PRODUCTO','PRECIO_ANTERIOR','PRECIO_NUEVO',
+    'CAMBIADO_POR', 'MOTIVO', 'COSTO_AL_MOMENTO','MARGEN_ANTERIOR_PCT','MARGEN_NUEVO_PCT']);
+  var mAnt = (costo > 0 && anterior > 0) ? Math.round((anterior / costo - 1) * 100) : '';
+  var mNue = costo > 0 ? Math.round((nuevo / costo - 1) * 100) : '';
+  lg.appendRow([fechaVE_(Utilities.formatDate(hoy, TZ_VE, 'dd/MM/yyyy')),
+                Utilities.formatDate(hoy, TZ_VE, 'HH:mm'), cod,
+                String(sh.getRange(fila, 3).getValue() || ''), anterior, nuevo,
+                (quien && quien.nombre) ? quien.nombre : (d.quien || ''), d.motivo || '', costo, mAnt, mNue]);
+  formatoFecha_(lg, lg.getLastRow(), 1);
+
+  return {ok:true, tipo:'precio', codigo:cod, anterior:anterior, precio:nuevo, costo:costo,
+          margen:costo > 0 ? mNue : null};
 }

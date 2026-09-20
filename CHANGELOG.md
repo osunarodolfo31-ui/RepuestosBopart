@@ -19,9 +19,9 @@ en el comentario del encabezado de cada HTML y en la cabecera de `Code.gs`.
 | boparts_gerencia.html   | v2.6    | **v22**              |
 | boparts_apartados.html  | v1.5    | **v21.5**            |
 | boparts_devoluciones.html| v1.4   | **v21.5**            |
-| boparts_inventario.html | v1.4    | **v21.5**            |
+| boparts_inventario.html | v2      | **v23**              |
 | boparts_reportes.html   | —       | **SE ELIMINA** (lo reemplazo gerencia) |
-| Code.gs (Apps Script)   | v22.1   | —                    |
+| Code.gs (Apps Script)   | v23     | —                    |
 
 Deployment ID (no cambia): `AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg`
 
@@ -61,6 +61,37 @@ una URL pública — ya no lo hacen. Piden `action=clientes` y `action=productos
 
 Con esto, las hojas que faltan por migrar son **LISTA DE PRODUCTOS** (compras, fotos, devoluciones) y
 **CATALOGO_PROVEEDORES** (demanda).
+
+## v23 / inventario v2 — 2026-09-19 · Ficha del producto y cambio de precio con registro
+**Code.gs v23 · boparts_inventario.html v2**
+
+Inventario queda partido en dos pestañas, como compras:
+
+- **Contar** — la de siempre, para el vendedor. Cuenta a ciegas, sin ver cuánto debería haber.
+- **Producto** — solo socios (sesión de socio, o el PIN si el login está apagado).
+
+### Lo que trae la ficha
+
+- **Stock explicado**, no solo el número: *contado 8 el 17/09 · recibidas +5 · vendidas −1*. Si el número no
+  cuadra con el estante, ahí se ve dónde se rompió.
+- **Costo bloqueado.** Solo se cambia costeando una compra, como hasta ahora.
+- **Precio de venta editable.** Es la primera vez que se puede cambiar un precio sin abrir la hoja a mano.
+  Hasta hoy las únicas formas eran editar `LISTA DE PRODUCTOS` o costear una compra de ese producto.
+- **Margen en vivo mientras escribes.** Si el precio queda bajo el costo, lo dice antes de guardar y calcula
+  cuánto se pierde por venta; pide confirmación aparte. Si el margen baja de 15%, avisa que revise si cubre la
+  comisión del punto.
+- **Historial completo**: ventas, devoluciones, compras, conteos y cambios de precio, en una línea de tiempo.
+
+### Cada cambio de precio queda registrado
+
+Hoja **`PRECIOS_LOG`**: fecha, hora, código, producto, precio anterior, precio nuevo, quién lo cambió, motivo,
+costo al momento y los dos márgenes.
+
+Esto es la mitad del valor de la pantalla. Hasta ahora un precio cambiaba sin dejar rastro: cuando el margen de
+un producto se moviera raro dentro de tres meses, no había forma de saber si fue el costo o alguien que tocó el
+precio. Ahora el historial del producto lo muestra.
+
+Al ponerle precio a un producto marcado como `NUEVO - SIN PRECIO`, la marca se quita sola.
 
 ## v22.1 — 2026-09-19 · Las notas de la hoja salían como métodos de pago
 El archivo que se pasó para llenar `METODOS_PAGO` traía las explicaciones de cada columna **en la misma hoja**,

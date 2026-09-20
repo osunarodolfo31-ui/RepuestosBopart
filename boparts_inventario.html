@@ -1,7 +1,10 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_inventario.html
-  VERSION: v1.4 (2026-09-18) | requiere Apps Script v21.5
+  VERSION: v2 (2026-09-19) | requiere Apps Script v23
+  v2: dos pestanas, como compras. 'Contar' es la de siempre, para el vendedor: cuenta a ciegas y no ve
+      cuanto deberia haber. 'Producto' es de socios: stock explicado, costo bloqueado, PRECIO EDITABLE
+      (primera vez que se puede cambiar sin abrir la hoja) e historial de todo lo que le paso.
   v1.4: incluye la pantalla de login; solo aparece cuando CONFIG!B15 = SI. No lee ningun CSV.
   v1.3: el corte del conteo es por fecha Y HORA: solo se descuentan las ventas posteriores al momento de contar
   v1.1: si el script responde sin los datos del conteo, lo avisa en vez de mostrar 'undefined'
@@ -25,6 +28,32 @@
   --green:#22C55E;--red:#EF4444;
   --radius:14px;--radius-sm:8px;
 }
+
+.fnm{font-size:16px;font-weight:700;color:var(--ink);line-height:1.3}
+.fmt{font-size:11px;color:var(--ink-muted);margin-top:3px;margin-bottom:12px}
+.fstk{display:flex;align-items:center;gap:14px;background:var(--card2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;margin-bottom:12px}
+.fstk .big{font-size:30px;font-weight:800;color:var(--green);line-height:1;text-align:center;min-width:64px}
+.fstk .big.bajo{color:var(--red)}
+.fstk .big.sin{color:var(--ink-muted)}
+.fstk .big small{display:block;font-size:9px;font-weight:600;color:var(--ink-muted);text-transform:uppercase;letter-spacing:.4px;margin-top:4px}
+.fstk .expl{font-size:11px;color:var(--ink-soft);line-height:1.6}
+.fstk .expl b{color:var(--ink)}
+.frow{display:flex;gap:8px}
+.fcell{flex:1;min-width:0}
+.fcell label{font-size:11px}
+.fcell input:disabled{opacity:.65;background:var(--bg2)}
+.mrow{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)}
+.mrow:last-child{border-bottom:none}
+.mtag{display:inline-block;font-size:9px;font-weight:700;letter-spacing:.4px;padding:2px 6px;border-radius:4px;margin-right:6px;background:var(--border);color:var(--ink-soft)}
+.mtag.venta{background:rgba(34,197,94,.15);color:var(--green)}
+.mtag.devolucion{background:rgba(239,68,68,.15);color:var(--red)}
+.mtag.compra{background:rgba(245,168,0,.15);color:var(--brand)}
+.mtag.conteo{background:rgba(255,255,255,.08);color:var(--ink-soft)}
+.mtag.precio{background:rgba(245,168,0,.25);color:var(--brand)}
+.mref{font-size:12px;color:var(--ink)}
+.mmeta{font-size:10px;color:var(--ink-muted);margin-top:3px}
+.mcant{font-size:13px;font-weight:600;color:var(--ink);white-space:nowrap}
+.mcant.neg{color:var(--red)}
   /* ===== LOGIN (bloque D) — identico en todas las pantallas ===== */
   .login{display:none;position:fixed;inset:0;background:var(--bg);z-index:900;align-items:center;justify-content:center;padding:24px}
   .login.open{display:flex}
@@ -228,6 +257,12 @@ select option{background:#1E1E1E;color:var(--ink)}
 
 <div class="container">
 
+  <div class="tabs" style="margin-bottom:12px">
+    <button class="tab on" id="tabCont" onclick="verTabInv('contar')">Contar</button>
+    <button class="tab" id="tabProd" onclick="verTabInv('producto')">Producto</button>
+  </div>
+
+  <div id="paneContar">
   <div class="section">
     <div class="stitle">Quien cuenta</div>
     <select id="selQ"><option value="">Seleccionar...</option><option>Reinaldo Cuicas</option><option>Rodolfo Osuna</option><option>Javier Boves</option></select>
@@ -246,6 +281,16 @@ select option{background:#1E1E1E;color:var(--ink)}
       <button class="tab" data-f="todos">Todos</button>
     </div>
     <div id="lista"><div class="cart-empty">Cargando...</div></div>
+  </div>
+  </div>
+
+  <div id="paneProducto" style="display:none">
+    <div class="section">
+      <div class="stitle">Buscar producto</div>
+      <input type="search" id="buscarP" placeholder="Nombre, codigo o marca..." autocomplete="off" oninput="pintarBusqueda()">
+      <div id="resultP" style="margin-top:10px"></div>
+    </div>
+    <div id="fichaBox"></div>
   </div>
 
 </div>
@@ -277,7 +322,7 @@ select option{background:#1E1E1E;color:var(--ink)}
 <div class="nav-ov" id="navOv" onclick="closeNav()"></div>
 <div class="nav-pan" id="navPan">
   <div class="nav-t">Repuesto BoParts</div>
-  <div id="verTag" style="font-size:10px;color:var(--ink-muted);margin:-6px 0 10px;letter-spacing:0.3px">app v1.4 · script ?</div>
+  <div id="verTag" style="font-size:10px;color:var(--ink-muted);margin:-6px 0 10px;letter-spacing:0.3px">app v2 · script ?</div>
   <div class="nav-g">
     <a class="ncard" href="index.html">
       <span class="nicon">📋</span>
@@ -510,7 +555,7 @@ function sellarVersion(d) {
   if (t) t.textContent = 'app ' + APP_VERSION + ' \u00b7 script ' + VER_SCRIPT;
   return d;
 }
-var APP_VERSION = 'v1.4';
+var APP_VERSION = 'v2';
 var STOCK = [], filtro = 'sin', actual = null;
 
 document.getElementById('fechaHdr').textContent = APP_VERSION + ' · ' + new Date().toLocaleDateString('es-VE', {weekday:'long', day:'numeric', month:'long'});
@@ -680,6 +725,163 @@ revisarSesion(cargar);
 // Lee la respuesta del script con cuidado: si Apps Script devuelve su pagina de error (HTML),
 // r.json() explota con "Unexpected token '<'". Asi se explica que pasa en vez de mostrar eso.
 // leerJSON vive ahora en el modulo de sesion: mismo nombre, y ademas manda al login cuando la sesion vence.
+// ============================================================
+// PESTANA PRODUCTO (v2) — solo socios
+// ============================================================
+// Con el login encendido, un socio pasa directo: pedirle otra clave seria la misma puerta dos veces.
+// Con el login apagado, el PIN es la unica puerta que hay.
+var PIN_HASH_SOCIOS = 911136;
+function hashPin(t) { var h = 5381; for (var i = 0; i < t.length; i++) h = ((h * 33) ^ t.charCodeAt(i)) >>> 0; return h % 1000000; }
+
+var FICHA = null;
+
+function verTabInv(t) {
+  var prod = t === 'producto';
+  if (prod && !soySocio()) {
+    var pin = prompt('PIN de socios: la ficha del producto muestra costos y deja cambiar precios');
+    if (pin === null) return;
+    if (hashPin(String(pin).trim()) !== PIN_HASH_SOCIOS) { toast('PIN incorrecto', 'err'); return; }
+  }
+  document.getElementById('tabCont').classList.toggle('on', !prod);
+  document.getElementById('tabProd').classList.toggle('on', prod);
+  document.getElementById('paneContar').style.display = prod ? 'none' : 'block';
+  document.getElementById('paneProducto').style.display = prod ? 'block' : 'none';
+  if (prod) setTimeout(function() { document.getElementById('buscarP').focus(); }, 150);
+}
+
+function pintarBusqueda() {
+  var q = norm(document.getElementById('buscarP').value).trim();
+  var box = document.getElementById('resultP');
+  if (q.length < 2) { box.innerHTML = '<div class="cart-empty" style="padding:12px">Escribe al menos dos letras</div>'; return; }
+  var lista = STOCK.filter(function(p) { return norm(p.producto + ' ' + p.codigo).indexOf(q) >= 0; }).slice(0, 12);
+  if (!lista.length) { box.innerHTML = '<div class="cart-empty" style="padding:12px">Sin resultados</div>'; return; }
+  box.innerHTML = lista.map(function(p) {
+    return '<div class="pcard" style="cursor:pointer;margin-bottom:6px" onclick="abrirFicha(\'' + escAttr(p.codigo) + '\')">' +
+           '<div class="nm">' + escHtml(p.producto) + '</div>' +
+           '<div class="mt">' + escHtml(p.codigo) + (p.categoria ? ' · ' + escHtml(p.categoria) : '') + '</div></div>';
+  }).join('');
+}
+
+function abrirFicha(codigo) {
+  document.getElementById('fichaBox').innerHTML = '<div class="section"><div class="cart-empty">Cargando ficha...</div></div>';
+  fetch(SCRIPT_URL + '?action=producto&codigo=' + encodeURIComponent(codigo) + '&t=' + Date.now())
+    .then(leerJSON)
+    .then(function(d) {
+      sellarVersion(d);
+      if (!d || !d.ok) throw new Error(d && d.error ? d.error : 'sin ficha');
+      FICHA = d; pintarFicha();
+    })
+    .catch(function(e) {
+      if (e && e.message === 'SESION') return;
+      document.getElementById('fichaBox').innerHTML =
+        '<div class="section"><div class="cart-empty" style="color:var(--red)">' + escHtml(e.message) + '</div></div>';
+    });
+}
+
+function pintarFicha() {
+  var p = FICHA.producto, M = FICHA.movimientos || [];
+  var tieneStock = p.stock !== null && p.stock !== undefined;
+
+  var h = '<div class="section">' +
+    '<div class="fnm">' + escHtml(p.nombre) + '</div>' +
+    '<div class="fmt">' + escHtml(p.codigo) + (p.marca ? ' · ' + escHtml(p.marca) : '') + (p.categoria ? ' · ' + escHtml(p.categoria) : '') + '</div>';
+
+  // Stock explicado: de aqui sale el porque del numero
+  h += '<div class="fstk">' +
+       (tieneStock
+         ? '<div class="big' + (p.stock <= 0 ? ' bajo' : '') + '">' + p.stock + '<small>en stock</small></div>' +
+           '<div class="expl">contado <b>' + p.contado + '</b> el ' + fechaES(p.fechaConteo) +
+           '<br>recibidas <b>+' + p.comprado + '</b> · vendidas <b>-' + p.vendido + '</b> desde entonces</div>'
+         : '<div class="big sin">?<small>sin conteo</small></div>' +
+           '<div class="expl">Nadie lo ha contado todavia, asi que no hay stock que mostrar.' +
+           (p.vendido ? '<br>Se han vendido ' + p.vendido + ' unidades.' : '') + '</div>') +
+       '</div>';
+
+  // Costo bloqueado, precio editable
+  h += '<div class="frow">' +
+    '<div class="fcell"><label>Costo</label><input type="text" value="' + usd(p.costo) + '" disabled title="El costo solo se cambia costeando una compra"></div>' +
+    '<div class="fcell"><label>Precio de venta</label><input type="number" step="0.01" id="fPrecio" value="' + (p.precio || '') + '" oninput="calcMargen()"></div>' +
+    '<div class="fcell" style="flex:0 0 76px"><label>Margen</label><input type="text" id="fMargen" value="' + (p.margen === null ? '-' : p.margen + '%') + '" disabled></div>' +
+    '</div>' +
+    '<div class="field" style="margin-top:8px"><label>Por que cambia</label>' +
+    '<input type="text" id="fMotivo" placeholder="Subio el proveedor, ajuste de temporada, liquidar..."></div>' +
+    '<div id="fAviso"></div>' +
+    '<button class="nbtn nbtn-p" id="fBtn" style="margin-top:10px" onclick="guardarPrecio()">Guardar precio</button>' +
+    '</div>';
+
+  // Historial
+  h += '<div class="section"><div class="stitle">Historial' +
+       (FICHA.total > M.length ? ' <span style="font-weight:500;text-transform:none;color:var(--ink-muted)">(ultimos ' + M.length + ' de ' + FICHA.total + ')</span>' : '') +
+       '</div>';
+  if (!M.length) {
+    h += '<div class="cart-empty">Sin movimientos todavia</div>';
+  } else {
+    M.forEach(function(m) {
+      var cant = m.tipo === 'PRECIO' ? usd(m.precio)
+               : (m.tipo === 'CONTEO' ? m.cantidad + ' und'
+               : (m.cantidad > 0 ? '+' : '') + m.cantidad + ' und');
+      h += '<div class="mrow">' +
+        '<div><span class="mtag ' + m.tipo.toLowerCase() + '">' + m.tipo + '</span>' +
+          '<span class="mref">' + escHtml(m.ref || '') + '</span>' +
+          '<div class="mmeta">' + fechaES(m.fecha) + (m.hora ? ' ' + escHtml(m.hora) : '') + (m.quien ? ' · ' + escHtml(m.quien) : '') + '</div></div>' +
+        '<div class="mcant' + (m.cantidad < 0 ? ' neg' : '') + '">' + cant + '</div>' +
+      '</div>';
+    });
+  }
+  h += '</div>';
+  document.getElementById('fichaBox').innerHTML = h;
+  calcMargen();
+  document.getElementById('fichaBox').scrollIntoView({behavior:'smooth', block:'start'});
+}
+
+// El margen se ve mientras se escribe: un precio bajo el costo se nota ANTES de guardar, no despues.
+function calcMargen() {
+  if (!FICHA) return;
+  var costo = FICHA.producto.costo || 0;
+  var nuevo = parseFloat(document.getElementById('fPrecio').value) || 0;
+  var mg = document.getElementById('fMargen'), av = document.getElementById('fAviso');
+  if (!mg) return;
+  if (costo > 0 && nuevo > 0) {
+    var m = Math.round((nuevo / costo - 1) * 100);
+    mg.value = m + '%';
+    mg.style.color = m < 0 ? 'var(--red)' : (m < 15 ? 'var(--brand)' : 'var(--green)');
+    av.innerHTML = nuevo < costo
+      ? '<div class="cominfo" style="border-left-color:var(--red);margin-top:8px">Ese precio esta por debajo del costo (' + usd(costo) + '). Cada venta pierde ' + usd(costo - nuevo) + '.</div>'
+      : (m < 15 ? '<div class="cominfo" style="border-left-color:var(--brand);margin-top:8px">Margen de ' + m + '%: revisa que cubra la comision del punto.</div>' : '');
+  } else {
+    mg.value = '-'; mg.style.color = ''; av.innerHTML = '';
+  }
+}
+
+function guardarPrecio() {
+  if (!FICHA) return;
+  var nuevo = parseFloat(document.getElementById('fPrecio').value);
+  var costo = FICHA.producto.costo || 0;
+  if (!(nuevo > 0)) { toast('Escribe un precio', 'err'); return; }
+  if (Math.abs(nuevo - (FICHA.producto.precio || 0)) < 0.0001) { toast('Ese ya es el precio actual', 'err'); return; }
+  var bajo = costo > 0 && nuevo < costo;
+  if (bajo && !confirm('El precio (' + usd(nuevo) + ') queda por debajo del costo (' + usd(costo) + ').\nCada venta pierde ' + usd(costo - nuevo) + '.\n\nSeguro?')) return;
+
+  var btn = document.getElementById('fBtn'); btn.disabled = true; btn.textContent = 'Guardando...';
+  fetch(SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'},
+    body:JSON.stringify({tipo:'precio', codigo:FICHA.producto.codigo, precio:nuevo,
+                         motivo:document.getElementById('fMotivo').value.trim(),
+                         quien:miNombre(), bajoCostoOk:bajo})})
+    .then(leerJSON)
+    .then(function(d) {
+      btn.disabled = false; btn.textContent = 'Guardar precio';
+      if (!d || !d.ok) throw new Error(d && d.error ? d.error : 'no se guardo');
+      toast(FICHA.producto.codigo + ': ' + usd(d.anterior) + ' -> ' + usd(d.precio) +
+            (d.margen !== null && d.margen !== undefined ? ' · margen ' + d.margen + '%' : ''), 'ok');
+      abrirFicha(FICHA.producto.codigo);   // se recarga: el historial ya trae el cambio
+      cargar();                            // y la lista de conteo, con el precio nuevo
+    })
+    .catch(function(e) {
+      btn.disabled = false; btn.textContent = 'Guardar precio';
+      if (e && e.message !== 'SESION') toast('No se guardo: ' + e.message, 'err');
+    });
+}
+
 </script>
 </body>
 </html>
