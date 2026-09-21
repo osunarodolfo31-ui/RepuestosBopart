@@ -1,7 +1,10 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — index.html
-  VERSION: v11.2 (2026-09-19) | requiere Apps Script v25
+  VERSION: v11.3 (2026-09-21) | requiere Apps Script v25
+  v11.3: Reintentar ya no deja la pantalla en blanco cuando Google no responde — muestra la lista
+         guardada con un aviso. 25s y un reintento automatico. El sello de version dice si el numero
+         viene del servidor o de la lista guardada en el telefono.
   · agrega "Mi día" al menú (requiere Apps Script v25 y boparts_tareas.html).
   v11: interruptor Dolares / BCV para dar precios. Los BOLIVARES NO CAMBIAN nunca: lo unico que cambia
        es en que dolar se expresa ese mismo precio. BCV = Bs / tasa BCV, que da un numero mas alto
@@ -75,6 +78,9 @@
   .modo-op-s{font-size:11px;color:var(--ink-soft);line-height:1.45;margin-top:4px}
   .modo-nota{font-size:10px;color:var(--ink-muted);margin:2px 0 14px;text-align:center;line-height:1.45}
   .bcvtag{font-size:10px;font-weight:700;color:var(--brand);letter-spacing:.3px}
+  .aviso-viejo{max-width:720px;margin:0 auto 4px;padding:9px 16px;font-size:11px;line-height:1.45;
+    color:#111;background:var(--brand);cursor:pointer}
+  .aviso-viejo b{font-weight:700}
   /* ===== LOGIN (bloque D) — identico en todas las pantallas ===== */
   .login{display:none;position:fixed;inset:0;background:var(--bg);z-index:900;align-items:center;justify-content:center;padding:24px}
   .login.open{display:flex}
@@ -479,10 +485,14 @@ function revisarSesion(alTener) {
 
 // v10: la lista viene del script, no del CSV publicado. Asi LISTA DE PRODUCTOS puede dejar de estar publicada.
 const SCRIPT_URL_SESION = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
-const APP_VERSION = 'v11.2';
+const APP_VERSION = 'v11.3';
 var VER_SCRIPT = '?';
+/* v11.3: el sello mentia de otra forma. La version salia tambien de la LISTA GUARDADA en el telefono,
+   que puede ser de hace dias, asi que la pantalla podia decir "script v21.4" con un v25 desplegado.
+   Ahora se marca de donde vino: sin marca = lo dijo el servidor ahora mismo. */
+var VER_DE_CACHE = false;
 function sellarVersion(d) {
-  if (d && d.v) VER_SCRIPT = d.v;
+  if (d && d.v) VER_SCRIPT = d.v + (VER_DE_CACHE ? ' (guardado)' : '');
   var t = document.getElementById('verTag');
   if (t) t.textContent = 'app ' + APP_VERSION + ' · script ' + VER_SCRIPT;
   return d;
@@ -603,22 +613,30 @@ setTimeout(cerrarSplash, 6000);   // pase lo que pase, a los 6 s se quita
 function leerCache(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
 function guardarCache(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
 
+/* v11.3 — Reintentar ya no puede dejarte sin lista.
+   Antes, 'force' descartaba la cache ANTES de pedir. Si Google no respondia, la pantalla quedaba en
+   blanco aunque hubiera una lista perfectamente buena guardada en el telefono. Eso es lo peor que
+   puede pasar en el mostrador: el vendedor tenia precios, toco refrescar, y se quedo sin nada.
+   Ahora la cache se guarda siempre como respaldo y solo se reemplaza cuando llega algo mejor. */
 function loadData(force) {
   var icon = document.getElementById('refreshIcon');
   icon.classList.add('spinning');
-  var cText = force ? null : leerCache(CACHE_KEY);
-  var cEquiv = force ? null : leerCache(EQUIV_KEY);
+  var cText = leerCache(CACHE_KEY);
+  var cEquiv = leerCache(EQUIV_KEY);
   var mostrado = false;
-  if (cText) { aplicarDatos(cText, cEquiv); mostrado = true; } else { showLoading(); }
+  // Con 'force' no se pinta la cache de entrada (se quiere ver que esta actualizando), pero NO se tira.
+  if (cText && !force) { VER_DE_CACHE = true; aplicarDatos(cText, cEquiv); VER_DE_CACHE = false; mostrado = true; }
+  else { showLoading(); }
 
   // Las dos hojas se piden a la vez, pero la lista se muestra apenas llegan los PRODUCTOS:
   // las equivalencias solo sirven para buscar por codigo de otra marca y pueden llegar despues.
-  conTiempo(fetch(conToken(PROD_URL) + '&t=' + Date.now()), 12000)
-    .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+  // 25s y un reintento: un Apps Script frio con 400+ productos pasa de 12s mas seguido de lo que parece.
+  pedirProductos(2)
     .then(function(text) {
       if (!isValidCSV(text)) throw new Error('respuesta invalida del script');
       guardarCache(CACHE_KEY, text);
-      if (!mostrado || text !== cText) aplicarDatos(text, null);
+      if (!mostrado || text !== cText) aplicarDatos(text, cEquiv);
+      avisoViejo('');
       icon.classList.remove('spinning');
       cerrarSplash();
     })
@@ -626,8 +644,28 @@ function loadData(force) {
       icon.classList.remove('spinning');
       cerrarSplash();
       if (e && e.message === 'SESION') return;          // ya se abrio el login
-      if (!mostrado) showError(e.message);   // con cache: se queda con la ultima lista guardada
+      if (cText) {
+        // Hay lista guardada: se muestra y se avisa que no es fresca. Nunca dejar la pantalla vacia.
+        if (!mostrado) {
+          VER_DE_CACHE = true;
+          try { aplicarDatos(cText, cEquiv); } catch (err) { VER_DE_CACHE = false; showError(e.message); return; }
+          VER_DE_CACHE = false;
+        }
+        avisoViejo(e.message);
+      } else {
+        showError(e.message);
+      }
     });
+
+  function pedirProductos(intentos) {
+    return conTiempo(fetch(conToken(PROD_URL) + '&t=' + Date.now()), 25000)
+      .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+      .catch(function(e) {
+        if (e && e.message === 'SESION') throw e;
+        if (intentos > 1) return pedirProductos(intentos - 1);
+        throw e;
+      });
+  }
 
   conTiempo(fetch(EQUIV_URL + '&t=' + Date.now()), 12000)
     .then(function(r) { return r.ok ? r.text() : ''; })
@@ -790,6 +828,23 @@ function showLoading() {
   document.getElementById('resultsInfo').textContent = '';
   document.getElementById('list').innerHTML = `<div class="state-box"><div class="icon">⏳</div><p>Cargando productos…</p></div>`;
 }
+/* Banda de aviso cuando se esta mostrando la lista guardada en vez de la del servidor.
+   Se ve, pero no tapa: los precios siguen ahi y se puede seguir atendiendo. */
+function avisoViejo(msg) {
+  var b = document.getElementById('avisoViejo');
+  if (!msg) { if (b) b.remove(); return; }
+  if (!b) {
+    b = document.createElement('div');
+    b.id = 'avisoViejo';
+    b.className = 'aviso-viejo';
+    b.onclick = function() { loadData(true); };
+    var lista = document.getElementById('list');
+    lista.parentNode.insertBefore(b, lista);
+  }
+  b.innerHTML = '<b>Estos precios son los guardados en el teléfono.</b> No se pudo hablar con la hoja (' +
+                String(msg).replace(/[<>&]/g, '') + '). Toca aquí para reintentar.';
+}
+
 function showError(msg) {
   document.getElementById('list').innerHTML = `<div class="state-box"><div class="icon">⚠️</div><p>No se pudo cargar la lista.<br><small>${msg}</small><br><small style="opacity:0.6">app ${APP_VERSION} · script ${VER_SCRIPT}</small></p><button class="retry" onclick="loadData(true)">Reintentar</button></div>`;
 }

@@ -9,7 +9,7 @@ en el comentario del encabezado de cada HTML y en la cabecera de `Code.gs`.
 
 | Archivo                 | Versión | Requiere Apps Script |
 |-------------------------|---------|----------------------|
-| index.html              | v11.2   | **v25**              |
+| index.html              | v11.3   | **v25**              |
 | boparts_tareas.html     | v1      | **v25**              |
 | boparts_ventas.html     | v14.3   | **v25**              |
 | boparts_cobros.html     | v2.7    | **v25**              |
@@ -31,6 +31,22 @@ Para volver atrás:
 - Apps Script: Implementar → Administrar implementaciones → lápiz → elegir la versión anterior → Implementar.
 
 ---
+
+## index v11.3 — 2026-09-21 · Un refresco fallido no puede dejarte sin precios
+
+Reinaldo (o tú) tiene la lista en pantalla, Google se pone lento, toca **Reintentar**, y se queda con
+la pantalla en blanco en pleno mostrador. Eso era culpa del diseño, no de Google: `Reintentar`
+**descartaba la lista guardada antes de pedir la nueva**. Si la nueva no llegaba, no quedaba nada.
+
+- La lista guardada ya no se tira nunca. Si el servidor no responde, se muestra igual, con una banda
+  naranja arriba: *"Estos precios son los guardados en el teléfono"*. Se puede seguir atendiendo.
+- El cartel de error solo aparece cuando de verdad no hay nada que mostrar.
+- **25 segundos en vez de 12, y un reintento automático.** Un Apps Script frío con 400+ productos pasa
+  de 12s más seguido de lo que parece.
+- **El sello de versión también mentía, de otra forma.** El número salía igual de la lista guardada en
+  el teléfono, que puede ser de hace días: la pantalla podía decir "script v21.4" teniendo un v25
+  desplegado. Ahora, cuando el número viene de la lista guardada, dice **`v21.4 (guardado)`**.
+  Sin esa marca, es lo que contestó el servidor en ese momento.
 
 ## v25 + tareas — 2026-09-19 · Medir el trabajo, no la sensación
 
