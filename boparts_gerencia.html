@@ -1,7 +1,11 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_gerencia.html
-  VERSION: v2.7 (2026-09-19) | requiere Apps Script v24
+  VERSION: v2.8 (2026-09-19) | requiere Apps Script v25
+  v2.8: modulo de tareas. Tres marcadores SEPARADOS por persona — cumplimiento, volumen e iniciativa —
+        y ninguno se promedia con otro: un solo numero esconde justo lo que hay que ver. Desde aqui se
+        asignan tareas, se apagan, y se ve quien cumple. Una tarea que se puede contar sola (fotos,
+        conteos, demanda, ventas) no se marca a mano: por eso es la unica que nadie puede inflar.
   v2.7: rendimiento por persona. Ventas, margen y ticket salen de VENTAS_DETALLE, que guarda el vendedor
         en cada linea desde el v8; el trabajo sobre el catalogo sale de FOTOS_LOG, CONTEOS y DEMANDA.
         Nada de esto son datos nuevos: estaban ahi y nadie los miraba.
@@ -264,6 +268,28 @@ select option{background:#1E1E1E;color:var(--ink)}
 .liqd b.mut{color:var(--ink-muted)}
 .liqd small{color:var(--ink-muted);font-size:10px;flex-basis:100%;text-align:right;margin-top:-3px}
 .liqm{margin-top:8px;font-size:12px;color:var(--ink-muted)}
+/* TAREAS (v2.8) — los tres marcadores van separados a proposito, nunca promediados */
+.mk{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+.mk>div{flex:1;min-width:92px;background:var(--card);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px}
+.mk .et{font-size:9px;color:var(--ink-muted);text-transform:uppercase;letter-spacing:.4px}
+.mk .nu{font-size:20px;font-weight:700;color:var(--ink);margin-top:3px;line-height:1.1}
+.mk .nu small{font-size:11px;font-weight:500;color:var(--ink-muted)}
+.mk .nu.alto{color:var(--green)}
+.mk .nu.bajo{color:var(--red)}
+.mk .nu.nada{color:var(--ink-muted);font-size:14px}
+.mk .pie{font-size:10px;color:var(--ink-muted);margin-top:3px;line-height:1.4}
+.tdef{display:flex;align-items:flex-start;gap:10px;padding:9px 0;border-bottom:1px solid var(--border)}
+.tdef:last-child{border-bottom:none}
+.tdef .c1{flex:1;min-width:0}
+.tdef .tt{font-size:13px;font-weight:600;color:var(--ink);line-height:1.3}
+.tdef .mm{font-size:10px;color:var(--ink-muted);margin-top:3px}
+.tdef button{background:none;border:1px solid var(--border);color:var(--ink-muted);border-radius:6px;
+  font-size:11px;font-family:inherit;padding:4px 9px;cursor:pointer;white-space:nowrap}
+.tdef button:hover{border-color:var(--red);color:var(--red)}
+.ttipo{display:inline-block;font-size:9px;font-weight:700;letter-spacing:.3px;padding:2px 6px;border-radius:4px;
+  background:rgba(255,255,255,.07);color:var(--ink-muted);text-transform:uppercase;margin-right:5px}
+.ttipo.auto{background:rgba(34,197,94,.15);color:var(--green)}
+.ttipo.enlace{background:rgba(245,168,0,.18);color:var(--brand)}
 .per{background:var(--card2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;margin-bottom:8px}
 .perh{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:10px}
 .perh .nm{font-size:14px;font-weight:600;color:var(--ink)}
@@ -352,7 +378,7 @@ select option{background:#1E1E1E;color:var(--ink)}
     </div>
     <div class="rango" id="rangoBox" style="display:none">
       <input type="date" id="d1"><span style="color:var(--ink-muted)">a</span><input type="date" id="d2">
-      <button class="tab on" onclick="cargar()">Ver</button>
+      <button class="tab on" onclick="cargar();cargarTareas()">Ver</button>
     </div>
     <div id="periodoLbl" style="font-size:12px;color:var(--ink-muted)"></div>
   </div>
@@ -366,6 +392,8 @@ select option{background:#1E1E1E;color:var(--ink)}
   <div id="apartadosBox"></div>
 
   <div id="liqBox"></div>
+
+  <div id="tareasBox"></div>
 
   <div class="section">
     <div class="stitle">Clientes <span style="float:right;font-weight:500;text-transform:none;color:var(--ink-muted)" id="cliCount"></span></div>
@@ -464,6 +492,11 @@ select option{background:#1E1E1E;color:var(--ink)}
       <span class="nicon">🧮</span>
       <span class="nlbl">Inventario</span>
       <span class="ndesc">Conteo de stock</span>
+    </a>
+    <a class="ncard" href="boparts_tareas.html">
+      <span class="nicon">✅</span>
+      <span class="nlbl">Mi día</span>
+      <span class="ndesc">Tareas del día</span>
     </a>
   </div>
 </div>
@@ -641,7 +674,7 @@ function sellarVersion(d) {
   if (t) t.textContent = 'app ' + APP_VERSION + ' \u00b7 script ' + VER_SCRIPT;
   return d;
 }
-var APP_VERSION = 'v2.7';
+var APP_VERSION = 'v2.8';
 var TASA = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
 var periodo = 'hoy', DATA = null;
 
@@ -675,6 +708,7 @@ function abrirGerencia() {
   cargarConteos();
   cargarClientes();
   cargarLiquidacion();
+  cargarTareas();
   cargar();
 }
 function salirGerencia() { olvidarSesion(); location.reload(); }
@@ -706,7 +740,7 @@ document.getElementById('tabs').addEventListener('click', function(e) {
   [].forEach.call(document.querySelectorAll('#tabs .tab'), function(t) { t.classList.remove('on'); });
   b.classList.add('on'); periodo = b.dataset.p;
   document.getElementById('rangoBox').style.display = periodo === 'rango' ? 'flex' : 'none';
-  if (periodo !== 'rango') cargar();
+  if (periodo !== 'rango') { cargar(); cargarTareas(); }
 });
 
 // Si un valor llega como texto ('3.5' o '3,5'), sumarlo con + lo concatena en vez de sumarlo.
@@ -1252,7 +1286,7 @@ function render(r) {
     });
     h += '<div class="aviso" style="margin-top:10px">El margen es lo que separa vender de despachar: dos personas ' +
          'con el mismo total vendido pueden dejar utilidades muy distintas. El cumplimiento de tareas y la ' +
-         'iniciativa llegan con el modulo de tareas.</div></div>';
+         'iniciativa se miden abajo, en Tareas.</div></div>';
   }
 
   // Gastos
@@ -1454,6 +1488,165 @@ function liquidar(nombre) {
     })
     .catch(function(e) { if (e && e.message !== 'SESION') toast('No se liquido: ' + e.message, 'err'); });
 }
+
+
+
+/* ===================== TAREAS Y RENDIMIENTO (v2.8) =====================
+   Tres marcadores, nunca uno solo. Un promedio entre "cumplio sus tareas" y "vendio mucho" no
+   significa nada: son dos cosas distintas y hay que poder verlas separadas para decidir.        */
+var REND = null, GENTE = [];
+
+function cargarTareas() {
+  var r = (typeof rango === 'function') ? rango() : null;
+  var qs = r ? ('&desde=' + r.d1 + '&hasta=' + r.d2) : '';
+  fetch(SCRIPT_URL + '?action=rendimiento' + qs + '&t=' + Date.now())
+    .then(leerJSON)
+    .then(function(d) {
+      sellarVersion(d);
+      if (!d || !d.ok) throw new Error(d && d.error ? d.error : 'sin datos');
+      REND = d;
+      pintarTareas();
+    })
+    .catch(function(e) {
+      if (e && e.message === 'SESION') return;
+      document.getElementById('tareasBox').innerHTML =
+        '<div class="section"><div class="stitle">Tareas</div><div class="cart-empty">No se pudo cargar: ' +
+        escHtml(e.message) + '<br><span style="font-size:12px">Si dice que falta la hoja, corre ' +
+        'prepararTareas() una vez desde el editor de Apps Script.</span></div></div>';
+    });
+}
+
+function pintarTareas() {
+  var d = REND || {personas:[], catalogo:[]};
+  var h = '<div class="section"><div class="stitle">Tareas · quien cumple</div>';
+
+  if (!d.personas.length) {
+    h += '<div class="cart-empty">Todavia nadie ha registrado trabajo en este periodo.</div>';
+  } else {
+    d.personas.forEach(function(p) {
+      var c = p.cumplimiento;
+      var clase = c === null ? 'nada' : (c >= 80 ? 'alto' : (c < 50 ? 'bajo' : ''));
+      h += '<div class="per">' +
+        '<div class="perh"><div class="nm">' + escHtml(p.nombre) + '</div>' +
+          '<div class="rt">' + p.diasActivos + '<small>dias con trabajo</small></div></div>' +
+        '<div class="mk">' +
+          '<div><div class="et">Cumplimiento</div><div class="nu ' + clase + '">' +
+            (c === null ? 'sin tareas' : c + '<small>%</small>') + '</div>' +
+            '<div class="pie">' + p.hechas + ' de ' + p.exigidas +
+            (p.parciales ? ' · ' + p.parciales + ' a medias' : '') + '</div></div>' +
+          '<div><div class="et">Volumen</div><div class="nu">' + p.fotos + '<small> fotos</small></div>' +
+            '<div class="pie">' + p.conteos + ' conteos · ' + p.ventas + ' ventas · ' +
+            p.demanda + ' demanda' + (p.publicaciones ? ' · ' + p.publicaciones + ' posts' : '') + '</div></div>' +
+          '<div><div class="et">Iniciativa</div><div class="nu ' + (p.propias ? 'alto' : 'nada') + '">' +
+            (p.propias ? p.propias : '0') + '</div>' +
+            '<div class="pie">tareas propias' + (p.superadas ? ' · ' + p.superadas + ' metas superadas' : '') + '</div></div>' +
+        '</div></div>';
+    });
+    h += '<div class="aviso">Los tres van separados a proposito. Quien cumple todas las tareas puede no ' +
+         'vender, y quien vende mucho puede no tocar el catalogo: promediarlos esconde justo eso. ' +
+         'El cumplimiento cuenta los dias completos del periodo, incluidos los que no se hizo nada.</div>';
+  }
+  h += '</div>';
+
+  // --- el catalogo, y el formulario para asignar ---
+  var cat = (d.catalogo || []).filter(function(t) { return t.activa; });
+  h += '<div class="section"><div class="stitle">Que se le pide a cada quien</div>';
+  h += cat.length ? cat.map(function(t) {
+      var et = t.tipo === 'AUTO' ? '<span class="ttipo auto">sola</span>'
+             : t.tipo === 'ENLACE' ? '<span class="ttipo enlace">con enlace</span>'
+             : '<span class="ttipo">a mano</span>';
+      return '<div class="tdef"><div class="c1"><div class="tt">' + et + escHtml(t.titulo) + '</div>' +
+        '<div class="mm">' + (t.meta > 1 ? 'meta ' + t.meta + ' · ' : '') +
+        (t.para === 'TODOS' ? 'todos' : escHtml(t.para)) + ' · ' +
+        (t.frecuencia === 'L-V' ? 'lunes a viernes' : t.frecuencia.toLowerCase()) +
+        (t.tipo === 'AUTO' ? ' · cuenta ' + t.medida.toLowerCase() : '') + '</div></div>' +
+        '<button onclick="apagarTarea(\'' + escAttr(t.id) + '\',\'' + escAttr(t.titulo) + '\')">Quitar</button></div>';
+    }).join('')
+    : '<div class="cart-empty">Sin tareas activas.</div>';
+
+  h += '<div style="border-top:1px solid var(--border);margin-top:14px;padding-top:14px">' +
+    '<div class="field"><label>Nueva tarea</label>' +
+      '<input type="text" id="ntTit" maxlength="90" placeholder="Ej: revisar los apartados vencidos"></div>' +
+    '<div class="row2">' +
+      '<div class="field"><label>Como se comprueba</label><select id="ntTipo" onchange="ntCambio()">' +
+        '<option value="AUTO">Se cuenta sola</option>' +
+        '<option value="ENLACE">Con enlace</option>' +
+        '<option value="CHECK" selected>Se marca a mano</option></select></div>' +
+      '<div class="field" id="ntMedBox" style="display:none"><label>Que cuenta</label><select id="ntMedida">' +
+        '<option value="FOTOS">Fotos nuevas</option><option value="CONTEOS">Conteos</option>' +
+        '<option value="DEMANDA">Demanda registrada</option><option value="VENTAS">Ventas</option></select></div>' +
+    '</div>' +
+    '<div class="row2">' +
+      '<div class="field"><label>Meta</label><input type="number" id="ntMeta" min="1" step="1" value="1"></div>' +
+      '<div class="field"><label>Cada cuando</label><select id="ntFrec">' +
+        '<option value="DIARIA">Todos los dias</option><option value="L-V">Lunes a viernes</option>' +
+        '<option value="UNA_VEZ">Una sola vez</option></select></div>' +
+    '</div>' +
+    '<div class="field"><label>Para quien</label><select id="ntPara">' +
+      '<option value="TODOS">Todos</option>' +
+      GENTE.map(function(g) { return '<option>' + escHtml(g) + '</option>'; }).join('') +
+      '</select></div>' +
+    '<button class="sbtn sbtn-y" onclick="crearTarea()">Asignar tarea</button>' +
+    '<div class="aviso">Lo que se puede contar solo, no se marca a mano: es la unica forma de que el ' +
+    'numero no dependa de que alguien diga que lo hizo. Deja "se marca a mano" solo para lo que no ' +
+    'deja rastro en el sistema.</div>' +
+  '</div></div>';
+
+  document.getElementById('tareasBox').innerHTML = h;
+  ntCambio();
+}
+
+function ntCambio() {
+  var t = document.getElementById('ntTipo');
+  if (!t) return;
+  var box = document.getElementById('ntMedBox');
+  if (box) box.style.display = t.value === 'AUTO' ? '' : 'none';
+  var meta = document.getElementById('ntMeta');
+  if (meta && t.value === 'AUTO' && Number(meta.value) <= 1) meta.value = 10;
+}
+
+function crearTarea() {
+  var tit = document.getElementById('ntTit').value.trim();
+  if (tit.length < 4) { toast('Escribe que hay que hacer', 'err'); return; }
+  var tipo = document.getElementById('ntTipo').value;
+  fetch(SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'},
+    body:JSON.stringify({tipo:'tarea_def', titulo:tit, tipoTarea:tipo,
+      medida:tipo === 'AUTO' ? document.getElementById('ntMedida').value : '',
+      meta:Number(document.getElementById('ntMeta').value) || 1,
+      frecuencia:document.getElementById('ntFrec').value,
+      para:document.getElementById('ntPara').value})})
+    .then(leerJSON)
+    .then(function(d) {
+      if (!d || !d.ok) throw new Error(d && d.error ? d.error : 'no se guardo');
+      toast('Tarea ' + d.id + ' asignada', 'ok');
+      cargarTareas();
+    })
+    .catch(function(e) { if (e && e.message !== 'SESION') toast('No se asigno: ' + e.message, 'err'); });
+}
+
+// Apagar no borra: el historico de lo que ya se cumplio tiene que seguir teniendo sentido.
+function apagarTarea(id, titulo) {
+  if (!confirm('Quitar "' + titulo + '" de las tareas del dia?\n\nLo que ya se cumplio queda registrado.')) return;
+  fetch(SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'},
+    body:JSON.stringify({tipo:'tarea_def', idTarea:id, apagar:true})})
+    .then(leerJSON)
+    .then(function(d) {
+      if (!d || !d.ok) throw new Error(d && d.error ? d.error : 'no se quito');
+      toast('Quitada', 'ok');
+      cargarTareas();
+    })
+    .catch(function(e) { if (e && e.message !== 'SESION') toast('No se quito: ' + e.message, 'err'); });
+}
+
+// Los nombres para el desplegable de "para quien" salen de USUARIOS, no se escriben a mano.
+fetch(SCRIPT_URL_SESION + '?action=quienes&t=' + Date.now())
+  .then(function(r) { return r.text(); })
+  .then(function(t) {
+    var d = {}; try { d = JSON.parse(t); } catch (e) {}
+    GENTE = ((d && d.usuarios) || []).map(function(u) { return u.nombre; });
+    if (REND) pintarTareas();
+  })
+  .catch(function() {});
 
 </script>
 </body>

@@ -1,7 +1,8 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_apartados.html
-  VERSION: v1.5 (2026-09-18) | requiere Apps Script v21.4
+  VERSION: v1.6 (2026-09-18) | requiere Apps Script v25
+  · agrega "Mi día" al menú (requiere Apps Script v25 y boparts_tareas.html).
   v1.5: con sesion activa, el desplegable de vendedor se fija en quien entro y se bloquea.
   v1.4: productos y clientes ya no se leen de un CSV publicado, sino por action=productos y action=clientes.
         Incluye la pantalla de login; solo aparece cuando CONFIG!B15 = SI.
@@ -323,7 +324,7 @@ select option{background:#1E1E1E;color:var(--ink)}
 <div class="nav-ov" id="navOv" onclick="closeNav()"></div>
 <div class="nav-pan" id="navPan">
   <div class="nav-t">Repuesto BoParts</div>
-  <div id="verTag" style="font-size:10px;color:var(--ink-muted);margin:-6px 0 10px;letter-spacing:0.3px">app v1.5 · script ?</div>
+  <div id="verTag" style="font-size:10px;color:var(--ink-muted);margin:-6px 0 10px;letter-spacing:0.3px">app v1.6 · script ?</div>
   <div class="nav-g">
     <a class="ncard" href="index.html">
       <span class="nicon">📋</span>
@@ -379,6 +380,11 @@ select option{background:#1E1E1E;color:var(--ink)}
       <span class="nicon">🧮</span>
       <span class="nlbl">Inventario</span>
       <span class="ndesc">Conteo de stock</span>
+    </a>
+    <a class="ncard" href="boparts_tareas.html">
+      <span class="nicon">✅</span>
+      <span class="nlbl">Mi día</span>
+      <span class="ndesc">Tareas del día</span>
     </a>
   </div>
 </div>
@@ -556,7 +562,7 @@ function sellarVersion(d) {
   if (t) t.textContent = 'app ' + APP_VERSION + ' \u00b7 script ' + VER_SCRIPT;
   return d;
 }
-var APP_VERSION = 'v1.5';
+var APP_VERSION = 'v1.6';
 var TASA = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
 
 var METODOS = [

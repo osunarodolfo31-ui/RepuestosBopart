@@ -1,7 +1,8 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — index.html
-  VERSION: v11 (2026-09-19) | requiere Apps Script v24
+  VERSION: v11.2 (2026-09-19) | requiere Apps Script v25
+  · agrega "Mi día" al menú (requiere Apps Script v25 y boparts_tareas.html).
   v11: interruptor Dolares / BCV para dar precios. Los BOLIVARES NO CAMBIAN nunca: lo unico que cambia
        es en que dolar se expresa ese mismo precio. BCV = Bs / tasa BCV, que da un numero mas alto
        porque quien paga con un dolar a BCV necesita mas dolares para cubrir los mismos bolivares.
@@ -478,7 +479,7 @@ function revisarSesion(alTener) {
 
 // v10: la lista viene del script, no del CSV publicado. Asi LISTA DE PRODUCTOS puede dejar de estar publicada.
 const SCRIPT_URL_SESION = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
-const APP_VERSION = 'v11.1';
+const APP_VERSION = 'v11.2';
 var VER_SCRIPT = '?';
 function sellarVersion(d) {
   if (d && d.v) VER_SCRIPT = d.v;
@@ -1036,6 +1037,11 @@ function marcarSlide(idx, slide) {
       <span class="nav-icon">🧮</span>
       <span class="nav-label">Inventario</span>
       <span class="nav-desc">Conteo de stock</span>
+    </a>
+    <a class="nav-card" href="boparts_tareas.html">
+      <span class="nav-icon">✅</span>
+      <span class="nav-label">Mi día</span>
+      <span class="nav-desc">Tareas del día</span>
     </a>
   </div>
 </div>

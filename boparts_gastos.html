@@ -1,7 +1,8 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_gastos.html
-  VERSION: v1.7 (2026-09-18) | requiere Apps Script v21.5
+  VERSION: v1.8 (2026-09-18) | requiere Apps Script v25
+  · agrega "Mi día" al menú (requiere Apps Script v25 y boparts_tareas.html).
   v1.7: incluye la pantalla de login; solo aparece cuando CONFIG!B15 = SI. No lee ningun CSV.
   v1.6: cada foto de soporte sube con nombre unico (mismo fallo que compras)
   VERSION anterior: v1.5 (2026-09-17) — nav con Gerencia | requiere Apps Script v11.2
@@ -273,7 +274,7 @@ select option{background:#1E1E1E;color:var(--ink)}
 <div class="nav-ov" id="navOv" onclick="closeNav()"></div>
 <div class="nav-pan" id="navPan">
   <div class="nav-t">Repuesto BoParts</div>
-  <div id="verTag" style="font-size:10px;color:var(--ink-muted);margin:-6px 0 10px;letter-spacing:0.3px">app v1.7 · script ?</div>
+  <div id="verTag" style="font-size:10px;color:var(--ink-muted);margin:-6px 0 10px;letter-spacing:0.3px">app v1.8 · script ?</div>
   <div class="nav-g">
     <a class="ncard" href="index.html">
       <span class="nicon">📋</span>
@@ -329,6 +330,11 @@ select option{background:#1E1E1E;color:var(--ink)}
       <span class="nicon">🧮</span>
       <span class="nlbl">Inventario</span>
       <span class="ndesc">Conteo de stock</span>
+    </a>
+    <a class="ncard" href="boparts_tareas.html">
+      <span class="nicon">✅</span>
+      <span class="nlbl">Mi día</span>
+      <span class="ndesc">Tareas del día</span>
     </a>
   </div>
 </div>
@@ -507,7 +513,7 @@ function sellarVersion(d) {
   return d;
 }
 var CLOUD = 'c7jufi9v', PRESET = 'boparts_productos';
-var APP_VERSION = 'v1.7';
+var APP_VERSION = 'v1.8';
 var TASA = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
 var comprobante = '';
 var METODOS = [

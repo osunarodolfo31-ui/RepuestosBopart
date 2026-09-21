@@ -1,7 +1,8 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_cobros.html
-  VERSION: v2.6 (2026-09-18) | requiere Apps Script v21.5
+  VERSION: v2.7 (2026-09-18) | requiere Apps Script v25
+  · agrega "Mi día" al menú (requiere Apps Script v25 y boparts_tareas.html).
   v2.6: incluye la pantalla de login; solo aparece cuando CONFIG!B15 = SI. No lee ningun CSV.
   v2.4: boton Cobrar en cada cliente y en su detalle: manda el estado de cuenta por WhatsApp al chat del cliente
         (usa el telefono de la hoja CLIENTES) sin tener que registrar un abono antes
@@ -281,7 +282,7 @@ select option{background:#1E1E1E;color:var(--ink)}
 <div class="nav-ov" id="navOv" onclick="closeNav()"></div>
 <div class="nav-pan" id="navPan">
   <div class="nav-t">Repuesto BoParts</div>
-  <div id="verTag" style="font-size:10px;color:var(--ink-muted);margin:-6px 0 10px;letter-spacing:0.3px">app v2.6 · script ?</div>
+  <div id="verTag" style="font-size:10px;color:var(--ink-muted);margin:-6px 0 10px;letter-spacing:0.3px">app v2.7 · script ?</div>
   <div class="nav-g">
     <a class="ncard" href="index.html">
       <span class="nicon">📋</span>
@@ -337,6 +338,11 @@ select option{background:#1E1E1E;color:var(--ink)}
       <span class="nicon">🧮</span>
       <span class="nlbl">Inventario</span>
       <span class="ndesc">Conteo de stock</span>
+    </a>
+    <a class="ncard" href="boparts_tareas.html">
+      <span class="nicon">✅</span>
+      <span class="nlbl">Mi día</span>
+      <span class="ndesc">Tareas del día</span>
     </a>
   </div>
 </div>
@@ -580,7 +586,7 @@ function primerNombre(n) {
 }
 var ultimo = null;   // ultimo abono registrado (para el mensaje de WhatsApp)
 
-var APP_VERSION = 'v2.6';
+var APP_VERSION = 'v2.7';
 document.getElementById('fechaHdr').textContent = APP_VERSION + ' · ' + new Date().toLocaleDateString('es-VE', {weekday:'long', day:'numeric', month:'long'});
 
 // Metodos de pago (sin CREDITO)

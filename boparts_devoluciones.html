@@ -1,7 +1,8 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_devoluciones.html
-  VERSION: v1.4 (2026-09-18) | requiere Apps Script v21.4
+  VERSION: v1.5 (2026-09-18) | requiere Apps Script v25
+  · agrega "Mi día" al menú (requiere Apps Script v25 y boparts_tareas.html).
   v1.4: la lista de productos se pide al script (action=productos) en vez del CSV publicado; login incluido.
   v1.3: el formulario (resolucion, autoriza, cliente, motivo) ya no se pierde al cambiar cantidades; el cliente
         viene de la venta; el servidor valida cuanto queda por devolver
@@ -252,7 +253,7 @@ select option{background:#1E1E1E;color:var(--ink)}
 <div class="nav-ov" id="navOv" onclick="closeNav()"></div>
 <div class="nav-pan" id="navPan">
   <div class="nav-t">Repuesto BoParts</div>
-  <div id="verTag" style="font-size:10px;color:var(--ink-muted);margin:-6px 0 10px;letter-spacing:0.3px">app v1.4 · script ?</div>
+  <div id="verTag" style="font-size:10px;color:var(--ink-muted);margin:-6px 0 10px;letter-spacing:0.3px">app v1.5 · script ?</div>
   <div class="nav-g">
     <a class="ncard" href="index.html">
       <span class="nicon">📋</span>
@@ -308,6 +309,11 @@ select option{background:#1E1E1E;color:var(--ink)}
       <span class="nicon">🧮</span>
       <span class="nlbl">Inventario</span>
       <span class="ndesc">Conteo de stock</span>
+    </a>
+    <a class="ncard" href="boparts_tareas.html">
+      <span class="nicon">✅</span>
+      <span class="nlbl">Mi día</span>
+      <span class="ndesc">Tareas del día</span>
     </a>
   </div>
 </div>
@@ -486,7 +492,7 @@ function sellarVersion(d) {
   return d;
 }
 function txt_(v) { return v == null ? '' : String(v); }
-var APP_VERSION = 'v1.4';
+var APP_VERSION = 'v1.5';
 var PIN_HASH_SOCIOS = 911136;      // mismo PIN de Gerencia
 var PLAZO_DIAS = 5;                // maximo acordado para aceptar un cambio
 var TASA = parseFloat(localStorage.getItem('motoauto_tasa') || '0');

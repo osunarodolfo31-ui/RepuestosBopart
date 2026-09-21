@@ -1,6 +1,19 @@
 /**
  * Repuesto BoParts — Code.gs
- * VERSION: v24 (2026-09-19) | quien sube cada foto, y datos para medir rendimiento
+ * VERSION: v25 (2026-09-19) | modulo de tareas y los tres marcadores de rendimiento
+ *
+ * v25 — TAREAS. Dos hojas nuevas, TAREAS (que hay que hacer) y TAREAS_DIA (que se hizo).
+ *   - Tres tipos de tarea. AUTO se cuenta sola con lo que la persona ya registro en el sistema
+ *     (fotos nuevas, conteos, demanda, ventas): nadie la marca, asi que nadie la puede inflar.
+ *     ENLACE exige el link de la publicacion como prueba. CHECK se marca a mano y por eso es la
+ *     mas debil: se usa solo donde no queda rastro, como abrir la tienda.
+ *   - TAREAS_DIA guarda UNA fila por tarea-persona-dia. Volver a marcar reescribe la fila, no apila.
+ *   - Tareas propias: lo que la persona hizo sin que nadie se lo mandara. Se guarda aparte.
+ *   - action=rendimiento devuelve TRES marcadores separados — cumplimiento, volumen, iniciativa —
+ *     y ninguno se promedia con otro. Un numero unico esconde justo lo que hay que ver.
+ *   - CORRECCION: VERSION_SCRIPT seguia en v21.4 mientras el encabezado decia v24. El sello que
+ *     sirve para saber que hay desplegado estaba mintiendo. Ahora se cambia junto con el encabezado.
+ *   - Correr prepararTareas() una vez desde el editor para crear las hojas.
  *
  * v24:
  *   - Hoja FOTOS_LOG: cada carga de fotos deja quien, cuando, que producto, cuantas fotos NUEVAS y cuantas
@@ -275,16 +288,18 @@ var PERMISOS_GET = {
   config:'VENDEDOR', nextNota:'VENDEDOR', nextCot:'VENDEDOR', nextFactura:'VENDEDOR', nota:'VENDEDOR',
   apartados:'VENDEDOR', proveedores:'VENDEDOR', stock:'VENDEDOR', conteos:'VENDEDOR', clientes:'VENDEDOR',
   cxc:'VENDEDOR', productos:'VENDEDOR', catalogo:'VENDEDOR', metodos:'VENDEDOR',
+  tareas:'VENDEDOR',
   producto:'SOCIO',
   ventas:'SOCIO', socios:'SOCIO', cxp:'SOCIO', cliente_stats:'SOCIO', compras:'SOCIO', diag:'SOCIO',
-  liquidacion:'SOCIO'
+  liquidacion:'SOCIO', rendimiento:'SOCIO'
 };
 var PERMISOS_POST = {
   fotos:'VENDEDOR', cliente:'VENDEDOR', demanda:'VENDEDOR', conteo:'VENDEDOR', gasto:'VENDEDOR',
   proveedor:'VENDEDOR', compra:'VENDEDOR', cotizacion:'VENDEDOR', abono:'VENDEDOR', venta:'VENDEDOR',
   factura_venta:'VENDEDOR', apartado:'VENDEDOR', apartado_abono:'VENDEDOR', apartado_entregar:'VENDEDOR',
+  tarea_marcar:'VENDEDOR', tarea_propia:'VENDEDOR',
   costeo:'SOCIO', cxp_abono:'SOCIO', conteo_revision:'SOCIO', devolucion:'SOCIO', apartado_cerrar:'SOCIO',
-  tasa:'SOCIO', socio:'SOCIO', liquidar_aliado:'SOCIO', precio:'SOCIO'
+  tasa:'SOCIO', socio:'SOCIO', liquidar_aliado:'SOCIO', precio:'SOCIO', tarea_def:'SOCIO'
 };
 
 function authActiva_(ss) {
@@ -383,7 +398,10 @@ function rolDe_(tabla, clave) {
   return r ? r : 'SOCIO';   // lo desconocido se trata como reservado a socios
 }
 
-var VERSION_SCRIPT = 'v21.4';
+// OJO: esta constante es lo que ven las apps en el menu. Se habia quedado en v21.4 mientras el
+// encabezado ya decia v24, asi que el sello de version — que existe justamente para saber si lo
+// desplegado es lo que crees — estaba mintiendo. Cada version nueva se cambia AQUI tambien.
+var VERSION_SCRIPT = 'v25';
 
 function json_(obj) {
   // La version viaja en cada respuesta: es la forma rapida de saber si lo desplegado es lo que crees
@@ -447,6 +465,14 @@ function rutearGet_(e) {
   }
   if (accion === 'producto') {
     return json_(fichaProducto_(ssA, e.parameter.codigo));
+  }
+  // v25 — tareas. Con sesion activa, la persona la pone el servidor: nadie consulta el dia de otro.
+  if (accion === 'tareas') {
+    var qn = (!usr.libre && usr.nombre) ? usr.nombre : String(e.parameter.quien || '');
+    return json_(miDia_(ssA, qn, e.parameter.fecha));
+  }
+  if (accion === 'rendimiento') {
+    return json_(rendimientoTareas_(ssA, e.parameter.desde, e.parameter.hasta));
   }
 
   if (e.parameter.action === 'nextNota') {
@@ -679,6 +705,24 @@ function doPost(e) {
     if (data.tipo === 'cxp_abono') {
       movCxp_(ss, data, 'ABONO');
       return json_({ok:true, tipo:'cxp_abono'});
+    }
+
+    // ---- TAREAS (v25) ----
+    // Con lock: dos marcas seguidas de la misma tarea no pueden crear dos filas del mismo dia.
+    if (data.tipo === 'tarea_marcar') {
+      var lockT = LockService.getScriptLock(); lockT.waitLock(10000);
+      try { return json_(marcarTarea_(ss, data, quien)); }
+      finally { lockT.releaseLock(); }
+    }
+    if (data.tipo === 'tarea_propia') {
+      var lockT2 = LockService.getScriptLock(); lockT2.waitLock(10000);
+      try { return json_(tareaPropia_(ss, data, quien)); }
+      finally { lockT2.releaseLock(); }
+    }
+    if (data.tipo === 'tarea_def') {
+      var lockT3 = LockService.getScriptLock(); lockT3.waitLock(10000);
+      try { return json_(guardarTareaDef_(ss, data, quien)); }
+      finally { lockT3.releaseLock(); }
     }
 
     // ---- CAMBIO DE PRECIO (v23) ----
@@ -2675,4 +2719,433 @@ function cambiarPrecio_(ss, d, quien) {
 
   return {ok:true, tipo:'precio', codigo:cod, anterior:anterior, precio:nuevo, costo:costo,
           margen:costo > 0 ? mNue : null};
+}
+
+// ============================================================
+// TAREAS Y RENDIMIENTO (v25)
+// ============================================================
+// Dos hojas y una regla: lo que se puede contar solo, no se marca a mano.
+//
+// TAREAS      = el catalogo. Que hay que hacer, quien, cada cuanto, cual es la meta.
+// TAREAS_DIA  = el cumplimiento. Una fila por tarea-persona-dia. Se reescribe la misma fila, no se apila.
+//
+// Tres tipos de tarea:
+//   AUTO   -> el avance sale de lo que la persona YA registro en el sistema (fotos nuevas, conteos,
+//             ventas, demanda). Nadie la marca: se cumple sola. Es la unica que no se puede inflar.
+//   ENLACE -> pide una prueba: el link de la publicacion. Sin link no hay cumplimiento.
+//   CHECK  -> se marca a mano. Es la mas debil y por eso vale menos: usarla solo donde no hay rastro.
+//
+// Y una linea aparte para la iniciativa: tareas PROPIAS, las que nadie mando.
+// No hay una nota unica. Un solo numero esconde justo lo que hay que ver: alguien puede cumplir
+// todas las tareas y no vender nada, o vender mucho y no tocar el catalogo. Van separados a proposito.
+
+var SH_TAREAS     = 'TAREAS';
+var SH_TAREAS_DIA = 'TAREAS_DIA';
+
+// TAREAS: A ID, B TITULO, C DETALLE, D TIPO, E MEDIDA, F META, G ASIGNADA_A, H FRECUENCIA,
+//         I ACTIVA, J DESDE, K HASTA, L CREADA_POR, M CREADA
+function shTareas_(ss) {
+  return hojaAp_(ss, SH_TAREAS, ['ID','TITULO','DETALLE','TIPO','MEDIDA','META','ASIGNADA_A','FRECUENCIA',
+                                 'ACTIVA','DESDE','HASTA','CREADA_POR','CREADA']);
+}
+// TAREAS_DIA: A FECHA, B HORA, C ID_TAREA, D TITULO, E QUIEN, F TIPO, G META, H HECHO,
+//             I ESTADO, J EVIDENCIA, K NOTA, L ORIGEN
+function shTareasDia_(ss) {
+  return hojaAp_(ss, SH_TAREAS_DIA, ['FECHA','HORA','ID_TAREA','TITULO','QUIEN','TIPO','META','HECHO',
+                                     'ESTADO','EVIDENCIA','NOTA','ORIGEN']);
+}
+
+// La primera vez deja el juego basico andando, para no empezar con una hoja en blanco.
+function sembrarTareas_(ss) {
+  var sh = shTareas_(ss);
+  if (sh.getLastRow() >= 2) return sh;
+  var hoy = new Date();
+  [['T001','Abri la tienda','Marcar al abrir. Queda la hora.','CHECK','',1,'TODOS','DIARIA','SI'],
+   ['T002','Cargar 10 fotos de productos','Productos sin foto, desde Cargar Fotos.','AUTO','FOTOS',10,'TODOS','DIARIA','SI'],
+   ['T003','Subir 5 publicaciones','Instagram o TikTok. Pegar el link de cada una.','ENLACE','',5,'TODOS','DIARIA','SI'],
+   ['T004','Contar 20 productos','Desde Inventario, pestana Contar.','AUTO','CONTEOS',20,'TODOS','L-V','SI'],
+   ['T005','Registrar la demanda no atendida','Todo lo que pidieron y no habia.','AUTO','DEMANDA',3,'TODOS','DIARIA','SI']
+  ].forEach(function(t) {
+    sh.appendRow([t[0],t[1],t[2],t[3],t[4],t[5],t[6],t[7],t[8],
+                  fechaVE_(Utilities.formatDate(hoy, TZ_VE, 'dd/MM/yyyy')),'','sistema',
+                  fechaVE_(Utilities.formatDate(hoy, TZ_VE, 'dd/MM/yyyy'))]);
+  });
+  return sh;
+}
+
+function tareasActivas_(ss) {
+  var sh = sembrarTareas_(ss);
+  var out = [];
+  if (sh.getLastRow() < 2) return out;
+  sh.getRange(2, 1, sh.getLastRow() - 1, 13).getValues().forEach(function(r, i) {
+    var id = String(r[0] || '').trim();
+    if (!id) return;
+    out.push({fila:i + 2, id:id, titulo:String(r[1] || ''), detalle:String(r[2] || ''),
+              tipo:String(r[3] || 'CHECK').trim().toUpperCase(),
+              medida:String(r[4] || '').trim().toUpperCase(), meta:Number(r[5]) || 0,
+              para:String(r[6] || 'TODOS').trim(), frecuencia:String(r[7] || 'DIARIA').trim().toUpperCase(),
+              activa:String(r[8] || 'SI').trim().toUpperCase() !== 'NO',
+              desde:iso_(r[9]), hasta:iso_(r[10])});
+  });
+  return out;
+}
+
+// Una tarea le toca a alguien hoy?
+function tocaHoy_(t, quien, fechaIso) {
+  if (!t.activa) return false;
+  if (t.desde && fechaIso < t.desde) return false;
+  if (t.hasta && fechaIso > t.hasta) return false;
+  var para = String(t.para || 'TODOS').trim().toUpperCase();
+  if (para && para !== 'TODOS' && para !== String(quien || '').trim().toUpperCase()) return false;
+  if (t.frecuencia === 'L-V') {
+    var p = fechaIso.split('-');
+    var dia = new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]), 12).getDay();
+    if (dia === 0 || dia === 6) return false;
+  }
+  return true;
+}
+
+// Lo que la persona YA hizo hoy, contado del propio sistema. Esto es lo que hace que una tarea AUTO
+// no dependa de que alguien diga que la hizo.
+function avanceAuto_(ss, medida, quien, fechaIso) {
+  var q = String(quien || '').trim().toUpperCase();
+  if (!q) return 0;
+  var n = 0;
+  if (medida === 'FOTOS') {
+    var fl = ss.getSheetByName('FOTOS_LOG');
+    if (fl && fl.getLastRow() >= 2) {
+      fl.getRange(2, 1, fl.getLastRow() - 1, 8).getValues().forEach(function(r) {
+        if (iso_(r[0]) !== fechaIso) return;
+        if (String(r[7] || '').trim().toUpperCase() !== q) return;
+        n += Number(r[4]) || 0;      // solo las fotos NUEVAS; volver a subir la misma no es trabajo nuevo
+      });
+    }
+  } else if (medida === 'CONTEOS') {
+    var ct = ss.getSheetByName('CONTEOS');
+    if (ct && ct.getLastRow() >= 2) {
+      ct.getRange(2, 1, ct.getLastRow() - 1, 15).getValues().forEach(function(r) {
+        if (iso_(r[0]) !== fechaIso) return;
+        if (String(r[8] || '').trim().toUpperCase() !== q) return;
+        n++;
+      });
+    }
+  } else if (medida === 'DEMANDA') {
+    var dm = ss.getSheetByName('DEMANDA_NO_ATENDIDA');
+    if (dm && dm.getLastRow() >= 2) {
+      dm.getRange(2, 1, dm.getLastRow() - 1, 17).getValues().forEach(function(r) {
+        if (iso_(r[0]) !== fechaIso) return;
+        if (String(r[2] || '').trim().toUpperCase() !== q) return;
+        n++;
+      });
+    }
+  } else if (medida === 'VENTAS') {
+    var v = ss.getSheetByName(SH_VENTAS);
+    if (v && v.getLastRow() >= 2) {
+      v.getRange(2, 1, v.getLastRow() - 1, Math.max(v.getLastColumn(), 3)).getValues().forEach(function(r) {
+        if (iso_(r[0]) !== fechaIso) return;
+        if (String(r[2] || '').trim().toUpperCase() !== q) return;
+        n++;
+      });
+    }
+  }
+  return n;
+}
+
+// Lo ya escrito en TAREAS_DIA para una persona y un dia.
+function marcasDelDia_(ss, quien, fechaIso) {
+  var sh = shTareasDia_(ss), out = [];
+  if (sh.getLastRow() < 2) return out;
+  var q = String(quien || '').trim().toUpperCase();
+  sh.getRange(2, 1, sh.getLastRow() - 1, 12).getValues().forEach(function(r, i) {
+    if (iso_(r[0]) !== fechaIso) return;
+    if (q && String(r[4] || '').trim().toUpperCase() !== q) return;
+    out.push({fila:i + 2, fecha:iso_(r[0]), hora:String(r[1] || ''), id:String(r[2] || ''),
+              titulo:String(r[3] || ''), quien:String(r[4] || ''), tipo:String(r[5] || ''),
+              meta:Number(r[6]) || 0, hecho:Number(r[7]) || 0, estado:String(r[8] || ''),
+              evidencia:String(r[9] || ''), nota:String(r[10] || ''),
+              origen:String(r[11] || 'ASIGNADA')});
+  });
+  return out;
+}
+
+function estadoDe_(hecho, meta) {
+  if (!meta) return hecho > 0 ? 'HECHA' : 'PENDIENTE';
+  if (hecho >= meta) return 'HECHA';
+  return hecho > 0 ? 'PARCIAL' : 'PENDIENTE';
+}
+
+// El dia de trabajo de una persona: sus tareas, cuanto lleva de cada una y lo que hizo por su cuenta.
+function miDia_(ss, quien, fechaIso) {
+  var f = fechaIso || Utilities.formatDate(new Date(), TZ_VE, 'yyyy-MM-dd');
+  var marcas = marcasDelDia_(ss, quien, f);
+  var porId = {};
+  marcas.forEach(function(m) { if (m.id) porId[m.id] = m; });
+
+  var lista = [];
+  tareasActivas_(ss).forEach(function(t) {
+    if (!tocaHoy_(t, quien, f)) return;
+    var m = porId[t.id] || null;
+    var hecho = (t.tipo === 'AUTO') ? avanceAuto_(ss, t.medida, quien, f) : (m ? m.hecho : 0);
+    lista.push({id:t.id, titulo:t.titulo, detalle:t.detalle, tipo:t.tipo, medida:t.medida,
+                meta:t.meta, hecho:hecho, estado:estadoDe_(hecho, t.meta),
+                evidencia:m ? m.evidencia : '', hora:m ? m.hora : '', nota:m ? m.nota : ''});
+  });
+
+  var propias = marcas.filter(function(m) { return String(m.origen).toUpperCase() === 'PROPIA'; })
+                      .map(function(m) { return {titulo:m.titulo, hora:m.hora, evidencia:m.evidencia, nota:m.nota}; });
+
+  var exigibles = lista.length;
+  var hechas = lista.filter(function(t) { return t.estado === 'HECHA'; }).length;
+  return {ok:true, tipo:'tareas', fecha:f, quien:quien || '', tareas:lista, propias:propias,
+          hechas:hechas, exigibles:exigibles};
+}
+
+// Marca una tarea. Se reescribe la fila del dia si ya existe: una tarea-persona-dia es UNA fila.
+// Una tarea AUTO no se puede marcar a mano; ahi esta su valor.
+function marcarTarea_(ss, d, quien) {
+  var nombre = (quien && quien.nombre) ? quien.nombre : String(d.quien || '').trim();
+  if (!nombre) throw new Error('No se sabe quien marca la tarea');
+  var id = String(d.idTarea || '').trim();
+  if (!id) throw new Error('Falta la tarea');
+  var f = String(d.fecha || '').trim() || Utilities.formatDate(new Date(), TZ_VE, 'yyyy-MM-dd');
+  f = iso_(f) || f;
+
+  var def = null;
+  tareasActivas_(ss).forEach(function(t) { if (t.id === id) def = t; });
+  if (!def) throw new Error('Esa tarea no existe: ' + id);
+  if (def.tipo === 'AUTO') {
+    throw new Error('"' + def.titulo + '" se cuenta sola con lo que registres en el sistema. No se marca a mano.');
+  }
+
+  var evid = String(d.evidencia || '').trim();
+  var hecho;
+  if (def.tipo === 'ENLACE') {
+    // Sin enlace no hay cumplimiento: es toda la diferencia entre "lo hice" y "aqui esta".
+    var links = evid.split(/[\s,;]+/).filter(function(u) { return /^https?:\/\//i.test(u); });
+    if (!links.length) throw new Error('"' + def.titulo + '" necesita el enlace de la publicacion.');
+    evid = links.join(' ');
+    hecho = links.length;
+  } else {
+    hecho = Number(d.hecho) || 1;
+  }
+
+  var sh = shTareasDia_(ss);
+  var ahora = new Date();
+  var hora = Utilities.formatDate(ahora, TZ_VE, 'HH:mm');
+  var yaHay = null;
+  marcasDelDia_(ss, nombre, f).forEach(function(m) { if (m.id === id) yaHay = m; });
+  var estado = estadoDe_(hecho, def.meta);
+
+  if (yaHay) {
+    // Se conserva la hora original: para "Abri la tienda" la primera marca es el dato.
+    sh.getRange(yaHay.fila, 7, 1, 5).setValues([[def.meta, hecho, estado, evid, String(d.nota || '')]]);
+  } else {
+    sh.appendRow([fechaVE_(Utilities.formatDate(ahora, TZ_VE, 'dd/MM/yyyy')), hora, id, def.titulo, nombre,
+                  def.tipo, def.meta, hecho, estado, evid, String(d.nota || ''), 'ASIGNADA']);
+    formatoFecha_(sh, sh.getLastRow(), 1);
+  }
+  return {ok:true, tipo:'tarea_marcar', id:id, hecho:hecho, estado:estado, hora:yaHay ? yaHay.hora : hora};
+}
+
+// Una tarea que nadie mando. Es la unica medida de iniciativa que tenemos, asi que se registra aparte
+// y no se mezcla con el cumplimiento: cumplir es hacer lo que se pidio, esto es otra cosa.
+function tareaPropia_(ss, d, quien) {
+  var nombre = (quien && quien.nombre) ? quien.nombre : String(d.quien || '').trim();
+  if (!nombre) throw new Error('No se sabe quien registra la tarea');
+  var titulo = String(d.titulo || '').trim();
+  if (titulo.length < 4) throw new Error('Describe que hiciste, en pocas palabras.');
+  if (titulo.length > 120) titulo = titulo.slice(0, 120);
+
+  var ahora = new Date();
+  var f = Utilities.formatDate(ahora, TZ_VE, 'dd/MM/yyyy');
+  var sh = shTareasDia_(ss);
+  sh.appendRow([fechaVE_(f), Utilities.formatDate(ahora, TZ_VE, 'HH:mm'), '', titulo, nombre,
+                'PROPIA', 0, 1, 'HECHA', String(d.evidencia || '').trim(), String(d.nota || '').trim(), 'PROPIA']);
+  formatoFecha_(sh, sh.getLastRow(), 1);
+  return {ok:true, tipo:'tarea_propia', titulo:titulo};
+}
+
+// Crear, editar o apagar una tarea del catalogo. Solo socios.
+function guardarTareaDef_(ss, d, quien) {
+  var sh = sembrarTareas_(ss);
+  var titulo = String(d.titulo || '').trim();
+  var tipo = String(d.tipoTarea || 'CHECK').trim().toUpperCase();
+  if (['AUTO','ENLACE','CHECK'].indexOf(tipo) < 0) throw new Error('Tipo de tarea desconocido: ' + tipo);
+  var medida = String(d.medida || '').trim().toUpperCase();
+  if (tipo === 'AUTO' && ['FOTOS','CONTEOS','DEMANDA','VENTAS'].indexOf(medida) < 0) {
+    throw new Error('Una tarea que se cuenta sola tiene que decir que cuenta: fotos, conteos, demanda o ventas.');
+  }
+  if (tipo !== 'AUTO') medida = '';
+
+  var id = String(d.idTarea || '').trim();
+  var fila = 0;
+  tareasActivas_(ss).forEach(function(t) { if (t.id === id) fila = t.fila; });
+
+  // Apagar una tarea no la borra: el historico de TAREAS_DIA tiene que seguir teniendo sentido.
+  if (d.apagar && fila) {
+    sh.getRange(fila, 9).setValue('NO');
+    return {ok:true, tipo:'tarea_def', id:id, activa:false};
+  }
+  if (!titulo) throw new Error('La tarea necesita un titulo');
+
+  var hoy = new Date();
+  var fila13 = [id, titulo, String(d.detalle || '').trim(), tipo, medida, Number(d.meta) || 1,
+                String(d.para || 'TODOS').trim() || 'TODOS',
+                String(d.frecuencia || 'DIARIA').trim().toUpperCase(),
+                'SI',
+                d.desde ? fechaVE_(d.desde) : fechaVE_(Utilities.formatDate(hoy, TZ_VE, 'dd/MM/yyyy')),
+                d.hasta ? fechaVE_(d.hasta) : '',
+                (quien && quien.nombre) ? quien.nombre : '',
+                fechaVE_(Utilities.formatDate(hoy, TZ_VE, 'dd/MM/yyyy'))];
+
+  if (fila) {
+    // Al editar no se toca quien la creo ni cuando
+    sh.getRange(fila, 1, 1, 11).setValues([fila13.slice(0, 11)]);
+  } else {
+    var n = 0;
+    tareasActivas_(ss).forEach(function(t) {
+      var m = /^T(\d+)$/.exec(t.id); if (m) n = Math.max(n, Number(m[1]));
+    });
+    fila13[0] = 'T' + ('00' + (n + 1)).slice(-3);
+    sh.appendRow(fila13);
+    formatoFecha_(sh, sh.getLastRow(), 10);
+    formatoFecha_(sh, sh.getLastRow(), 13);
+    id = fila13[0];
+  }
+  return {ok:true, tipo:'tarea_def', id:id, activa:true};
+}
+
+// Los tres marcadores, por persona, en un rango de fechas. Separados a proposito.
+//   cumplimiento -> de lo que se le pidio, cuanto hizo. En %.
+//   volumen      -> el trabajo crudo, sin convertir a nota: fotos, conteos, ventas, demanda.
+//   iniciativa   -> tareas propias, y metas superadas.
+//
+// Se lee cada hoja UNA vez y se arma un indice por persona+dia. La version obvia — preguntar por cada
+// persona y cada dia — releia la hoja entera cientos de veces y el script se caia por tiempo.
+function rendimientoTareas_(ss, desde, hasta) {
+  var hoyIso = Utilities.formatDate(new Date(), TZ_VE, 'yyyy-MM-dd');
+  var d1 = iso_(desde) || hoyIso, d2 = iso_(hasta) || hoyIso;
+  if (d2 > hoyIso) d2 = hoyIso;                 // el futuro no se exige: bajaria el % sin razon
+  var dias = diasEntre_(d1, d2, 120);
+  if (!dias.length) return {ok:true, tipo:'rendimiento', desde:d1, hasta:d2, personas:[], catalogo:tareasActivas_(ss)};
+  var d2r = dias[dias.length - 1];
+
+  var gente = {};
+  function de(n) {
+    var k = String(n || '').trim();
+    if (!k) return null;
+    if (!gente[k]) gente[k] = {nombre:k, exigidas:0, hechas:0, parciales:0, propias:0, superadas:0,
+                               fotos:0, conteos:0, ventas:0, demanda:0, publicaciones:0, dias:{}};
+    return gente[k];
+  }
+  function clave(n, f) { return String(n || '').trim().toUpperCase() + '|' + f; }
+
+  // --- una pasada por cada hoja ---
+  var auto = {FOTOS:{}, CONTEOS:{}, DEMANDA:{}, VENTAS:{}};
+  function suma(mapa, n, f, cuanto) {
+    var k = clave(n, f); mapa[k] = (mapa[k] || 0) + cuanto;
+  }
+
+  var fl = ss.getSheetByName('FOTOS_LOG');
+  if (fl && fl.getLastRow() >= 2) {
+    fl.getRange(2, 1, fl.getLastRow() - 1, 8).getValues().forEach(function(r) {
+      var f = iso_(r[0]); if (!f || f < d1 || f > d2r) return;
+      var p = de(r[7]); if (!p) return;
+      var n = Number(r[4]) || 0;
+      p.fotos += n; p.dias[f] = true; suma(auto.FOTOS, r[7], f, n);
+    });
+  }
+  var ct = ss.getSheetByName('CONTEOS');
+  if (ct && ct.getLastRow() >= 2) {
+    ct.getRange(2, 1, ct.getLastRow() - 1, 15).getValues().forEach(function(r) {
+      var f = iso_(r[0]); if (!f || f < d1 || f > d2r) return;
+      var p = de(r[8]); if (!p) return;
+      p.conteos++; p.dias[f] = true; suma(auto.CONTEOS, r[8], f, 1);
+    });
+  }
+  var dm = ss.getSheetByName('DEMANDA_NO_ATENDIDA');
+  if (dm && dm.getLastRow() >= 2) {
+    dm.getRange(2, 1, dm.getLastRow() - 1, 17).getValues().forEach(function(r) {
+      var f = iso_(r[0]); if (!f || f < d1 || f > d2r) return;
+      var p = de(r[2]); if (!p) return;
+      p.demanda++; p.dias[f] = true; suma(auto.DEMANDA, r[2], f, 1);
+    });
+  }
+  var v = ss.getSheetByName(SH_VENTAS);
+  if (v && v.getLastRow() >= 2) {
+    v.getRange(2, 1, v.getLastRow() - 1, Math.max(v.getLastColumn(), 3)).getValues().forEach(function(r) {
+      var f = iso_(r[0]); if (!f || f < d1 || f > d2r) return;
+      var p = de(r[2]); if (!p) return;
+      p.ventas++; p.dias[f] = true; suma(auto.VENTAS, r[2], f, 1);
+    });
+  }
+
+  // Lo marcado a mano, indexado por persona+dia+tarea
+  var marcado = {};
+  var shD = shTareasDia_(ss);
+  if (shD.getLastRow() >= 2) {
+    shD.getRange(2, 1, shD.getLastRow() - 1, 12).getValues().forEach(function(r) {
+      var f = iso_(r[0]); if (!f || f < d1 || f > d2r) return;
+      var p = de(r[4]); if (!p) return;
+      p.dias[f] = true;
+      if (String(r[11] || '').toUpperCase() === 'PROPIA') { p.propias++; return; }
+      if (String(r[5] || '').toUpperCase() === 'ENLACE') p.publicaciones += Number(r[7]) || 0;
+      var id = String(r[2] || '').trim();
+      if (id) marcado[clave(r[4], f) + '|' + id] = Number(r[7]) || 0;
+    });
+  }
+
+  // --- el cumplimiento, dia por dia y persona por persona ---
+  // Se recorre el rango COMPLETO, no solo los dias con actividad: un dia en que no se hizo nada es
+  // justamente el dia que hay que contar. Contar solo los dias trabajados daria 100% a quien no vino.
+  var defs = tareasActivas_(ss);
+  Object.keys(gente).forEach(function(nom) {
+    var p = gente[nom];
+    dias.forEach(function(f) {
+      defs.forEach(function(t) {
+        if (!tocaHoy_(t, nom, f)) return;
+        p.exigidas++;
+        var hecho = (t.tipo === 'AUTO') ? (auto[t.medida] ? (auto[t.medida][clave(nom, f)] || 0) : 0)
+                                        : (marcado[clave(nom, f) + '|' + t.id] || 0);
+        var est = estadoDe_(hecho, t.meta);
+        if (est === 'HECHA') p.hechas++;
+        else if (est === 'PARCIAL') p.parciales++;
+        if (t.meta && hecho > t.meta) p.superadas++;
+      });
+    });
+  });
+
+  var lista = Object.keys(gente).map(function(k) {
+    var p = gente[k];
+    p.diasActivos = Object.keys(p.dias).length;
+    delete p.dias;
+    p.cumplimiento = p.exigidas ? Math.round(p.hechas * 100 / p.exigidas) : null;
+    return p;
+  }).sort(function(a, b) { return (b.cumplimiento || 0) - (a.cumplimiento || 0); });
+
+  return {ok:true, tipo:'rendimiento', desde:d1, hasta:d2r, dias:dias.length,
+          personas:lista, catalogo:defs};
+}
+
+// Los dias del rango, en aaaa-mm-dd. Con tope, para que un rango absurdo no tumbe el script.
+function diasEntre_(d1, d2, tope) {
+  var out = [];
+  var a = d1.split('-'), b = d2.split('-');
+  if (a.length !== 3 || b.length !== 3) return out;
+  var cur = new Date(Number(a[0]), Number(a[1]) - 1, Number(a[2]), 12);
+  var fin = new Date(Number(b[0]), Number(b[1]) - 1, Number(b[2]), 12);
+  while (cur <= fin && out.length < (tope || 120)) {
+    out.push(Utilities.formatDate(cur, TZ_VE, 'yyyy-MM-dd'));
+    cur = new Date(cur.getTime() + 24 * 3600 * 1000);
+    cur.setHours(12, 0, 0, 0);
+  }
+  return out;
+}
+
+// Deja las dos hojas creadas y con las tareas de arranque. Se corre una sola vez desde el editor.
+function prepararTareas() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  sembrarTareas_(ss);
+  shTareasDia_(ss);
+  return 'Listo: hojas TAREAS y TAREAS_DIA creadas.';
 }

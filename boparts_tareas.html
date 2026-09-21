@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<!--
+  Repuesto BoParts — boparts_tareas.html
+  VERSION: v1 (2026-09-19) | requiere Apps Script v25
+
+  El dia de trabajo de cada persona. Tres tipos de tarea, a proposito distintos:
+    - Las que se cuentan solas (fotos, conteos, demanda, ventas): salen del propio sistema. Nadie las
+      marca, asi que nadie las puede inflar. Son las unicas totalmente confiables.
+    - Las que piden prueba (publicaciones): sin el link no hay cumplimiento.
+    - Las que se marcan a mano (abrir la tienda): las mas debiles. Se usan solo donde no queda rastro.
+  Y aparte, las tareas propias: lo que la persona hizo sin que nadie se lo mandara. No suma al
+  cumplimiento, se mide sola. Cumplir es hacer lo que se pidio; esto es otra cosa.
+-->
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>BoParts · Mi día</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --brand:#F5A800;--brand-soft:rgba(245,168,0,.15);
+  --bg:#111;--bg2:#1A1A1A;--card:#1E1E1E;--card2:#252525;--border:#2E2E2E;
+  --ink:#F0F0F0;--ink-soft:#AAA;--ink-muted:#666;
+  --green:#22C55E;--red:#EF4444;
+  --radius:14px;--radius-sm:8px;
+}
+html,body{min-height:100%;background:var(--bg);font-family:'Inter',sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased}
+header{background:var(--bg2);border-bottom:2px solid var(--brand);padding:12px 16px;display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:50}
+.logo{height:34px;width:auto}
+.hdr h1{font-size:15px;font-weight:700}
+.hdr p{font-size:11px;color:var(--ink-muted)}
+.container{padding:16px;max-width:520px;margin:0 auto;padding-bottom:110px}
+.section{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:12px}
+.stitle{font-size:12px;font-weight:700;color:var(--brand);text-transform:uppercase;letter-spacing:.5px;margin-bottom:12px}
+label{font-size:12px;color:var(--ink-soft);font-weight:600;display:block;margin-bottom:4px}
+input,select,textarea{width:100%;background:var(--card2);border:1.5px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;font-size:14px;font-family:inherit;color:var(--ink);outline:none;transition:border-color .15s}
+input:focus,select:focus,textarea:focus{border-color:var(--brand)}
+input::placeholder,textarea::placeholder{color:var(--ink-muted)}
+.field{margin-bottom:12px}
+
+/* RESUMEN DEL DIA */
+.hoy{display:flex;align-items:center;gap:14px;background:var(--card2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:14px;margin-bottom:12px}
+.hoy .big{font-size:30px;font-weight:800;color:var(--brand);line-height:1;min-width:70px;text-align:center}
+.hoy .big small{display:block;font-size:9px;font-weight:600;color:var(--ink-muted);text-transform:uppercase;letter-spacing:.4px;margin-top:5px}
+.hoy .big.todo{color:var(--green)}
+.hoy .txt{font-size:12px;color:var(--ink-soft);line-height:1.6}
+.hoy .txt b{color:var(--ink)}
+
+/* UNA TAREA */
+.t{background:var(--card2);border:1px solid var(--border);border-left:3px solid var(--border);border-radius:var(--radius-sm);padding:12px;margin-bottom:9px}
+.t.hecha{border-left-color:var(--green)}
+.t.parcial{border-left-color:var(--brand)}
+.ttop{display:flex;align-items:flex-start;gap:10px}
+.ttit{flex:1;font-size:14px;font-weight:600;line-height:1.35}
+.t.hecha .ttit{color:var(--ink-soft)}
+.tdet{font-size:11px;color:var(--ink-muted);margin-top:3px;line-height:1.5}
+.tmarca{font-size:10px;color:var(--ink-muted);margin-top:6px}
+.tmarca a{color:var(--brand);text-decoration:none}
+.tipo{font-size:9px;font-weight:700;letter-spacing:.4px;padding:2px 7px;border-radius:4px;white-space:nowrap;
+  background:rgba(255,255,255,.07);color:var(--ink-muted);text-transform:uppercase}
+.tipo.auto{background:rgba(34,197,94,.15);color:var(--green)}
+.tipo.enlace{background:rgba(245,168,0,.18);color:var(--brand)}
+
+/* AVANCE */
+.barra{height:6px;border-radius:3px;background:var(--border);overflow:hidden;margin-top:10px}
+.barra span{display:block;height:100%;background:var(--brand);border-radius:3px;transition:width .3s}
+.barra.full span{background:var(--green)}
+.cuenta{display:flex;justify-content:space-between;align-items:baseline;margin-top:7px;font-size:11px;color:var(--ink-muted)}
+.cuenta b{font-size:14px;color:var(--ink);font-weight:700}
+.cuenta .ok{color:var(--green)}
+
+.tbtn{width:100%;margin-top:10px;padding:11px;border:none;border-radius:var(--radius-sm);background:var(--brand);
+  color:#111;font-size:14px;font-weight:700;font-family:inherit;cursor:pointer}
+.tbtn:disabled{opacity:.45;cursor:default}
+.tbtn.sec{background:var(--card);color:var(--ink-soft);border:1.5px solid var(--border);font-weight:600}
+.tbtn.listo{background:rgba(34,197,94,.15);color:var(--green);border:1.5px solid rgba(34,197,94,.35)}
+.solo{font-size:10px;color:var(--ink-muted);margin-top:9px;line-height:1.5;font-style:italic}
+
+/* PROPIAS */
+.pr{display:flex;gap:9px;align-items:flex-start;padding:9px 0;border-bottom:1px solid var(--border);font-size:13px}
+.pr:last-child{border-bottom:none}
+.pr .h{font-size:10px;color:var(--ink-muted);white-space:nowrap;padding-top:2px}
+.vacio{text-align:center;padding:18px 8px;color:var(--ink-muted);font-size:12px;line-height:1.6}
+
+/* TOAST */
+.toast{position:fixed;bottom:90px;left:50%;transform:translateX(-50%) translateY(40px);opacity:0;visibility:hidden;background:#222;color:#fff;padding:12px 20px;border-radius:18px;font-size:13px;font-weight:600;transition:transform .3s,opacity .3s,visibility .3s;z-index:999;max-width:92vw;text-align:center;line-height:1.4;cursor:pointer;border:1px solid var(--border);pointer-events:none}
+.toast.show{transform:translateX(-50%) translateY(0);opacity:1;visibility:visible}
+.toast.ok{border-color:var(--green);color:var(--green)}
+.toast.err{border-color:var(--red);color:var(--red);white-space:pre-line}
+
+/* NAV */
+.fab{position:fixed;bottom:70px;right:16px;z-index:90;width:48px;height:48px;background:var(--brand);border:none;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 16px rgba(245,168,0,.4)}
+.nav-ov{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:91;opacity:0;pointer-events:none;transition:opacity .2s}
+.nav-ov.open{opacity:1;pointer-events:auto}
+.nav-pan{position:fixed;bottom:0;left:0;right:0;z-index:92;background:var(--bg2);border-radius:20px 20px 0 0;border-top:2px solid var(--brand);padding:20px 16px 40px;transform:translateY(100%);transition:transform .3s;max-height:88vh;overflow-y:auto}
+.nav-pan.open{transform:translateY(0)}
+.nav-t{font-size:12px;font-weight:700;color:var(--brand);text-transform:uppercase;letter-spacing:.5px;margin-bottom:16px;text-align:center}
+.nav-g{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.ncard{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px 12px;display:flex;flex-direction:column;align-items:center;gap:8px;text-decoration:none;-webkit-tap-highlight-color:transparent}
+.ncard.cur{border-color:var(--brand);background:var(--brand-soft)}
+.nicon{font-size:28px}
+.nlbl{font-size:12px;font-weight:700;color:var(--ink);text-align:center}
+.ndesc{font-size:10px;color:var(--ink-muted);text-align:center}
+  /* ===== LOGIN (bloque D) — identico en todas las pantallas ===== */
+  .login{display:none;position:fixed;inset:0;background:var(--bg);z-index:900;align-items:center;justify-content:center;padding:24px}
+  .login.open{display:flex}
+  .logincard{width:100%;max-width:340px;text-align:center}
+  .loginlogo{font-size:24px;font-weight:800;letter-spacing:-0.5px;margin-bottom:4px}
+  .loginlogo span{color:var(--brand)}
+  .loginsub{font-size:13px;color:var(--ink-muted);margin-bottom:26px}
+  .login .lgf{text-align:left;margin-bottom:14px}
+  .login label{display:block;font-size:11px;color:var(--ink-soft);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px}
+  .login select,.login input{width:100%;padding:13px;border-radius:var(--radius-sm);border:1.5px solid var(--border);
+    background:var(--card);color:var(--ink);font-size:16px;font-family:inherit;box-sizing:border-box}
+  .login input{letter-spacing:6px;text-align:center}
+  .login select:focus,.login input:focus{outline:none;border-color:var(--brand)}
+  .lgbtn{width:100%;padding:14px;border:none;border-radius:var(--radius-sm);background:var(--brand);color:#111;
+    font-size:15px;font-weight:700;font-family:inherit;cursor:pointer;margin-top:6px}
+  .lgbtn:disabled{opacity:0.5}
+  .lgerr{min-height:18px;font-size:13px;color:#FF6B6B;margin-top:12px}
+  .lgquien{font-size:11px;color:var(--ink-muted);margin-top:22px}
+  .lgquien b{color:var(--ink-soft);font-weight:600}
+</style>
+</head>
+<body>
+<!-- ===== LOGIN (bloque D) ===== -->
+<div class="login" id="loginBox">
+  <div class="logincard">
+    <div class="loginlogo">Repuesto <span>BoParts</span></div>
+    <div class="loginsub">Entra con tu PIN para continuar</div>
+    <div class="lgf"><label>Quien eres</label><select id="lgUser"></select></div>
+    <div class="lgf"><label>Tu PIN</label><input type="password" id="lgPin" inputmode="numeric" autocomplete="off" placeholder="····"></div>
+    <button class="lgbtn" id="lgBtn" onclick="hacerLogin()">Entrar</button>
+    <div class="lgerr" id="lgErr"></div>
+  </div>
+</div>
+
+<header>
+  <img src="logo-header.png" alt="BoParts" class="logo" onerror="this.style.display='none'">
+  <div class="hdr"><h1>Mi día</h1><p id="hdrSub">Tareas de hoy</p></div>
+</header>
+
+<div class="container">
+
+  <div class="hoy">
+    <div class="big" id="hyN">–<small>de hoy</small></div>
+    <div class="txt" id="hyTxt">Cargando tu día…</div>
+  </div>
+
+  <div class="section">
+    <div class="stitle">Lo que toca hoy</div>
+    <div id="lista"><div class="vacio">Cargando…</div></div>
+  </div>
+
+  <div class="section">
+    <div class="stitle">Lo que hiciste por tu cuenta</div>
+    <p style="font-size:11px;color:var(--ink-muted);line-height:1.6;margin-bottom:12px">
+      Algo que nadie te mandó y que valió la pena. Esto no suma al cumplimiento: se mide aparte.</p>
+    <div class="field">
+      <input type="text" id="prTit" maxlength="120" placeholder="Ej: ordené la vitrina de bujías">
+    </div>
+    <div class="field">
+      <input type="text" id="prLink" placeholder="Enlace o foto, si aplica (opcional)">
+    </div>
+    <button class="tbtn" id="prBtn" onclick="guardarPropia()">Agregar</button>
+    <div id="propias" style="margin-top:14px"></div>
+  </div>
+
+</div>
+
+<div class="toast" id="toast" onclick="this.className='toast'"></div>
+
+<button class="fab" onclick="toggleNav()">
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#111" stroke-width="2.5" stroke-linecap="round">
+    <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
+  </svg>
+</button>
+<div class="nav-ov" id="navOv" onclick="closeNav()"></div>
+<div class="nav-pan" id="navPan">
+  <div class="nav-t">Repuesto BoParts</div>
+  <div id="verTag" style="font-size:10px;color:var(--ink-muted);margin:-6px 0 10px;letter-spacing:0.3px">app v1 · script ?</div>
+<div class="nav-g">
+    <a class="ncard" href="index.html">
+      <span class="nicon">📋</span>
+      <span class="nlbl">Lista de Precios</span>
+      <span class="ndesc">Consulta y busqueda</span>
+    </a>
+    <a class="ncard" href="boparts_ventas.html">
+      <span class="nicon">💰</span>
+      <span class="nlbl">Registrar Venta</span>
+      <span class="ndesc">Nueva venta</span>
+    </a>
+    <a class="ncard" href="boparts_fotos.html">
+      <span class="nicon">📷</span>
+      <span class="nlbl">Cargar Fotos</span>
+      <span class="ndesc">Catalogo imagenes</span>
+    </a>
+    <a class="ncard" href="boparts_demanda.html">
+      <span class="nicon">📝</span>
+      <span class="nlbl">Demanda</span>
+      <span class="ndesc">No atendida</span>
+    </a>
+    <a class="ncard" href="boparts_compras.html">
+      <span class="nicon">📦</span>
+      <span class="nlbl">Compras</span>
+      <span class="ndesc">Recibir mercancia</span>
+    </a>
+    <a class="ncard" href="boparts_gastos.html">
+      <span class="nicon">💸</span>
+      <span class="nlbl">Gastos</span>
+      <span class="ndesc">Registrar gasto</span>
+    </a>
+    <a class="ncard" href="boparts_cobros.html">
+      <span class="nicon">🧾</span>
+      <span class="nlbl">Cobros</span>
+      <span class="ndesc">Cuentas por cobrar</span>
+    </a>
+    <a class="ncard" href="boparts_gerencia.html">
+      <span class="nicon">📊</span>
+      <span class="nlbl">Gerencia</span>
+      <span class="ndesc">Solo socios</span>
+    </a>
+    <a class="ncard" href="boparts_apartados.html">
+      <span class="nicon">🔖</span>
+      <span class="nlbl">Apartados</span>
+      <span class="ndesc">Y contra pedido</span>
+    </a>
+    <a class="ncard" href="boparts_devoluciones.html">
+      <span class="nicon">↩️</span>
+      <span class="nlbl">Devoluciones</span>
+      <span class="ndesc">Y cambios</span>
+    </a>
+    <a class="ncard" href="boparts_inventario.html">
+      <span class="nicon">🧮</span>
+      <span class="nlbl">Inventario</span>
+      <span class="ndesc">Conteo de stock</span>
+    </a>
+    <a class="ncard cur" href="boparts_tareas.html">
+      <span class="nicon">✅</span>
+      <span class="nlbl">Mi dia</span>
+      <span class="ndesc">Tareas del dia</span>
+    </a>
+  </div></div>
+
+<script>
+/* ===================== SESION (bloque D) — identico en todas las pantallas =====================
+   Mientras CONFIG!B15 sea NO, nada de esto se activa y la pantalla funciona como siempre.       */
+var SES_KEY = 'boparts_sesion';
+function sesionActual() {
+  try {
+    var s = JSON.parse(localStorage.getItem(SES_KEY) || 'null');
+    if (s && s.token && s.vence > Date.now()) return s;
+  } catch (e) {}
+  return null;
+}
+function guardarSesion(s) { try { localStorage.setItem(SES_KEY, JSON.stringify(s)); } catch (e) {} }
+function olvidarSesion()  { try { localStorage.removeItem(SES_KEY); } catch (e) {} }
+function miToken()  { var s = sesionActual(); return s ? s.token  : ''; }
+function miNombre() { var s = sesionActual(); return s ? s.nombre : ''; }
+function soySocio() { var s = sesionActual(); return !!s && s.rol === 'SOCIO'; }
+
+// Agrega el token a una URL del script. Sin sesion la deja igual: con el login apagado el script no lo pide.
+function conToken(url) {
+  var t = miToken();
+  if (!t) return url;
+  return url + (url.indexOf('?') < 0 ? '?' : '&') + 'token=' + encodeURIComponent(t);
+}
+
+// Lee la respuesta del script. Si la sesion vencio, manda al login en vez de mostrar un error tecnico.
+function leerJSON(r) {
+  return r.text().then(function(t) {
+    var d;
+    try { d = JSON.parse(t); }
+    catch (e) {
+      var limpio = String(t).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
+      throw new Error('El script no devolvio datos' + (limpio ? ': ' + limpio : '') +
+                      '. Revisa que Apps Script este desplegado como Nueva version.');
+    }
+    if (d && d.sesion)  { olvidarSesion(); mostrarLogin(); throw new Error('SESION'); }
+    if (d && d.permiso) { throw new Error(d.error || 'Eso es solo para los socios.'); }
+    return d;
+  });
+}
+
+
+/* Con sesion activa, los desplegables de "quien hace esto" se fijan en quien entro y se bloquean.
+   Regla: solo se toca un desplegable que YA ofrece ese nombre. Asi el de "Autoriza" de devoluciones,
+   que solo lista a los socios, no se fuerza con un vendedor que no puede autorizar. */
+function fijarPersonaDeSesion() {
+  var nom = miNombre();
+  if (!nom) return;
+  var sels = document.getElementsByTagName('select');
+  for (var i = 0; i < sels.length; i++) {
+    var sel = sels[i];
+    if (sel.disabled) continue;
+    for (var j = 0; j < sel.options.length; j++) {
+      if (String(sel.options[j].text).trim() !== nom) continue;
+      sel.value = sel.options[j].value || sel.options[j].text;
+      sel.disabled = true;
+      sel.style.opacity = '0.75';
+      sel.title = 'Registrado a nombre de quien inicio sesion';
+      break;
+    }
+  }
+}
+
+function mostrarLogin() {
+  var box = document.getElementById('loginBox');
+  if (!box) return;
+  box.classList.add('open');
+  var sel = document.getElementById('lgUser');
+  if (sel && !sel.options.length) {
+    sel.innerHTML = '<option value="">Cargando...</option>';
+    fetch(SCRIPT_URL_SESION + '?action=quienes&t=' + Date.now())
+      .then(leerJSON)
+      .then(function(d) {
+        var us = (d && d.usuarios) || [];
+        sel.innerHTML = us.length
+          ? us.map(function(u) { return '<option>' + u.nombre.replace(/[<>&]/g, '') + '</option>'; }).join('')
+          : '<option value="">No hay usuarios configurados</option>';
+        var ult = '';
+        try { ult = localStorage.getItem('boparts_ultimo_usuario') || ''; } catch (e) {}
+        if (ult) sel.value = ult;
+        var pin = document.getElementById('lgPin'); if (pin) pin.focus();
+      })
+      .catch(function() { sel.innerHTML = '<option value="">Sin conexion con el script</option>'; });
+  }
+}
+
+function hacerLogin() {
+  var sel = document.getElementById('lgUser'), pin = document.getElementById('lgPin');
+  var btn = document.getElementById('lgBtn'), err = document.getElementById('lgErr');
+  var usuario = sel ? sel.value : '', clave = pin ? pin.value.trim() : '';
+  err.textContent = '';
+  if (!usuario) { err.textContent = 'Elige quien eres'; return; }
+  if (!clave)   { err.textContent = 'Escribe tu PIN'; pin.focus(); return; }
+  btn.disabled = true; btn.textContent = 'Entrando...';
+  fetch(SCRIPT_URL_SESION, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'},
+                            body:JSON.stringify({tipo:'login', usuario:usuario, pin:clave})})
+    .then(function(r) { return r.text(); })
+    .then(function(t) {
+      var d; try { d = JSON.parse(t); } catch (e) { throw new Error('El script no respondio bien'); }
+      if (!d.ok) throw new Error(d.error || 'No se pudo entrar');
+      guardarSesion({token:d.token, nombre:d.nombre, rol:d.rol, vence:Date.now() + 11.5 * 3600 * 1000});
+      try { localStorage.setItem('boparts_ultimo_usuario', d.nombre); } catch (e) {}
+      pin.value = '';
+      document.getElementById('loginBox').classList.remove('open');
+      btn.disabled = false; btn.textContent = 'Entrar';
+      if (typeof alEntrar === 'function') alEntrar();
+      fijarPersonaDeSesion();
+      setTimeout(fijarPersonaDeSesion, 800);   // por si la pantalla dibuja sus desplegables despues
+    })
+    .catch(function(e) {
+      btn.disabled = false; btn.textContent = 'Entrar';
+      err.textContent = e.message || 'No se pudo entrar';
+      pin.value = ''; pin.focus();
+    });
+}
+
+// Al abrir la pantalla: si el login esta activo y no hay sesion valida, se pide antes de cargar nada.
+// Si esta apagado, no se pide nada y todo sigue como hasta hoy.
+function revisarSesion(alTener) {
+  if (sesionActual()) {
+    alTener();
+    fijarPersonaDeSesion();
+    setTimeout(fijarPersonaDeSesion, 800);
+    return;
+  }
+  fetch(SCRIPT_URL_SESION + '?action=quienes&t=' + Date.now())
+    .then(function(r) { return r.text(); })
+    .then(function(t) {
+      var d = {}; try { d = JSON.parse(t); } catch (e) {}
+      if (d && d.authActiva) mostrarLogin();
+      else alTener();
+    })
+    .catch(function() { alTener(); });   // sin respuesta, no se deja a nadie fuera de la tienda
+}
+
+/* El token se agrega en un solo lugar: se envuelve fetch y se le pone a TODA llamada al script,
+   sea GET o POST. Asi no hay forma de olvidarlo en una pantalla con veinte llamadas.
+   Solo toca las URL del script: Cloudinary y los CSV que queden pasan intactos. */
+(function() {
+  if (window.__tokenEnFetch) return;
+  window.__tokenEnFetch = true;
+  var original = window.fetch.bind(window);
+  window.fetch = function(u, o) {
+    try {
+      // SCRIPT_URL_SESION se lee AQUI, no al instalar: cuando este modulo corre todavia no esta asignada.
+      if (typeof u === 'string' && u.indexOf(SCRIPT_URL_SESION) === 0) {
+        var t = miToken();
+        if (t) {
+          if (o && o.body && String(o.method || '').toUpperCase() === 'POST') {
+            var b = JSON.parse(o.body);
+            if (b && typeof b === 'object' && b.token === undefined) {
+              b.token = t;
+              var o2 = {}; for (var k in o) o2[k] = o[k];
+              o2.body = JSON.stringify(b); o = o2;
+            }
+          } else if (u.indexOf('token=') < 0) {
+            u += (u.indexOf('?') < 0 ? '?' : '&') + 'token=' + encodeURIComponent(t);
+          }
+        }
+      }
+    } catch (e) {}
+    return original(u, o);
+  };
+})();
+
+/* ===================== MI DIA ===================== */
+var SCRIPT_URL_SESION = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
+var APP_VERSION = 'v1';
+var VER_SCRIPT = '?';
+function sellarVersion(d) {
+  if (d && d.v) VER_SCRIPT = d.v;
+  var t = document.getElementById('verTag');
+  if (t) t.textContent = 'app ' + APP_VERSION + ' · script ' + VER_SCRIPT;
+  return d;
+}
+
+var DIA = null;
+var esc = function(s) { return String(s == null ? '' : s).replace(/[<>&"]/g, function(c) {
+  return {'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]; }); };
+
+function toast(msg, clase) {
+  var t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show ' + (clase || '');
+  clearTimeout(t._t);
+  t._t = setTimeout(function() { t.className = 'toast ' + (clase || ''); }, clase === 'err' ? 7000 : 3000);
+}
+function toggleNav() {
+  document.getElementById('navOv').classList.toggle('open');
+  document.getElementById('navPan').classList.toggle('open');
+}
+function closeNav() {
+  document.getElementById('navOv').classList.remove('open');
+  document.getElementById('navPan').classList.remove('open');
+}
+
+function cargarDia() {
+  fetch(SCRIPT_URL_SESION + '?action=tareas&t=' + Date.now())
+    .then(leerJSON).then(sellarVersion)
+    .then(function(d) {
+      if (!d || !d.ok) throw new Error((d && d.error) || 'No se pudo cargar tu dia');
+      DIA = d;
+      pintarDia();
+    })
+    .catch(function(e) {
+      if (e.message === 'SESION') return;
+      document.getElementById('lista').innerHTML =
+        '<div class="vacio">No se pudo cargar.<br><small>' + esc(e.message) + '</small><br>' +
+        '<small style="opacity:.6">app ' + APP_VERSION + ' · script ' + VER_SCRIPT + '</small></div>';
+    });
+}
+
+function pintarDia() {
+  var d = DIA;
+  var sub = document.getElementById('hdrSub');
+  if (sub) sub.textContent = (d.quien || 'Sin identificar') + ' · ' + fechaLarga(d.fecha);
+
+  var n = document.getElementById('hyN');
+  n.innerHTML = d.hechas + '/' + d.exigibles + '<small>de hoy</small>';
+  n.className = 'big' + (d.exigibles && d.hechas >= d.exigibles ? ' todo' : '');
+  var falta = d.exigibles - d.hechas;
+  document.getElementById('hyTxt').innerHTML = !d.exigibles
+    ? 'Hoy no tienes tareas asignadas.'
+    : (falta <= 0
+       ? '<b>Terminaste todo lo de hoy.</b> Lo que hagas de aquí en adelante cuenta como iniciativa.'
+       : 'Te falta<b> ' + falta + (falta === 1 ? ' tarea' : ' tareas') + '</b>. ' +
+         'Las verdes se cuentan solas con lo que registres en el sistema.');
+
+  document.getElementById('lista').innerHTML = d.tareas.length
+    ? d.tareas.map(pintarTarea).join('')
+    : '<div class="vacio">Hoy no tienes tareas asignadas.<br>Lo que hagas queda como iniciativa.</div>';
+
+  document.getElementById('propias').innerHTML = d.propias.length
+    ? d.propias.map(function(p) {
+        return '<div class="pr"><span class="h">' + esc(p.hora) + '</span><span>' + esc(p.titulo) +
+               (p.evidencia ? ' <a href="' + esc(p.evidencia) + '" target="_blank" rel="noopener" style="color:var(--brand)">ver</a>' : '') +
+               '</span></div>'; }).join('')
+    : '<div class="vacio">Todavía nada hoy.</div>';
+}
+
+function fechaLarga(iso) {
+  if (!iso) return '';
+  var p = String(iso).split('-');
+  if (p.length !== 3) return iso;
+  var dias = ['domingo','lunes','martes','miércoles','jueves','viernes','sábado'];
+  var mes = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+  var f = new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]), 12);
+  return dias[f.getDay()] + ' ' + Number(p[2]) + ' ' + mes[Number(p[1]) - 1];
+}
+
+function pintarTarea(t) {
+  var pct = t.meta ? Math.min(100, Math.round(t.hecho * 100 / t.meta)) : (t.hecho ? 100 : 0);
+  var clase = t.estado === 'HECHA' ? 'hecha' : (t.estado === 'PARCIAL' ? 'parcial' : '');
+  var etiq = t.tipo === 'AUTO' ? '<span class="tipo auto">sola</span>'
+           : t.tipo === 'ENLACE' ? '<span class="tipo enlace">con enlace</span>'
+           : '<span class="tipo">a mano</span>';
+
+  var h = '<div class="t ' + clase + '" id="t_' + esc(t.id) + '">' +
+          '<div class="ttop"><div class="ttit">' + esc(t.titulo) + '</div>' + etiq + '</div>' +
+          (t.detalle ? '<div class="tdet">' + esc(t.detalle) + '</div>' : '');
+
+  if (t.meta > 1) {
+    h += '<div class="barra' + (pct >= 100 ? ' full' : '') + '"><span style="width:' + pct + '%"></span></div>' +
+         '<div class="cuenta"><span><b class="' + (pct >= 100 ? 'ok' : '') + '">' + t.hecho + '</b> de ' + t.meta + '</span>' +
+         '<span>' + (pct >= 100 ? 'listo' : pct + '%') + '</span></div>';
+  }
+
+  if (t.tipo === 'AUTO') {
+    // No lleva boton a proposito: si se pudiera marcar, dejaria de medir nada.
+    h += '<div class="solo">' + (t.estado === 'HECHA'
+      ? 'Cumplida sola con lo que registraste.'
+      : 'Esta se cuenta sola. Registra el trabajo en su pantalla y aquí sube.') + '</div>';
+  } else if (t.tipo === 'ENLACE') {
+    if (t.evidencia) {
+      h += '<div class="tmarca">' + t.evidencia.split(/\s+/).filter(Boolean).map(function(u, i) {
+        return '<a href="' + esc(u) + '" target="_blank" rel="noopener">enlace ' + (i + 1) + '</a>'; }).join(' · ') + '</div>';
+    }
+    h += '<div class="field" style="margin-top:10px;margin-bottom:0">' +
+         '<input type="url" id="ev_' + esc(t.id) + '" placeholder="Pega aquí el enlace de la publicación">' +
+         '</div><button class="tbtn" onclick="agregarEnlace(\'' + esc(t.id) + '\')">Agregar enlace</button>';
+  } else {
+    h += t.estado === 'HECHA'
+      ? '<button class="tbtn listo" disabled>Hecha' + (t.hora ? ' · ' + esc(t.hora) : '') + '</button>'
+      : '<button class="tbtn" onclick="marcar(\'' + esc(t.id) + '\')">Marcar como hecha</button>';
+  }
+  return h + '</div>';
+}
+
+// Una tarea de enlace acumula: cada link que se pega se suma a los que ya estaban.
+function agregarEnlace(id) {
+  var inp = document.getElementById('ev_' + id);
+  var url = (inp ? inp.value : '').trim();
+  if (!/^https?:\/\//i.test(url)) { toast('Pega el enlace completo, empezando por https://', 'err'); return; }
+  var t = null;
+  DIA.tareas.forEach(function(x) { if (x.id === id) t = x; });
+  var previos = (t && t.evidencia) ? t.evidencia.split(/\s+/).filter(Boolean) : [];
+  if (previos.indexOf(url) >= 0) { toast('Ese enlace ya está.', 'err'); return; }
+  enviar({tipo:'tarea_marcar', idTarea:id, evidencia:previos.concat([url]).join(' ')});
+}
+
+function marcar(id) { enviar({tipo:'tarea_marcar', idTarea:id}); }
+
+function enviar(cuerpo) {
+  fetch(SCRIPT_URL_SESION, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'},
+                            body:JSON.stringify(cuerpo)})
+    .then(leerJSON).then(sellarVersion)
+    .then(function(d) {
+      if (!d || !d.ok) throw new Error((d && d.error) || 'No se pudo guardar');
+      toast(d.estado === 'HECHA' ? '¡Hecha!' : 'Guardado', 'ok');
+      cargarDia();
+    })
+    .catch(function(e) { if (e.message !== 'SESION') toast(e.message, 'err'); });
+}
+
+function guardarPropia() {
+  var tit = document.getElementById('prTit'), lnk = document.getElementById('prLink');
+  var texto = tit.value.trim();
+  if (texto.length < 4) { toast('Describe en pocas palabras qué hiciste.', 'err'); tit.focus(); return; }
+  var btn = document.getElementById('prBtn');
+  btn.disabled = true; btn.textContent = 'Guardando...';
+  fetch(SCRIPT_URL_SESION, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'},
+      body:JSON.stringify({tipo:'tarea_propia', titulo:texto, evidencia:lnk.value.trim()})})
+    .then(leerJSON).then(sellarVersion)
+    .then(function(d) {
+      btn.disabled = false; btn.textContent = 'Agregar';
+      if (!d || !d.ok) throw new Error((d && d.error) || 'No se pudo guardar');
+      tit.value = ''; lnk.value = '';
+      toast('Anotado.', 'ok');
+      cargarDia();
+    })
+    .catch(function(e) {
+      btn.disabled = false; btn.textContent = 'Agregar';
+      if (e.message !== 'SESION') toast(e.message, 'err');
+    });
+}
+
+function alEntrar() { cargarDia(); }
+revisarSesion(cargarDia);
+</script>
+</body>
+</html>
