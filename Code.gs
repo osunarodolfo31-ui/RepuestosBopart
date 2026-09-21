@@ -1,6 +1,16 @@
 /**
  * Repuesto BoParts — Code.gs
- * VERSION: v25 (2026-09-19) | modulo de tareas y los tres marcadores de rendimiento
+ * VERSION: v25.1 (2026-09-21) | dos correcciones urgentes
+ *
+ * v25.1:
+ *   - LA VENTA ESTABA BLOQUEADA PARA LOS VENDEDORES. El permiso se calculaba desde data.tipo, pero la
+ *     venta no manda 'tipo' (se despacha por data.vendedor). Caia en '' y deny-by-default la trataba
+ *     como accion de socios. Desde que se encendio el login, Reinaldo no podia registrar una venta;
+ *     no se noto porque un socio pasa igual. Ahora claveDePost_() reconoce lo mismo que el despacho.
+ *     Efecto secundario: recien ahora se aplica de verdad "el vendedor es quien inicio sesion".
+ *   - LA HORA SALIA COMO "Sat Dec 30 1899". La hoja convertia el texto "08:05" en valor de hora, que
+ *     por dentro es una fecha de 1899. Se arregla al escribir (celda en texto) y al leer (horaTexto_),
+ *     asi que las filas que ya quedaron mal tambien se ven bien.
  *
  * v25 — TAREAS. Dos hojas nuevas, TAREAS (que hay que hacer) y TAREAS_DIA (que se hizo).
  *   - Tres tipos de tarea. AUTO se cuenta sola con lo que la persona ya registro en el sistema
@@ -398,10 +408,26 @@ function rolDe_(tabla, clave) {
   return r ? r : 'SOCIO';   // lo desconocido se trata como reservado a socios
 }
 
+/* v25.1 — QUE OPERACION ES ESTE POST.
+   Aqui estuvo el error mas caro del Bloque D. No todo POST manda 'tipo': la venta se despacha por
+   `data.vendedor !== undefined` y las fotos por los campos de imagen. Como esta clave se calculaba
+   con una regla y el despacho con otra, la venta caia en '' -> y '' no esta en la tabla, asi que
+   deny-by-default la mandaba a SOCIO. Resultado: desde que se encendio el login, NINGUN vendedor
+   podia registrar una venta. No se vio antes porque los socios pasan igual.
+   Regla desde ahora: esta funcion y el despacho de doPost reconocen lo mismo. Si se agrega una
+   operacion que no manda 'tipo', se agrega aqui en la misma linea en que se agrega alla. */
+function claveDePost_(data) {
+  if (data.tipo) return String(data.tipo);
+  if (data.row !== undefined || data.imagen !== undefined ||
+      data.imagen2 !== undefined || data.imagen3 !== undefined) return 'fotos';
+  if (data.vendedor !== undefined) return 'venta';
+  return '';
+}
+
 // OJO: esta constante es lo que ven las apps en el menu. Se habia quedado en v21.4 mientras el
 // encabezado ya decia v24, asi que el sello de version — que existe justamente para saber si lo
 // desplegado es lo que crees — estaba mintiendo. Cada version nueva se cambia AQUI tambien.
-var VERSION_SCRIPT = 'v25';
+var VERSION_SCRIPT = 'v25.1';
 
 function json_(obj) {
   // La version viaja en cada respuesta: es la forma rapida de saber si lo desplegado es lo que crees
@@ -614,9 +640,7 @@ function doPost(e) {
     }
 
     // ---- BLOQUE D (v21): identidad y rol antes de tocar nada ----
-    // 'fotos' no manda tipo: se reconoce igual que abajo, por los campos de imagen.
-    var claveP = data.tipo ? String(data.tipo) :
-      ((data.row !== undefined || data.imagen !== undefined || data.imagen2 !== undefined || data.imagen3 !== undefined) ? 'fotos' : '');
+    var claveP = claveDePost_(data);
     var quien = auth_(ss, data.token, rolDe_(PERMISOS_POST, claveP));
 
     // Con sesion activa, el nombre lo pone el servidor: nadie registra a nombre de otro.
@@ -1180,6 +1204,10 @@ function fechaVE_(v) {
 }
 function formatoFecha_(sheet, fila, col) {
   try { sheet.getRange(fila, col).setNumberFormat('dd/MM/yyyy'); } catch (err) {}
+}
+// v25.1: para la hora. Sin esto, la hoja convierte "08:05" en un valor de hora (fecha de 1899).
+function formatoTexto_(sheet, fila, col) {
+  try { sheet.getRange(fila, col).setNumberFormat('@'); } catch (err) {}
 }
 
 // ============================================================
@@ -2859,13 +2887,29 @@ function marcasDelDia_(ss, quien, fechaIso) {
   sh.getRange(2, 1, sh.getLastRow() - 1, 12).getValues().forEach(function(r, i) {
     if (iso_(r[0]) !== fechaIso) return;
     if (q && String(r[4] || '').trim().toUpperCase() !== q) return;
-    out.push({fila:i + 2, fecha:iso_(r[0]), hora:String(r[1] || ''), id:String(r[2] || ''),
+    out.push({fila:i + 2, fecha:iso_(r[0]), hora:horaTexto_(r[1]), id:String(r[2] || ''),
               titulo:String(r[3] || ''), quien:String(r[4] || ''), tipo:String(r[5] || ''),
               meta:Number(r[6]) || 0, hecho:Number(r[7]) || 0, estado:String(r[8] || ''),
               evidencia:String(r[9] || ''), nota:String(r[10] || ''),
               origen:String(r[11] || 'ASIGNADA')});
   });
   return out;
+}
+
+/* v25.1 — La hora, como texto.
+   Se escribe "08:05" y la hoja lo convierte sola en un valor de HORA, que por dentro es una fecha
+   del 30/12/1899. Al leerla de vuelta salia "Sat Dec 30 1899 12:03:20 GMT-0427" en la pantalla.
+   Se arregla por los dos lados: al escribir se fuerza la celda a texto, y al leer, si vino como
+   fecha, se vuelve a HH:mm — asi las filas que ya quedaron mal tambien se ven bien. */
+function horaTexto_(v) {
+  if (v == null || v === '') return '';
+  if (esFecha_(v)) return Utilities.formatDate(v, TZ_VE, 'HH:mm');
+  var t = String(v).trim();
+  var m = /^(\d{1,2}):(\d{2})/.exec(t);
+  if (m) return ('0' + m[1]).slice(-2) + ':' + m[2];
+  var d = new Date(t);                                   // "Sat Dec 30 1899 12:03:20 GMT-0427"
+  if (!isNaN(d.getTime())) return Utilities.formatDate(d, TZ_VE, 'HH:mm');
+  return t;
 }
 
 function estadoDe_(hecho, meta) {
@@ -2943,6 +2987,7 @@ function marcarTarea_(ss, d, quien) {
     sh.appendRow([fechaVE_(Utilities.formatDate(ahora, TZ_VE, 'dd/MM/yyyy')), hora, id, def.titulo, nombre,
                   def.tipo, def.meta, hecho, estado, evid, String(d.nota || ''), 'ASIGNADA']);
     formatoFecha_(sh, sh.getLastRow(), 1);
+    formatoTexto_(sh, sh.getLastRow(), 2);
   }
   return {ok:true, tipo:'tarea_marcar', id:id, hecho:hecho, estado:estado, hora:yaHay ? yaHay.hora : hora};
 }
@@ -2962,6 +3007,7 @@ function tareaPropia_(ss, d, quien) {
   sh.appendRow([fechaVE_(f), Utilities.formatDate(ahora, TZ_VE, 'HH:mm'), '', titulo, nombre,
                 'PROPIA', 0, 1, 'HECHA', String(d.evidencia || '').trim(), String(d.nota || '').trim(), 'PROPIA']);
   formatoFecha_(sh, sh.getLastRow(), 1);
+  formatoTexto_(sh, sh.getLastRow(), 2);
   return {ok:true, tipo:'tarea_propia', titulo:titulo};
 }
 

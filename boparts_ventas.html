@@ -1,7 +1,9 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_ventas.html
-  VERSION: v14.3 (2026-09-19) | requiere Apps Script v25
+  VERSION: v14.4 (2026-09-21) | requiere Apps Script v25.1
+  v14.4: la venta manda tipo:'venta'. Sin eso, con el login encendido el servidor la trataba como
+         accion de socios y ningun vendedor podia vender.
   · agrega "Mi día" al menú (requiere Apps Script v25 y boparts_tareas.html).
   v14.2: los metodos de pago y los aliados ya no estan escritos dentro de este archivo: se piden con
          action=metodos. Los metodos salen de la hoja METODOS_PAGO y los aliados de CLIENTES (ALIADO=SI).
@@ -683,7 +685,7 @@ function sellarVersion(d) {
   if (t) t.textContent = 'app ' + APP_VERSION + ' \u00b7 script ' + VER_SCRIPT;
   return d;
 }
-var APP_VERSION = 'v14.3';
+var APP_VERSION = 'v14.4';
 var TASA        = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
 var TASA_ORIGEN = TASA ? 'guardada' : 'ninguna';
 
@@ -1516,6 +1518,11 @@ function guardarVenta() {
   var aComBs = aliadoSel ? Math.round(bs * aliadoSel.pct / 100) : 0;
 
   var payload = {
+    // v14.4: la venta era el UNICO POST sin 'tipo'. El servidor la despachaba por 'vendedor', pero el
+    // control de permisos miraba 'tipo', no lo encontraba, y por deny-by-default la mandaba a SOCIO:
+    // desde que se encendio el login, ningun vendedor podia registrar una venta. El servidor tambien
+    // se corrigio (v25.1), asi que un telefono con la version vieja en cache funciona igual.
+    tipo:'venta',
     fecha:fecha, hora:hora, vendedor:vendedor, canal:canal,
     productos:prods, totalUSD:usd.toFixed(2), totalBS:bs,
     pago1:pagoData[0]||{}, pago2:pagoData[1]||{}, pago3:pagoData[2]||{},

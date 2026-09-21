@@ -11,7 +11,7 @@ en el comentario del encabezado de cada HTML y en la cabecera de `Code.gs`.
 |-------------------------|---------|----------------------|
 | index.html              | v11.3   | **v25**              |
 | boparts_tareas.html     | v1      | **v25**              |
-| boparts_ventas.html     | v14.3   | **v25**              |
+| boparts_ventas.html     | v14.4   | **v25.1**            |
 | boparts_cobros.html     | v2.7    | **v25**              |
 | boparts_compras.html    | v2.7    | **v25**              |
 | boparts_gastos.html     | v1.8    | **v25**              |
@@ -22,7 +22,7 @@ en el comentario del encabezado de cada HTML y en la cabecera de `Code.gs`.
 | boparts_devoluciones.html| v1.5   | **v25**              |
 | boparts_inventario.html | v2.1    | **v25**              |
 | boparts_reportes.html   | —       | **SE ELIMINA** (lo reemplazo gerencia) |
-| Code.gs (Apps Script)   | v25     | —                    |
+| Code.gs (Apps Script)   | v25.1   | —                    |
 
 Deployment ID (no cambia): `AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg`
 
@@ -31,6 +31,35 @@ Para volver atrás:
 - Apps Script: Implementar → Administrar implementaciones → lápiz → elegir la versión anterior → Implementar.
 
 ---
+
+## v25.1 / ventas v14.4 — 2026-09-21 · Reinaldo no podía vender
+
+**URGENTE. Desde que se encendió el login, ningún vendedor podía registrar una venta.**
+
+El permiso de cada POST se calculaba mirando el campo `tipo`. La venta es la única operación que
+**no manda `tipo`**: el servidor la reconoce por `data.vendedor`. Así que el control de permisos no
+la encontraba en la tabla, y la regla de "lo desconocido es solo para socios" — que es correcta — la
+mandaba a SOCIO. Un socio pasaba igual, por eso las pruebas de Rodolfo trabajando solo salieron bien
+y el error solo apareció el lunes, cuando Reinaldo entró con su PIN de vendedor.
+
+Dos reglas para reconocer la misma cosa, escritas en dos lugares distintos. Cuando se separaron,
+nadie se enteró hasta que hubo un cliente esperando en el mostrador.
+
+- `claveDePost_()` ahora reconoce exactamente lo mismo que el despacho de `doPost`. Una sola función.
+- `boparts_ventas.html` además manda `tipo:'venta'`. **El servidor se corrigió también**, así que un
+  teléfono con la pantalla vieja en caché funciona igual: no hay que correr a actualizar los teléfonos.
+- **Efecto secundario que conviene saber:** recién ahora se aplica de verdad "el vendedor es quien
+  inició sesión". Antes esa línea nunca corría para las ventas, porque dependía de la misma clave.
+
+Auditados los 11 archivos: la venta era el único POST sin `tipo`.
+
+### Y la hora de "Abrí la tienda" decía *Sat Dec 30 1899*
+
+Se escribía `"08:05"` y la hoja lo convertía sola en un **valor de hora**, que por dentro es una fecha
+del 30/12/1899. Al leerla de vuelta salía la fecha completa en pantalla.
+
+Arreglado por los dos lados: al escribir se fuerza la celda a texto, y al leer, si vino como fecha,
+se vuelve a `HH:mm`. **Las filas que ya quedaron mal también se ven bien**, sin tocar la hoja.
 
 ## index v11.3 — 2026-09-21 · Un refresco fallido no puede dejarte sin precios
 
