@@ -1,7 +1,14 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_cobros.html
-  VERSION: v2.8 (2026-09-22) | build 2026-09-22 | requiere Apps Script v25
+  VERSION: v3.0 (2026-09-22) | build 2026-09-22 | requiere Apps Script v25
+  v3.0: el detalle de cada nota va en vinetas, una por producto, con el TOTAL de la linea
+  (cantidad x precio unitario). La nota cuadra sola: si la suma de los renglones no da el monto de la
+  nota (los precios de la lista son SIN IVA y la nota puede traer IVA 16% o recargo), la diferencia
+  sale como renglon "IVA y cargos" o "Descuento"; si hubo abono, se muestra y el pendiente va en
+  negrita. Vineta '•' y no '*': el asterisco es el marcador de negrita de WhatsApp.
+  v2.9: mensaje de cobro por WhatsApp rediseniado: el saldo va en las primeras lineas (arriba del
+  "Leer mas" de WhatsApp), emojis como marcadores, y maximo 3 productos por nota con "+N mas".
   v2.8: aviso de version nueva con boton Actualizar (borra cache y recarga) y enlaces del menu con ?v=;
   el login reintenta solo cuando no hay conexion con el script en vez de quedarse en "Sin conexion".
   VERSION anterior: v2.7 (2026-09-18) | requiere Apps Script v25
@@ -570,21 +577,90 @@ function waTel(nombre) {
   return d.length === 10 ? '58' + d : '';
 }
 
-// Recordatorio de cobro: directo con el monto, pero cordial. No requiere registrar ningun abono.
+// Como maximo 3 productos por nota. Una nota de doce renglones convierte el recordatorio en un muro
+// de texto y el cliente deja de leerlo; los que faltan se resumen en una linea con su monto.
+var MAX_PROD_MSG = 3;
+
+// Cada producto viene guardado por ventas.html como "BUJIA COROLLA (4 UND) x4 ($18.00)", donde el
+// monto entre parentesis es el precio UNITARIO. El total de la linea es cantidad x unitario.
+// Ojo: el NOMBRE tambien trae parentesis — "(4 UND)" es parte del producto, no un precio. Por eso el
+// patron se ancla al final de la cadena y exige el signo $; sin eso se comia el "(4 UND)".
+function partirProducto(t) {
+  var txt = String(t || '').trim();
+  if (!txt) return null;
+  var m = /^(.*?)\s*x\s*([\d.]+)\s*\(\$\s*([\d.]+)\)\s*$/.exec(txt);
+  if (!m) {
+    // Formato viejo o sin precio: se muestra el nombre y nada mas. Nunca se inventa un monto.
+    return {nombre:txt.replace(/\s*\(\$[^)]*\)/g, '').trim(), cant:0, total:null};
+  }
+  var cant = parseFloat(m[2]) || 0, unit = parseFloat(m[3]);
+  return {nombre:m[1].trim(), cant:cant, total:isNaN(unit) ? null : Math.round(cant * unit * 100) / 100};
+}
+
+// Una linea por producto, con el total de esa linea (cantidad x precio unitario).
+// Devuelve tambien la suma de TODAS las lineas (incluidas las resumidas), para poder cuadrar la nota.
+function detalleProductos(p) {
+  var items = String(p || '').split('|').map(partirProducto).filter(function(x) { return x && x.nombre; });
+  if (!items.length) return {txt:'', suma:null};
+  var txt = '', suma = 0, completo = true;
+  items.forEach(function(it) { if (it.total === null) completo = false; else suma += it.total; });
+  items.slice(0, MAX_PROD_MSG).forEach(function(it) {
+    txt += '\n• ' + it.nombre + (it.cant > 1 ? ' x' + it.cant : '') +
+           (it.total === null ? '' : ' — *' + fmtUSD(it.total) + '*');
+  });
+  var resto = items.slice(MAX_PROD_MSG);
+  if (resto.length) {
+    var sr = 0, ok = true;
+    resto.forEach(function(it) { if (it.total === null) ok = false; else sr += it.total; });
+    txt += '\n• ' + resto.length + ' artículo' + (resto.length === 1 ? '' : 's') + ' más' +
+           (ok ? ' — *' + fmtUSD(Math.round(sr * 100) / 100) + '*' : '');
+  }
+  return {txt:txt, suma:completo ? Math.round(suma * 100) / 100 : null};
+}
+
+// Recordatorio de cobro. Dos reglas que mandan sobre el diseno:
+// 1) El MONTO tiene que caber arriba del "Leer mas" de WhatsApp: de ahi depende que el cliente
+//    reaccione desde la notificacion sin abrir el chat. Saldo arriba, detalle abajo, nunca al reves.
+// 2) Las cuentas tienen que cerrar SOLAS. Los precios de los productos suman el total ORIGINAL de la
+//    nota; si hubo abono, ese numero no es el que se debe. En una nota parcial se muestran las tres
+//    cifras (total, abonado, pendiente) para que el cliente no sume por su cuenta y reclame.
+// Los emojis son marcadores (quien, cuanto, que hacer), no adorno. La vineta es '•' y no '*': el
+// asterisco es el marcador de negrita de WhatsApp y mezclarlos corre el formato del mensaje.
 function cobrar(nombre) {
   var c = CLIENTES.filter(function(x) { return x.cliente === nombre; })[0];
   if (!c) { toast('No se encontro el cliente', 'err'); return; }
-  var lineas = '';
+  var bloques = [];
   c.notas.filter(function(n) { return n.estado !== 'PAGADA'; }).forEach(function(n) {
-    lineas += '\n\n' + (n.nota ? 'Nota ' + ('000' + n.nota).slice(-4) : 'Entrega') + ' del ' + fechaCorta(n.fecha) + ' - ' + fmtUSD(n.pendienteUSD) +
-      (n.estado === 'PARCIAL' ? ' (queda pendiente de un abono parcial)' : '') +
-      (n.productos ? '\n' + limpiarProductos(n.productos) : '');
+    var det = detalleProductos(n.productos);
+    var monto = Number(n.montoUSD) || 0, abonado = Number(n.abonadoUSD) || 0;
+    var parcial = abonado > 0.009;
+
+    // La nota tiene que cuadrar sola. Los precios de la lista son SIN IVA y la nota puede traer IVA 16%
+    // o algun recargo, asi que la suma de los renglones casi nunca es el monto de la nota. Si el cliente
+    // suma y le falta plata, llama a reclamar. La diferencia se muestra como un renglon con nombre.
+    var ajuste = (det.suma === null) ? 0 : Math.round((monto - det.suma) * 100) / 100;
+    var extras = [];
+    if (Math.abs(ajuste) > 0.009) extras.push((ajuste > 0 ? 'IVA y cargos ' : 'Descuento ') + fmtUSD(Math.abs(ajuste)));
+    if (parcial) extras.push('abonado ' + fmtUSD(abonado));
+
+    var simple = !extras.length;   // sin ajustes ni abonos el monto va en el encabezado y no hace falta pie
+    var cab = '📄 *' + (n.nota ? 'Nota ' + ('000' + n.nota).slice(-4) : 'Entrega') + '* · ' + fechaCorta(n.fecha) +
+              (simple ? ' · *' + fmtUSD(n.pendienteUSD) + '*' : '');
+    var pie = simple ? '' :
+      '\n_' + extras.join(' · ') + '_' +
+      '\n👉 *' + (parcial ? 'Pendiente: ' : 'Total: ') + fmtUSD(n.pendienteUSD) + '*';
+    bloques.push(cab + det.txt + pie);
   });
-  var saldoBs = TASA ? ' (' + fmtBS(c.saldoUSD * TASA) + ' a tasa ' + TASA + ')' : '';
-  var msg = 'Hola ' + primerNombre(c.cliente) + ', le saluda Repuesto BoParts. Gracias por confiar en nosotros.' +
-    '\n\nLe escribimos para recordarle que tiene un saldo pendiente de *' + fmtUSD(c.saldoUSD) + '*' + saldoBs + ', correspondiente a:' + lineas +
-    '\n\nCuando pueda nos indica como le queda mejor cancelar y lo coordinamos con gusto. Si ya realizo el pago, por favor haga caso omiso a este mensaje y nos comparte el comprobante.' +
-    '\n\nQuedamos a la orden.\nRepuesto BoParts\n0412-3185778 / 0414-9536708';
+  var msg = '*REPUESTO BoParts* 🔧' +
+    '\n\nHola ' + primerNombre(c.cliente) + ' 👋' +
+    '\n\nSu saldo pendiente es de *' + fmtUSD(c.saldoUSD) + '*' +
+    (TASA ? '\n💵 ' + fmtBS(c.saldoUSD * TASA) + ' (tasa ' + TASA + ')' : '') +
+    (bloques.length ? '\n\n━━━━━━━━━━━━━━\n' + bloques.join('\n\n') + '\n━━━━━━━━━━━━━━' : '') +
+    '\n\n✅ ¿Ya pagó? Mándenos el comprobante y lo descargamos de una vez.' +
+    '\n📲 ¿Todavía no? Nos dice cómo le queda mejor y lo coordinamos con gusto.' +
+    '\n\nQuedamos a la orden 🙌' +
+    '\n*Repuesto BoParts*' +
+    '\n📞 0412-3185778 / 0414-9536708';
   var tel = waTel(c.cliente);
   window.open('https://wa.me/' + tel + '?text=' + encodeURIComponent(msg), '_blank');
   if (!tel) toast('Sin telefono en CLIENTES: elige el contacto en WhatsApp', 'err');
@@ -599,7 +675,7 @@ function primerNombre(n) {
 }
 var ultimo = null;   // ultimo abono registrado (para el mensaje de WhatsApp)
 
-var APP_VERSION = 'v2.8';
+var APP_VERSION = 'v3.0';
 document.getElementById('fechaHdr').textContent = APP_VERSION + ' · ' + new Date().toLocaleDateString('es-VE', {weekday:'long', day:'numeric', month:'long'});
 
 // Metodos de pago (sin CREDITO)
