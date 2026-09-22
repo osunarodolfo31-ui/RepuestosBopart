@@ -1,5 +1,38 @@
 # CHANGELOG — Repuesto BoParts
 
+## build 2026-09-22.3 — ventas v14.7: el ID de la venta sobrevive a un refresco
+
+**Se duplico una venta real hoy 22/09.** Se pego la app de Reinaldo, le dio refrescar, y quedaron dos
+ventas. Rodolfo borro el duplicado a mano.
+
+**Causa, verificada en el codigo:** el `idVenta` que evita duplicados vivia en una variable de
+JavaScript en memoria. El comentario decia "se mantiene entre reintentos" y era cierto solo dentro de
+la misma pagina: un refresco la borraba, la siguiente vez se generaba un ID nuevo y el servidor no
+podia reconocer el reenvio. La proteccion cubria "se cayo la senal y reintento solo" y NO cubria "se
+pego y refresque", que es el caso que ocurre en la tienda.
+
+**Arreglo:** el ID vive en `localStorage` y aguanta el refresco. **Caduca a los 15 minutos**, porque un
+reintento de la misma venta ocurre en segundos: pasado ese rato lo que viene es una venta distinta y
+endosarle el ID viejo haria que el servidor devolviera la nota anterior y la venta nueva no quedara
+guardada. Perder una venta en silencio es peor que duplicar una que se ve y se borra.
+
+**Aviso al abrir** cuando quedo una venta sin confirmar, con boton **"Es otra venta"** para soltar el
+ID a proposito. Es la valvula de escape del parrafo anterior: la decision la toma quien esta en el
+mostrador, no el sistema en silencio.
+
+**Probado en Chromium**, los cuatro casos: sin ID previo no aparece el aviso; el ID sobrevive al
+refresco; "Es otra venta" lo suelta; un ID de hace 16 minutos caduca y uno de hace 5 no.
+
+**Esto NO cierra el hallazgo #1 de la auditoria.** El servidor sigue dando por terminada una venta si
+encuentra su cabecera, sin comprobar que el detalle se haya escrito. Esto cierra el camino por el que
+entro hoy.
+
+**Nota de despliegue:** al cambiar el build hay que subir **todos** los archivos, no solo el que
+cambio. El `?v=` de cada pantalla y el `BUILD` del modulo tienen que coincidir con `version.json`, o
+el aviso de "version nueva" quedaria encendido para siempre.
+
+---
+
 ## build 2026-09-22.2 — el modulo de sesion sale de los 12 HTML
 
 **Nuevo archivo: `boparts_sesion.js`.** Sesion, login (markup y CSS incluidos) y el aviso de version

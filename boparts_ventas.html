@@ -1,7 +1,12 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_ventas.html
-  VERSION: v14.6 (2026-09-22) | build 2026-09-22.2 |
+  VERSION: v14.7 (2026-09-22) | build 2026-09-22.3 |
+  v14.7: el ID de la venta sobrevive a un refresco (vive en localStorage, caduca a los 15 min).
+  Estaba en memoria: un refresco lo borraba y la siguiente vez se generaba otro, asi que el servidor
+  no reconocia el reenvio. El 22/09 se pego la app, Reinaldo refresco y SE DUPLICO UNA VENTA REAL.
+  Aviso al abrir cuando quedo una venta sin confirmar, con boton "Es otra venta" para soltar el ID
+  a proposito: sin eso, el arreglo podria perder una venta distinta en vez de duplicar una.
   v14.6: sesion, login y aviso de version salen del HTML y viven en boparts_sesion.js, un solo archivo
   para las 12 pantallas. Estaban copiados byte a byte doce veces; de ahi salio el leerJSON duplicado.
   REQUIERE subir boparts_sesion.js junto a este archivo.
@@ -488,7 +493,7 @@ select option{background:#1E1E1E;color:var(--ink)}
   </div>
 </div>
 
-<script src="boparts_sesion.js?v=2026-09-22.2"></script>
+<script src="boparts_sesion.js?v=2026-09-22.3"></script>
 <script>
 
 
@@ -504,7 +509,7 @@ function sellarVersion(d) {
   if (t) t.textContent = 'app ' + APP_VERSION + ' \u00b7 script ' + VER_SCRIPT;
   return d;
 }
-var APP_VERSION = 'v14.6';
+var APP_VERSION = 'v14.7';
 var TASA        = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
 var TASA_ORIGEN = TASA ? 'guardada' : 'ninguna';
 
@@ -1247,8 +1252,8 @@ function guardarVenta() {
   // Se conserva entre reintentos: si la respuesta se pierde y se vuelve a enviar, el script reconoce
   // el mismo ID y no duplica la venta. Solo se renueva cuando empieza una venta nueva.
   if (!idVentaActual) {
-    idVentaActual = 'V' + now.getFullYear() + pad2(now.getMonth()+1) + pad2(now.getDate()) + '-' +
-      pad2(now.getHours()) + pad2(now.getMinutes()) + pad2(now.getSeconds()) + '-' + Math.random().toString(36).substr(2,4).toUpperCase();
+    guardarIdVenta('V' + now.getFullYear() + pad2(now.getMonth()+1) + pad2(now.getDate()) + '-' +
+      pad2(now.getHours()) + pad2(now.getMinutes()) + pad2(now.getSeconds()) + '-' + Math.random().toString(36).substr(2,4).toUpperCase());
   }
   var idVenta = idVentaActual;
   var lineas = lastCart.map(function(c) {
@@ -1406,7 +1411,58 @@ function parseNum(v) {
   return isNaN(n) ? 0 : n;
 }
 var lastIdVenta = '';
-var idVentaActual = '';   // se mantiene entre reintentos de la misma venta
+
+/* ===== ID DE LA VENTA — sobrevive a un refresco =====================================
+   Estaba en una variable en memoria. Se mantenia entre reintentos SI la pagina seguia viva,
+   pero un refresco la borraba: al volver a registrar se generaba un ID nuevo, el servidor no lo
+   reconocia como repetido y quedaban DOS ventas. Eso paso el 22/09: se pego la app, Reinaldo
+   refresco, y se duplico una venta real.
+   Ahora vive en localStorage y aguanta el refresco. Caduca a los 15 minutos: un reintento de la
+   MISMA venta ocurre en segundos, asi que pasado ese rato lo que viene es una venta distinta y
+   no se le debe endosar el ID viejo — si no, en vez de duplicar una venta se perderia otra. */
+var ID_KEY = 'boparts_id_venta', ID_VIDA_MIN = 15;
+var idVentaActual = (function() {
+  try {
+    var g = JSON.parse(localStorage.getItem(ID_KEY) || 'null');
+    if (g && g.id && (Date.now() - g.t) < ID_VIDA_MIN * 60000) return g.id;
+  } catch (e) {}
+  return '';
+})();
+function guardarIdVenta(id) {
+  idVentaActual = id;
+  try { localStorage.setItem(ID_KEY, JSON.stringify({id:id, t:Date.now()})); } catch (e) {}
+}
+function olvidarIdVenta() {
+  idVentaActual = '';
+  try { localStorage.removeItem(ID_KEY); } catch (e) {}
+  var b = document.getElementById('avisoVentaMedias'); if (b) b.remove();
+}
+
+/* Si al abrir la pantalla quedo un ID vivo, es que la venta anterior no llego a confirmarse: se pego
+   la app, se fue la senal o se refresco. Se avisa en vez de callarlo, porque las dos salidas son
+   legitimas y solo Reinaldo sabe cual es: si vuelve a registrar LA MISMA venta, el servidor la
+   reconoce y no la duplica; si lo que viene es OTRA venta, tiene que soltar el ID a proposito, o el
+   servidor le devolveria la nota vieja y la venta nueva no quedaria guardada. */
+(function() {
+  if (!idVentaActual) return;
+  var d = document.createElement('div');
+  d.id = 'avisoVentaMedias';
+  d.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:9990;background:#F5A800;color:#111;' +
+    'font-family:inherit;font-size:13px;padding:12px 14px;display:flex;align-items:center;gap:10px;' +
+    'box-shadow:0 -6px 20px rgba(0,0,0,.45)';
+  d.innerHTML = '<span style="flex:1;line-height:1.35"><b>Quedo una venta sin confirmar.</b> Si es la misma, ' +
+    'registrala igual: no se va a duplicar.</span>' +
+    '<button id="btnVentaNueva" style="background:#111;color:#F5A800;border:none;border-radius:8px;' +
+    'padding:9px 13px;font-weight:700;font-size:13px;font-family:inherit;cursor:pointer;flex-shrink:0">Es otra venta</button>';
+  var poner = function() {
+    document.body.appendChild(d);
+    document.getElementById('btnVentaNueva').onclick = function() {
+      olvidarIdVenta();
+      if (typeof toast === 'function') toast('Listo: esta se registra como venta nueva', 'ok');
+    };
+  };
+  if (document.body) poner(); else document.addEventListener('DOMContentLoaded', poner);
+})();
 var lastCredito = null;
 var lastNotaAsignada = 0;
 var lastPagos = [];         // formas de pago de la ultima venta (para el mensaje de WhatsApp)
@@ -1421,7 +1477,7 @@ function nuevaVenta() {
 function resetAll() {
   cart = []; pagos = []; pid = 0;
   aliadoOn = false; aliadoSel = null; cliSel = null; lastCredito = null;
-  idVentaActual = ''; FACT = null;
+  olvidarIdVenta(); FACT = null;
   clienteVenta = null; saldoCliente = 0; pintarClienteVenta();
   FACTURAR = false;
   var ft = document.getElementById('factTog'); if (ft) ft.classList.remove('on');
