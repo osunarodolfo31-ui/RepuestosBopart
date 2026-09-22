@@ -1,7 +1,11 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_cobros.html
-  VERSION: v3.0 (2026-09-22) | build 2026-09-22 | requiere Apps Script v25
+  VERSION: v3.1 (2026-09-22) | build 2026-09-22.2 |
+  v3.1: sesion, login y aviso de version salen del HTML y viven en boparts_sesion.js, un solo archivo
+  para las 12 pantallas. Estaban copiados byte a byte doce veces; de ahi salio el leerJSON duplicado.
+  REQUIERE subir boparts_sesion.js junto a este archivo.
+  VERSION anterior: v3.0 requiere Apps Script v25
   v3.0: el detalle de cada nota va en vinetas, una por producto, con el TOTAL de la linea
   (cantidad x precio unitario). La nota cuadra sola: si la suma de los renglones no da el monto de la
   nota (los precios de la lista son SIN IVA y la nota puede traer IVA 16% o recargo), la diferencia
@@ -36,25 +40,7 @@
   --green:#22C55E;--red:#EF4444;
   --radius:14px;--radius-sm:8px;
 }
-  /* ===== LOGIN (bloque D) — identico en todas las pantallas ===== */
-  .login{display:none;position:fixed;inset:0;background:var(--bg);z-index:900;align-items:center;justify-content:center;padding:24px}
-  .login.open{display:flex}
-  .logincard{width:100%;max-width:340px;text-align:center}
-  .loginlogo{font-size:24px;font-weight:800;letter-spacing:-0.5px;margin-bottom:4px}
-  .loginlogo span{color:var(--brand)}
-  .loginsub{font-size:13px;color:var(--ink-muted);margin-bottom:26px}
-  .login .lgf{text-align:left;margin-bottom:14px}
-  .login label{display:block;font-size:11px;color:var(--ink-soft);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px}
-  .login select,.login input{width:100%;padding:13px;border-radius:var(--radius-sm);border:1.5px solid var(--border);
-    background:var(--card);color:var(--ink);font-size:16px;font-family:inherit;box-sizing:border-box}
-  .login input{letter-spacing:6px;text-align:center}
-  .login select:focus,.login input:focus{outline:none;border-color:var(--brand)}
-  .lgbtn{width:100%;padding:14px;border:none;border-radius:var(--radius-sm);background:var(--brand);color:#111;
-    font-size:15px;font-weight:700;font-family:inherit;cursor:pointer;margin-top:6px}
-  .lgbtn:disabled{opacity:0.5}
-  .lgerr{min-height:18px;font-size:13px;color:#FF6B6B;margin-top:12px}
-  .lgquien{font-size:11px;color:var(--ink-muted);margin-top:22px}
-  .lgquien b{color:var(--ink-soft);font-weight:600}
+  
 
 html,body{min-height:100%;background:var(--bg);font-family:'Inter',sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased}
 header{background:var(--bg2);border-bottom:2px solid var(--brand);padding:12px 16px;display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:50}
@@ -204,17 +190,7 @@ select option{background:#1E1E1E;color:var(--ink)}
 </style>
 </head>
 <body>
-<!-- ===== LOGIN (bloque D) ===== -->
-<div class="login" id="loginBox">
-  <div class="logincard">
-    <div class="loginlogo">Repuesto <span>BoParts</span></div>
-    <div class="loginsub">Entra con tu PIN para continuar</div>
-    <div class="lgf"><label>Quien eres</label><select id="lgUser"></select></div>
-    <div class="lgf"><label>Tu PIN</label><input type="password" id="lgPin" inputmode="numeric" autocomplete="off" placeholder="····"></div>
-    <button class="lgbtn" id="lgBtn" onclick="hacerLogin()">Entrar</button>
-    <div class="lgerr" id="lgErr"></div>
-  </div>
-</div>
+
 
 <header>
   <img src="logo-header.png" alt="BoParts" class="logo">
@@ -357,179 +333,9 @@ select option{background:#1E1E1E;color:var(--ink)}
   </div>
 </div>
 
+<script src="boparts_sesion.js?v=2026-09-22.2"></script>
 <script>
-/* ===================== SESION (bloque D) — identico en todas las pantallas =====================
-   Mientras CONFIG!B15 sea NO, nada de esto se activa y la pantalla funciona como siempre.       */
-var SES_KEY = 'boparts_sesion';
-function sesionActual() {
-  try {
-    var s = JSON.parse(localStorage.getItem(SES_KEY) || 'null');
-    if (s && s.token && s.vence > Date.now()) return s;
-  } catch (e) {}
-  return null;
-}
-function guardarSesion(s) { try { localStorage.setItem(SES_KEY, JSON.stringify(s)); } catch (e) {} }
-function olvidarSesion()  { try { localStorage.removeItem(SES_KEY); } catch (e) {} }
-function miToken()  { var s = sesionActual(); return s ? s.token  : ''; }
-function miNombre() { var s = sesionActual(); return s ? s.nombre : ''; }
-function soySocio() { var s = sesionActual(); return !!s && s.rol === 'SOCIO'; }
 
-// Agrega el token a una URL del script. Sin sesion la deja igual: con el login apagado el script no lo pide.
-function conToken(url) {
-  var t = miToken();
-  if (!t) return url;
-  return url + (url.indexOf('?') < 0 ? '?' : '&') + 'token=' + encodeURIComponent(t);
-}
-
-// Lee la respuesta del script. Si la sesion vencio, manda al login en vez de mostrar un error tecnico.
-function leerJSON(r) {
-  return r.text().then(function(t) {
-    var d;
-    try { d = JSON.parse(t); }
-    catch (e) {
-      var limpio = String(t).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
-      throw new Error('El script no devolvio datos' + (limpio ? ': ' + limpio : '') +
-                      '. Revisa que Apps Script este desplegado como Nueva version.');
-    }
-    if (d && d.sesion)  { olvidarSesion(); mostrarLogin(); throw new Error('SESION'); }
-    if (d && d.permiso) { throw new Error(d.error || 'Eso es solo para los socios.'); }
-    return d;
-  });
-}
-
-
-/* Con sesion activa, los desplegables de "quien hace esto" se fijan en quien entro y se bloquean.
-   Regla: solo se toca un desplegable que YA ofrece ese nombre. Asi el de "Autoriza" de devoluciones,
-   que solo lista a los socios, no se fuerza con un vendedor que no puede autorizar. */
-function fijarPersonaDeSesion() {
-  var nom = miNombre();
-  if (!nom) return;
-  var sels = document.getElementsByTagName('select');
-  for (var i = 0; i < sels.length; i++) {
-    var sel = sels[i];
-    if (sel.disabled) continue;
-    for (var j = 0; j < sel.options.length; j++) {
-      if (String(sel.options[j].text).trim() !== nom) continue;
-      sel.value = sel.options[j].value || sel.options[j].text;
-      sel.disabled = true;
-      sel.style.opacity = '0.75';
-      sel.title = 'Registrado a nombre de quien inicio sesion';
-      break;
-    }
-  }
-}
-
-function mostrarLogin() {
-  var box = document.getElementById('loginBox');
-  if (!box) return;
-  box.classList.add('open');
-  var sel = document.getElementById('lgUser');
-  if (sel && !sel.options.length) {
-    sel.innerHTML = '<option value="">Cargando...</option>';
-    fetch(SCRIPT_URL_SESION + '?action=quienes&t=' + Date.now())
-      .then(leerJSON)
-      .then(function(d) {
-        var us = (d && d.usuarios) || [];
-        sel.innerHTML = us.length
-          ? us.map(function(u) { return '<option>' + u.nombre.replace(/[<>&]/g, '') + '</option>'; }).join('')
-          : '<option value="">No hay usuarios configurados</option>';
-        var ult = '';
-        try { ult = localStorage.getItem('boparts_ultimo_usuario') || ''; } catch (e) {}
-        if (ult) sel.value = ult;
-        var pin = document.getElementById('lgPin'); if (pin) pin.focus();
-      })
-      .catch(function() {
-        // Antes esto era un callejon sin salida: decia "Sin conexion" y ahi se quedaba.
-        window.__reintentosQuienes = (window.__reintentosQuienes || 0) + 1;
-        if (window.__reintentosQuienes <= 3) {
-          sel.innerHTML = '<option value="">Sin conexion — reintentando (' + window.__reintentosQuienes + '/3)...</option>';
-          setTimeout(function() { sel.innerHTML = ''; mostrarLogin(); }, 2500);
-        } else {
-          sel.innerHTML = '<option value="">Sin conexion con el script — toca aqui para reintentar</option>';
-          sel.onclick = function() { window.__reintentosQuienes = 0; sel.onclick = null; sel.innerHTML = ''; mostrarLogin(); };
-        }
-      });
-  }
-}
-
-function hacerLogin() {
-  var sel = document.getElementById('lgUser'), pin = document.getElementById('lgPin');
-  var btn = document.getElementById('lgBtn'), err = document.getElementById('lgErr');
-  var usuario = sel ? sel.value : '', clave = pin ? pin.value.trim() : '';
-  err.textContent = '';
-  if (!usuario) { err.textContent = 'Elige quien eres'; return; }
-  if (!clave)   { err.textContent = 'Escribe tu PIN'; pin.focus(); return; }
-  btn.disabled = true; btn.textContent = 'Entrando...';
-  fetch(SCRIPT_URL_SESION, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'},
-                            body:JSON.stringify({tipo:'login', usuario:usuario, pin:clave})})
-    .then(function(r) { return r.text(); })
-    .then(function(t) {
-      var d; try { d = JSON.parse(t); } catch (e) { throw new Error('El script no respondio bien'); }
-      if (!d.ok) throw new Error(d.error || 'No se pudo entrar');
-      guardarSesion({token:d.token, nombre:d.nombre, rol:d.rol, vence:Date.now() + 11.5 * 3600 * 1000});
-      try { localStorage.setItem('boparts_ultimo_usuario', d.nombre); } catch (e) {}
-      pin.value = '';
-      document.getElementById('loginBox').classList.remove('open');
-      btn.disabled = false; btn.textContent = 'Entrar';
-      if (typeof alEntrar === 'function') alEntrar();
-      fijarPersonaDeSesion();
-      setTimeout(fijarPersonaDeSesion, 800);   // por si la pantalla dibuja sus desplegables despues
-    })
-    .catch(function(e) {
-      btn.disabled = false; btn.textContent = 'Entrar';
-      err.textContent = e.message || 'No se pudo entrar';
-      pin.value = ''; pin.focus();
-    });
-}
-
-// Al abrir la pantalla: si el login esta activo y no hay sesion valida, se pide antes de cargar nada.
-// Si esta apagado, no se pide nada y todo sigue como hasta hoy.
-function revisarSesion(alTener) {
-  if (sesionActual()) {
-    alTener();
-    fijarPersonaDeSesion();
-    setTimeout(fijarPersonaDeSesion, 800);
-    return;
-  }
-  fetch(SCRIPT_URL_SESION + '?action=quienes&t=' + Date.now())
-    .then(function(r) { return r.text(); })
-    .then(function(t) {
-      var d = {}; try { d = JSON.parse(t); } catch (e) {}
-      if (d && d.authActiva) mostrarLogin();
-      else alTener();
-    })
-    .catch(function() { alTener(); });   // sin respuesta, no se deja a nadie fuera de la tienda
-}
-
-/* El token se agrega en un solo lugar: se envuelve fetch y se le pone a TODA llamada al script,
-   sea GET o POST. Asi no hay forma de olvidarlo en una pantalla con veinte llamadas.
-   Solo toca las URL del script: Cloudinary y los CSV que queden pasan intactos. */
-(function() {
-  if (window.__tokenEnFetch) return;
-  window.__tokenEnFetch = true;
-  var original = window.fetch.bind(window);
-  window.fetch = function(u, o) {
-    try {
-      // SCRIPT_URL_SESION se lee AQUI, no al instalar: cuando este modulo corre todavia no esta asignada.
-      if (typeof u === 'string' && u.indexOf(SCRIPT_URL_SESION) === 0) {
-        var t = miToken();
-        if (t) {
-          if (o && o.body && String(o.method || '').toUpperCase() === 'POST') {
-            var b = JSON.parse(o.body);
-            if (b && typeof b === 'object' && b.token === undefined) {
-              b.token = t;
-              var o2 = {}; for (var k in o) o2[k] = o[k];
-              o2.body = JSON.stringify(b); o = o2;
-            }
-          } else if (u.indexOf('token=') < 0) {
-            u += (u.indexOf('?') < 0 ? '?' : '&') + 'token=' + encodeURIComponent(t);
-          }
-        }
-      }
-    } catch (e) {}
-    return original(u, o);
-  };
-})();
 
 var SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
 var SCRIPT_URL_SESION = SCRIPT_URL;
@@ -675,7 +481,7 @@ function primerNombre(n) {
 }
 var ultimo = null;   // ultimo abono registrado (para el mensaje de WhatsApp)
 
-var APP_VERSION = 'v3.0';
+var APP_VERSION = 'v3.1';
 document.getElementById('fechaHdr').textContent = APP_VERSION + ' · ' + new Date().toLocaleDateString('es-VE', {weekday:'long', day:'numeric', month:'long'});
 
 // Metodos de pago (sin CREDITO)
@@ -879,63 +685,7 @@ revisarSesion(cargar);
 // r.json() explota con "Unexpected token '<'". Asi se explica que pasa en vez de mostrar eso.
 // leerJSON vive ahora en el modulo de sesion: mismo nombre, y ademas manda al login cuando la sesion vence.
 
-/* ===================== ACTUALIZACION (2026-09-22) — identico en todas las pantallas =====================
-   El telefono guarda la pantalla vieja y la sigue mostrando aunque ya haya una nueva en GitHub.
-   Hasta hoy eso se arreglaba borrando la cache a mano. Ahora cada pantalla sabe con que build salio,
-   version.json dice cual es la buena, y si no coinciden aparece una barra con un boton que borra la
-   cache y recarga. Nadie tiene que saber que es "borrar cache".
-   Ademas, todo enlace entre pantallas lleva ?v=BUILD: moverse por el menu ya no trae copias viejas. */
-var BUILD = '2026-09-22';
-(function() {
-  var intentos = 0;
-  function sellarEnlaces() {
-    var as = document.getElementsByTagName('a');
-    for (var i = 0; i < as.length; i++) {
-      var h = as[i].getAttribute('href') || '';
-      if ((h.indexOf('boparts_') === 0 || h === 'index.html') && h.indexOf('v=') < 0) {
-        as[i].setAttribute('href', h + (h.indexOf('?') < 0 ? '?' : '&') + 'v=' + BUILD);
-      }
-    }
-  }
-  function barra(nuevo) {
-    if (document.getElementById('updBar')) return;
-    var d = document.createElement('div');
-    d.id = 'updBar';
-    d.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:9999;background:#F5A800;color:#111;' +
-      'font-family:inherit;font-size:13px;font-weight:700;padding:12px 14px;display:flex;align-items:center;' +
-      'gap:10px;box-shadow:0 -6px 20px rgba(0,0,0,.45)';
-    d.innerHTML = '<span style="flex:1;line-height:1.35">Version nueva disponible (' + nuevo +
-      '). Esta pantalla corre ' + BUILD + '.</span>' +
-      '<button id="updBtn" style="background:#111;color:#F5A800;border:none;border-radius:8px;padding:9px 15px;' +
-      'font-weight:700;font-size:13px;font-family:inherit;cursor:pointer;flex-shrink:0">Actualizar</button>';
-    document.body.appendChild(d);
-    document.getElementById('updBtn').onclick = actualizarApp;
-  }
-  function actualizarApp() {
-    var recargar = function() { location.replace(location.pathname + '?v=' + Date.now()); };
-    try {
-      if (window.caches && caches.keys) {
-        caches.keys()
-          .then(function(ks) { return Promise.all(ks.map(function(k) { return caches.delete(k); })); })
-          .then(recargar, recargar);
-        return;
-      }
-    } catch (e) {}
-    recargar();
-  }
-  function revisar() {
-    if (intentos > 40) return;
-    intentos++;
-    fetch('version.json?t=' + Date.now(), {cache:'no-store'})
-      .then(function(r) { return r.json(); })
-      .then(function(d) { if (d && d.build && d.build !== BUILD) barra(d.build); })
-      .catch(function() {});
-  }
-  window.actualizarApp = actualizarApp;
-  sellarEnlaces();
-  revisar();
-  document.addEventListener('visibilitychange', function() { if (!document.hidden) revisar(); });
-})();
+
 </script>
 </body>
 </html>

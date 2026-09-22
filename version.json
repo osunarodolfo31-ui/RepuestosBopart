@@ -1,4 +1,4 @@
 {
-  "build": "2026-09-22",
-  "nota": "Sube este archivo con cada despliegue y cambia build."
+  "build": "2026-09-22.2",
+  "nota": "Cambia build en CADA despliegue, incluso el mismo dia (usa .2, .3...)."
 }

@@ -1,5 +1,38 @@
 # CHANGELOG — Repuesto BoParts
 
+## build 2026-09-22.2 — el modulo de sesion sale de los 12 HTML
+
+**Nuevo archivo: `boparts_sesion.js`.** Sesion, login (markup y CSS incluidos) y el aviso de version
+vivian copiados **byte a byte** dentro de cada uno de los 12 HTML — se verifico con SHA-256: los doce
+bloques eran identicos. Cualquier correccion habia que hacerla doce veces, y bastaba olvidar una para
+que esa pantalla se comportara distinto. Asi nacio el `leerJSON` duplicado que esta manana dejo a
+Compras sin lista de productos.
+
+Ahora cada pantalla carga `<script src="boparts_sesion.js?v=2026-09-22.2"></script>` antes de su propio
+script. El `?v=` importa: sin el, una copia vieja del modulo en cache se puede emparejar con un HTML
+nuevo. **Hay que subir `boparts_sesion.js` junto con los HTML; sin el, ninguna pantalla entra.**
+
+Salen de cada HTML: 1.435 caracteres de CSS del login, 580 de markup y 7.787 del modulo de sesion.
+**3.123 lineas menos en total.**
+
+**CORRECCION encontrada al probar — `boparts_gastos.html` nunca pedia sesion al abrir.** Definia
+`revisarSesion` y no la llamaba nunca: era la unica de las 12. El login igual aparecia, pero solo
+despues de que fallara la primera peticion al script, sin fijar el nombre de quien entro en los
+desplegables y sin recargar la tasa al entrar. Ahora llama a `revisarSesion` como las demas.
+
+**Se probaron las 12 pantallas en un navegador real** (Chromium) contra un Apps Script simulado que
+**exige token**: las doce muestran el login al abrir, entran con el PIN, guardan la sesion y ninguna
+lanza un error de pagina.
+
+**Pendiente, observado en la prueba y NO corregido:** en Gerencia, su propio candado de PIN (`.pinov`,
+z-index 9998) tapa el cuadro de login (z-index 900). Viene de antes de estos cambios. Efecto: quien
+abra Gerencia como primera pantalla del dia no tiene donde iniciar sesion. Se decide aparte.
+
+**`version.json` ahora lleva contador:** `2026-09-22.2`. Un build con solo la fecha no distingue dos
+publicaciones del mismo dia, que era justo el caso de hoy.
+
+---
+
 ## build 2026-09-22 — cuatro reportes de Rodolfo (22/09)
 
 **index.html v11.4 — encuadre de la lista de precios.**
