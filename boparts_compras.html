@@ -1,7 +1,11 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_compras.html
-  VERSION: v2.7 (2026-09-19) | requiere Apps Script v25
+  VERSION: v2.8 (2026-09-22) | build 2026-09-22 | requiere Apps Script v25
+  v2.8: aviso de version nueva con boton Actualizar (borra cache y recarga) y enlaces del menu con ?v=;
+  el login reintenta solo cuando no hay conexion con el script en vez de quedarse en "Sin conexion".
+  la lista de productos vuelve a cargar (habia DOS leerJSON y el de abajo pisaba al de sesion: con la sesion vencida el script decia "vuelve a entrar" y la pantalla se lo tragaba)
+  VERSION anterior: v2.7 (2026-09-19) | requiere Apps Script v25
   · agrega "Mi día" al menú (requiere Apps Script v25 y boparts_tareas.html).
   v2.6: el ID de la recepcion se conserva mientras no cambie lo recibido, asi un reintento no crea otra
         recepcion. Si el script reconoce que ya estaba guardada, la app lo dice en vez de callarse.
@@ -476,7 +480,17 @@ function mostrarLogin() {
         if (ult) sel.value = ult;
         var pin = document.getElementById('lgPin'); if (pin) pin.focus();
       })
-      .catch(function() { sel.innerHTML = '<option value="">Sin conexion con el script</option>'; });
+      .catch(function() {
+        // Antes esto era un callejon sin salida: decia "Sin conexion" y ahi se quedaba.
+        window.__reintentosQuienes = (window.__reintentosQuienes || 0) + 1;
+        if (window.__reintentosQuienes <= 3) {
+          sel.innerHTML = '<option value="">Sin conexion — reintentando (' + window.__reintentosQuienes + '/3)...</option>';
+          setTimeout(function() { sel.innerHTML = ''; mostrarLogin(); }, 2500);
+        } else {
+          sel.innerHTML = '<option value="">Sin conexion con el script — toca aqui para reintentar</option>';
+          sel.onclick = function() { window.__reintentosQuienes = 0; sel.onclick = null; sel.innerHTML = ''; mostrarLogin(); };
+        }
+      });
   }
 }
 
@@ -570,7 +584,7 @@ function sellarVersion(d) {
 }
 function txt_(v) { return v == null ? '' : String(v); }
 var CLOUD = 'c7jufi9v', PRESET = 'boparts_productos';
-var APP_VERSION = 'v2.7';
+var APP_VERSION = 'v2.8';
 
 var PRODUCTS = [], PROVEEDORES = [], lineas = [], provSel = null, fotoUrl = '';
 var idCompraActual = '';   // se mantiene entre reintentos de la MISMA recepcion
@@ -592,8 +606,12 @@ function cargarProductos() {
     document.getElementById('catList').innerHTML = Object.keys(cats).sort().map(function(c) { return '<option value="' + escHtml(c) + '">'; }).join('');
     document.getElementById('marcaList').innerHTML = Object.keys(marcas).sort().map(function(c) { return '<option value="' + escHtml(c) + '">'; }).join('');
   }).catch(function(e) {
-    if (e && e.message === 'SESION') return;
-    toast('No cargo la lista de productos', 'err');
+    if (e && e.message === 'SESION') return;   // leerJSON ya mando al login
+    // Antes decia solo "No cargo la lista de productos" y no se sabia por que: sesion vencida,
+    // script sin desplegar o sin internet daban todos el mismo mensaje.
+    toast('No cargo la lista de productos: ' + ((e && e.message) || 'sin conexion') + '. Toca para reintentar.', 'err');
+    var el = document.getElementById('toast');
+    if (el) el.onclick = function() { el.onclick = null; el.className = 'toast'; cargarProductos(); };
   });
 }
 function alEntrar() { cargarProductos(); }
@@ -1023,17 +1041,64 @@ function closeNav() {
 }
 
 
-// Lee la respuesta del script con cuidado: si Apps Script devuelve su pagina de error (HTML),
-// r.json() explota con "Unexpected token '<'". Asi se explica que pasa en vez de mostrar eso.
-function leerJSON(r) {
-  return r.text().then(function(t) {
-    try { return JSON.parse(t); }
-    catch (e) {
-      var limpio = String(t).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
-      throw new Error('El script no devolvio datos' + (limpio ? ': ' + limpio : '') + '. Revisa que Apps Script este desplegado como Nueva version.');
+
+/* ===================== ACTUALIZACION (2026-09-22) — identico en todas las pantallas =====================
+   El telefono guarda la pantalla vieja y la sigue mostrando aunque ya haya una nueva en GitHub.
+   Hasta hoy eso se arreglaba borrando la cache a mano. Ahora cada pantalla sabe con que build salio,
+   version.json dice cual es la buena, y si no coinciden aparece una barra con un boton que borra la
+   cache y recarga. Nadie tiene que saber que es "borrar cache".
+   Ademas, todo enlace entre pantallas lleva ?v=BUILD: moverse por el menu ya no trae copias viejas. */
+var BUILD = '2026-09-22';
+(function() {
+  var intentos = 0;
+  function sellarEnlaces() {
+    var as = document.getElementsByTagName('a');
+    for (var i = 0; i < as.length; i++) {
+      var h = as[i].getAttribute('href') || '';
+      if ((h.indexOf('boparts_') === 0 || h === 'index.html') && h.indexOf('v=') < 0) {
+        as[i].setAttribute('href', h + (h.indexOf('?') < 0 ? '?' : '&') + 'v=' + BUILD);
+      }
     }
-  });
-}
+  }
+  function barra(nuevo) {
+    if (document.getElementById('updBar')) return;
+    var d = document.createElement('div');
+    d.id = 'updBar';
+    d.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:9999;background:#F5A800;color:#111;' +
+      'font-family:inherit;font-size:13px;font-weight:700;padding:12px 14px;display:flex;align-items:center;' +
+      'gap:10px;box-shadow:0 -6px 20px rgba(0,0,0,.45)';
+    d.innerHTML = '<span style="flex:1;line-height:1.35">Version nueva disponible (' + nuevo +
+      '). Esta pantalla corre ' + BUILD + '.</span>' +
+      '<button id="updBtn" style="background:#111;color:#F5A800;border:none;border-radius:8px;padding:9px 15px;' +
+      'font-weight:700;font-size:13px;font-family:inherit;cursor:pointer;flex-shrink:0">Actualizar</button>';
+    document.body.appendChild(d);
+    document.getElementById('updBtn').onclick = actualizarApp;
+  }
+  function actualizarApp() {
+    var recargar = function() { location.replace(location.pathname + '?v=' + Date.now()); };
+    try {
+      if (window.caches && caches.keys) {
+        caches.keys()
+          .then(function(ks) { return Promise.all(ks.map(function(k) { return caches.delete(k); })); })
+          .then(recargar, recargar);
+        return;
+      }
+    } catch (e) {}
+    recargar();
+  }
+  function revisar() {
+    if (intentos > 40) return;
+    intentos++;
+    fetch('version.json?t=' + Date.now(), {cache:'no-store'})
+      .then(function(r) { return r.json(); })
+      .then(function(d) { if (d && d.build && d.build !== BUILD) barra(d.build); })
+      .catch(function() {});
+  }
+  window.actualizarApp = actualizarApp;
+  sellarEnlaces();
+  revisar();
+  document.addEventListener('visibilitychange', function() { if (!document.hidden) revisar(); });
+})();
 </script>
 </body>
 </html>

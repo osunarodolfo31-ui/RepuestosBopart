@@ -1,7 +1,11 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_devoluciones.html
-  VERSION: v1.5 (2026-09-18) | requiere Apps Script v25
+  VERSION: v1.6 (2026-09-22) | build 2026-09-22 | requiere Apps Script v25
+  v1.6: aviso de version nueva con boton Actualizar (borra cache y recarga) y enlaces del menu con ?v=;
+  el login reintenta solo cuando no hay conexion con el script en vez de quedarse en "Sin conexion".
+  leerJSON duplicado: la sesion vencida ya manda al login en vez de fallar en silencio
+  VERSION anterior: v1.5 (2026-09-18) | requiere Apps Script v25
   · agrega "Mi día" al menú (requiere Apps Script v25 y boparts_tareas.html).
   v1.4: la lista de productos se pide al script (action=productos) en vez del CSV publicado; login incluido.
   v1.3: el formulario (resolucion, autoriza, cliente, motivo) ya no se pierde al cambiar cantidades; el cliente
@@ -399,7 +403,17 @@ function mostrarLogin() {
         if (ult) sel.value = ult;
         var pin = document.getElementById('lgPin'); if (pin) pin.focus();
       })
-      .catch(function() { sel.innerHTML = '<option value="">Sin conexion con el script</option>'; });
+      .catch(function() {
+        // Antes esto era un callejon sin salida: decia "Sin conexion" y ahi se quedaba.
+        window.__reintentosQuienes = (window.__reintentosQuienes || 0) + 1;
+        if (window.__reintentosQuienes <= 3) {
+          sel.innerHTML = '<option value="">Sin conexion — reintentando (' + window.__reintentosQuienes + '/3)...</option>';
+          setTimeout(function() { sel.innerHTML = ''; mostrarLogin(); }, 2500);
+        } else {
+          sel.innerHTML = '<option value="">Sin conexion con el script — toca aqui para reintentar</option>';
+          sel.onclick = function() { window.__reintentosQuienes = 0; sel.onclick = null; sel.innerHTML = ''; mostrarLogin(); };
+        }
+      });
   }
 }
 
@@ -492,7 +506,7 @@ function sellarVersion(d) {
   return d;
 }
 function txt_(v) { return v == null ? '' : String(v); }
-var APP_VERSION = 'v1.5';
+var APP_VERSION = 'v1.6';
 var PIN_HASH_SOCIOS = 911136;      // mismo PIN de Gerencia
 var PLAZO_DIAS = 5;                // maximo acordado para aceptar un cambio
 var TASA = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
@@ -763,17 +777,64 @@ function closeNav() {
 
 document.addEventListener('click', function(e) { if (!e.target.closest('.wrap')) { var d = document.getElementById('prodDrop'); if (d) d.classList.remove('open'); } });
 
-// Lee la respuesta del script con cuidado: si Apps Script devuelve su pagina de error (HTML),
-// r.json() explota con "Unexpected token '<'". Asi se explica que pasa en vez de mostrar eso.
-function leerJSON(r) {
-  return r.text().then(function(t) {
-    try { return JSON.parse(t); }
-    catch (e) {
-      var limpio = String(t).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
-      throw new Error('El script no devolvio datos' + (limpio ? ': ' + limpio : '') + '. Revisa que Apps Script este desplegado como Nueva version.');
+
+/* ===================== ACTUALIZACION (2026-09-22) — identico en todas las pantallas =====================
+   El telefono guarda la pantalla vieja y la sigue mostrando aunque ya haya una nueva en GitHub.
+   Hasta hoy eso se arreglaba borrando la cache a mano. Ahora cada pantalla sabe con que build salio,
+   version.json dice cual es la buena, y si no coinciden aparece una barra con un boton que borra la
+   cache y recarga. Nadie tiene que saber que es "borrar cache".
+   Ademas, todo enlace entre pantallas lleva ?v=BUILD: moverse por el menu ya no trae copias viejas. */
+var BUILD = '2026-09-22';
+(function() {
+  var intentos = 0;
+  function sellarEnlaces() {
+    var as = document.getElementsByTagName('a');
+    for (var i = 0; i < as.length; i++) {
+      var h = as[i].getAttribute('href') || '';
+      if ((h.indexOf('boparts_') === 0 || h === 'index.html') && h.indexOf('v=') < 0) {
+        as[i].setAttribute('href', h + (h.indexOf('?') < 0 ? '?' : '&') + 'v=' + BUILD);
+      }
     }
-  });
-}
+  }
+  function barra(nuevo) {
+    if (document.getElementById('updBar')) return;
+    var d = document.createElement('div');
+    d.id = 'updBar';
+    d.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:9999;background:#F5A800;color:#111;' +
+      'font-family:inherit;font-size:13px;font-weight:700;padding:12px 14px;display:flex;align-items:center;' +
+      'gap:10px;box-shadow:0 -6px 20px rgba(0,0,0,.45)';
+    d.innerHTML = '<span style="flex:1;line-height:1.35">Version nueva disponible (' + nuevo +
+      '). Esta pantalla corre ' + BUILD + '.</span>' +
+      '<button id="updBtn" style="background:#111;color:#F5A800;border:none;border-radius:8px;padding:9px 15px;' +
+      'font-weight:700;font-size:13px;font-family:inherit;cursor:pointer;flex-shrink:0">Actualizar</button>';
+    document.body.appendChild(d);
+    document.getElementById('updBtn').onclick = actualizarApp;
+  }
+  function actualizarApp() {
+    var recargar = function() { location.replace(location.pathname + '?v=' + Date.now()); };
+    try {
+      if (window.caches && caches.keys) {
+        caches.keys()
+          .then(function(ks) { return Promise.all(ks.map(function(k) { return caches.delete(k); })); })
+          .then(recargar, recargar);
+        return;
+      }
+    } catch (e) {}
+    recargar();
+  }
+  function revisar() {
+    if (intentos > 40) return;
+    intentos++;
+    fetch('version.json?t=' + Date.now(), {cache:'no-store'})
+      .then(function(r) { return r.json(); })
+      .then(function(d) { if (d && d.build && d.build !== BUILD) barra(d.build); })
+      .catch(function() {});
+  }
+  window.actualizarApp = actualizarApp;
+  sellarEnlaces();
+  revisar();
+  document.addEventListener('visibilitychange', function() { if (!document.hidden) revisar(); });
+})();
 </script>
 </body>
 </html>

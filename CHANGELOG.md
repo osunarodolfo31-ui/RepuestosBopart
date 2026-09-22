@@ -1,4 +1,41 @@
-# Repuesto BoParts — Sistema Operativo · CHANGELOG
+# CHANGELOG — Repuesto BoParts
+
+## build 2026-09-22 — cuatro reportes de Rodolfo (22/09)
+
+**index.html v11.4 — encuadre de la lista de precios.**
+Un nombre encadenado con barras (AVEO/CORSA/CRUZE/OPTRA/GRAND VITARA) es UNA sola palabra para el
+navegador. `.card-name` tenia `flex:1` sin `min-width:0`, asi que no se podia encoger por debajo de esa
+palabra y empujaba el bloque del precio fuera de la tarjeta. Ahora: `min-width:0`,
+`overflow-wrap:break-word`, `.card-price` con `flex:0 0 auto` y `white-space:nowrap`, y un `<wbr>`
+detras de cada barra (funcion `cortable`) para que la linea corte EN la barra y no parta marcas por la
+mitad (antes quedaba EL / ANTRA). Mismo arreglo en el nombre de la hoja de detalle.
+
+**boparts_inventario.html v2.1 — el historial decia "VENTA +2 und".**
+En VENTAS_DETALLE una venta se guarda como +2 (dos unidades vendidas) y una devolucion como -2 (la
+venta revertida). El historial mostraba ese numero crudo, pero el historial se lee como lo ve el
+estante: una venta SACA unidades. Ahora VENTA y DEVOLUCION se muestran con el signo invertido
+(venta -2 und en rojo, devolucion +2 und). No cambia ningun calculo: `calcularStock_` ya restaba bien.
+
+**boparts_compras.html v2.8 — no cargaba la lista de productos.**
+Habia DOS `function leerJSON` en el archivo. Las declaraciones de funcion se elevan y gana la ultima,
+asi que la version del modulo de sesion (la que detecta `d.sesion` y manda al login) estaba muerta y
+corria la de abajo, que no sabe nada de sesiones. Con la sesion vencida el script respondia
+`{ok:false, sesion:true}`, `cargarProductos` lo tomaba como error generico y la pantalla se quedaba
+para siempre con PRODUCTS vacio: al buscar solo aparecia "+ Producto nuevo". Se elimino el duplicado.
+El mismo duplicado estaba en apartados (v1.7), demanda (v8.8), devoluciones (v1.6) y gerencia (v2.9).
+Ademas el toast de error ahora dice la causa real y se puede tocar para reintentar.
+
+**Las 12 pantallas — la cache deja de ser problema del usuario.**
+Cada pantalla lleva `var BUILD` y consulta `version.json` al abrir y cada vez que vuelve al frente. Si
+no coinciden, sale una barra naranja con el boton Actualizar, que borra las caches y recarga con
+`?v=<timestamp>`. Todo enlace entre pantallas sale con `?v=BUILD`, asi que moverse por el menu ya no
+trae copias viejas. Al desplegar hay que cambiar `build` en version.json.
+
+**Las 12 pantallas — el login ya no es un callejon sin salida.**
+"Sin conexion con el script" se quedaba fijo para siempre. Ahora reintenta solo 3 veces cada 2,5 s y
+despues deja el desplegable tocable para reintentar a mano.
+
+---
 
 Regla: cada vez que se sube un archivo a GitHub o se implementa una versión nueva del Apps Script,
 se agrega una línea aquí. Si un cambio requiere subir varios archivos juntos, se listan juntos.

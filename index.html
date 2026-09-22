@@ -1,7 +1,11 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — index.html
-  VERSION: v11.3 (2026-09-21) | requiere Apps Script v25
+  VERSION: v11.4 (2026-09-22) | build 2026-09-22 | requiere Apps Script v25
+  v11.4: aviso de version nueva con boton Actualizar (borra cache y recarga) y enlaces del menu con ?v=;
+  el login reintenta solo cuando no hay conexion con el script en vez de quedarse en "Sin conexion".
+  encuadre de la lista: un nombre largo sin espacios ya no empuja el precio fuera de la tarjeta
+  VERSION anterior: v11.3 (2026-09-21) | requiere Apps Script v25
   v11.3: Reintentar ya no deja la pantalla en blanco cuando Google no responde — muestra la lista
          guardada con un aviso. 25s y un reintento automatico. El sello de version dice si el numero
          viene del servidor o de la lista guardada en el telefono.
@@ -140,17 +144,19 @@
   /* CARD */
   .card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:14px;cursor:pointer;transition:transform .1s,border-color .15s;-webkit-tap-highlight-color:transparent}
   .card:active{transform:scale(.985);border-color:var(--brand)}
-  .card-top{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}
-  .card-name{font-size:14px;font-weight:600;line-height:1.35;flex:1;color:var(--ink)}
+  /* El nombre lleva min-width:0 y overflow-wrap: sin eso, un nombre largo sin espacios
+     (AVEO/CORSA/CRUZE/OPTRA/GRAND) no se puede encoger y empuja el precio fuera de la tarjeta. */
+  .card-top{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+  .card-name{font-size:14px;font-weight:600;line-height:1.35;flex:1 1 auto;min-width:0;overflow-wrap:break-word;color:var(--ink)}
   .card-name mark{background:rgba(245,168,0,0.2);color:var(--brand);border-radius:3px;padding:0 2px}
-  .card-price{text-align:right;flex-shrink:0}
-  .card-price .usd{font-size:17px;font-weight:700;color:var(--brand);line-height:1}
+  .card-price{text-align:right;flex:0 0 auto;white-space:nowrap;max-width:42%}
+  .card-price .usd{font-size:17px;font-weight:700;color:var(--brand);line-height:1;white-space:nowrap}
   .card-price .bs{font-size:11px;color:var(--ink-muted);margin-top:2px}
   .card-meta{margin-top:6px;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
   .badge{font-size:10px;font-weight:600;padding:2px 7px;border-radius:20px}
   .badge-marca{background:var(--card2);color:var(--ink-soft);border:1px solid var(--border)}
   .badge-cat{background:var(--brand-soft);color:var(--brand);border:1px solid rgba(245,168,0,0.2)}
-  .card-code{font-size:10px;color:var(--ink-muted);margin-left:auto}
+  .card-code{font-size:10px;color:var(--ink-muted);margin-left:auto;overflow-wrap:anywhere}
 
   /* EMPTY / LOADING / ERROR */
   .state-box{text-align:center;padding:60px 24px;color:var(--ink-muted)}
@@ -166,7 +172,7 @@
   .sheet-handle{width:40px;height:4px;background:var(--border);border-radius:2px;margin:14px auto 20px}
   .sheet-body{padding:0 20px 24px}
   .sheet-cat-badge{display:inline-flex;align-items:center;background:var(--brand-soft);color:var(--brand);border-radius:20px;padding:4px 10px;font-size:11px;font-weight:700;margin-bottom:12px;border:1px solid rgba(245,168,0,0.2)}
-  .sheet-name{font-size:20px;font-weight:700;line-height:1.25;margin-bottom:4px;color:var(--ink)}
+  .sheet-name{font-size:20px;font-weight:700;line-height:1.25;margin-bottom:4px;color:var(--ink);overflow-wrap:break-word}
   .sheet-marca{font-size:13px;color:var(--ink-muted);margin-bottom:20px}
   .sheet-prices{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px}
   .price-box{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px;text-align:center}
@@ -400,7 +406,17 @@ function mostrarLogin() {
         if (ult) sel.value = ult;
         var pin = document.getElementById('lgPin'); if (pin) pin.focus();
       })
-      .catch(function() { sel.innerHTML = '<option value="">Sin conexion con el script</option>'; });
+      .catch(function() {
+        // Antes esto era un callejon sin salida: decia "Sin conexion" y ahi se quedaba.
+        window.__reintentosQuienes = (window.__reintentosQuienes || 0) + 1;
+        if (window.__reintentosQuienes <= 3) {
+          sel.innerHTML = '<option value="">Sin conexion — reintentando (' + window.__reintentosQuienes + '/3)...</option>';
+          setTimeout(function() { sel.innerHTML = ''; mostrarLogin(); }, 2500);
+        } else {
+          sel.innerHTML = '<option value="">Sin conexion con el script — toca aqui para reintentar</option>';
+          sel.onclick = function() { window.__reintentosQuienes = 0; sel.onclick = null; sel.innerHTML = ''; mostrarLogin(); };
+        }
+      });
   }
 }
 
@@ -485,7 +501,7 @@ function revisarSesion(alTener) {
 
 // v10: la lista viene del script, no del CSV publicado. Asi LISTA DE PRODUCTOS puede dejar de estar publicada.
 const SCRIPT_URL_SESION = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
-const APP_VERSION = 'v11.3';
+const APP_VERSION = 'v11.4';
 var VER_SCRIPT = '?';
 /* v11.3: el sello mentia de otra forma. La version salia tambien de la LISTA GUARDADA en el telefono,
    que puede ser de hace dias, asi que la pantalla podia decir "script v21.4" con un v25 desplegado.
@@ -821,6 +837,12 @@ function highlight(text, terms) {
   });
   return s;
 }
+// Los nombres vienen encadenados con barras (AVEO/CORSA/OPTRA/ACCENT/GETZ/ELANTRA) y el navegador
+// los trata como UNA sola palabra: o empuja el precio fuera de la tarjeta, o parte una marca por la
+// mitad (EL / ANTRA). Con un <wbr> detras de cada barra la linea corta en la barra y ninguna
+// palabra se parte. No toca las barras de las etiquetas </mark> que mete highlight().
+function cortable(html) { return String(html).replace(/(^|[^<])\//g, '$1/<wbr>'); }
+
 function fmtUSD(n) { return n ? '$' + Number(n).toFixed(2) : '—' }
 function fmtBS(n) { return n ? 'Bs ' + Math.round(n).toLocaleString('es-VE') : '—' }
 
@@ -864,7 +886,7 @@ function render(filtered) {
   list.innerHTML = slice.map(p => `
     <div class="card" onclick="openDetail(${PRODUCTS.indexOf(p)})">
       <div class="card-top">
-        <div class="card-name">${highlight(p.producto, terms)}</div>
+        <div class="card-name">${cortable(highlight(p.producto, terms))}</div>
         <div class="card-price">
           <div class="usd">${fmtUSD(precioMostrado(p))}${modoPrecio === 'bcv' ? ' <span class="bcvtag">BCV</span>' : ''}</div>
           <div class="bs">${fmtBS(p.bs)}</div>
@@ -907,7 +929,7 @@ function openDetail(idx) {
   }
   document.getElementById('sheetBody').innerHTML = imgHtml + `
     <div class="sheet-cat-badge">${escHtml(p.categoria)}</div>
-    <div class="sheet-name">${escHtml(p.producto)}</div>
+    <div class="sheet-name">${cortable(escHtml(p.producto))}</div>
     <div class="sheet-marca">${escHtml(p.marca) || '&nbsp;'}</div>
     <div class="sheet-prices">
       <div class="price-box featured">
@@ -1135,6 +1157,64 @@ function parseNum(v) {
   var n = parseFloat(t);
   return isNaN(n) ? 0 : n;
 }
+
+/* ===================== ACTUALIZACION (2026-09-22) — identico en todas las pantallas =====================
+   El telefono guarda la pantalla vieja y la sigue mostrando aunque ya haya una nueva en GitHub.
+   Hasta hoy eso se arreglaba borrando la cache a mano. Ahora cada pantalla sabe con que build salio,
+   version.json dice cual es la buena, y si no coinciden aparece una barra con un boton que borra la
+   cache y recarga. Nadie tiene que saber que es "borrar cache".
+   Ademas, todo enlace entre pantallas lleva ?v=BUILD: moverse por el menu ya no trae copias viejas. */
+var BUILD = '2026-09-22';
+(function() {
+  var intentos = 0;
+  function sellarEnlaces() {
+    var as = document.getElementsByTagName('a');
+    for (var i = 0; i < as.length; i++) {
+      var h = as[i].getAttribute('href') || '';
+      if ((h.indexOf('boparts_') === 0 || h === 'index.html') && h.indexOf('v=') < 0) {
+        as[i].setAttribute('href', h + (h.indexOf('?') < 0 ? '?' : '&') + 'v=' + BUILD);
+      }
+    }
+  }
+  function barra(nuevo) {
+    if (document.getElementById('updBar')) return;
+    var d = document.createElement('div');
+    d.id = 'updBar';
+    d.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:9999;background:#F5A800;color:#111;' +
+      'font-family:inherit;font-size:13px;font-weight:700;padding:12px 14px;display:flex;align-items:center;' +
+      'gap:10px;box-shadow:0 -6px 20px rgba(0,0,0,.45)';
+    d.innerHTML = '<span style="flex:1;line-height:1.35">Version nueva disponible (' + nuevo +
+      '). Esta pantalla corre ' + BUILD + '.</span>' +
+      '<button id="updBtn" style="background:#111;color:#F5A800;border:none;border-radius:8px;padding:9px 15px;' +
+      'font-weight:700;font-size:13px;font-family:inherit;cursor:pointer;flex-shrink:0">Actualizar</button>';
+    document.body.appendChild(d);
+    document.getElementById('updBtn').onclick = actualizarApp;
+  }
+  function actualizarApp() {
+    var recargar = function() { location.replace(location.pathname + '?v=' + Date.now()); };
+    try {
+      if (window.caches && caches.keys) {
+        caches.keys()
+          .then(function(ks) { return Promise.all(ks.map(function(k) { return caches.delete(k); })); })
+          .then(recargar, recargar);
+        return;
+      }
+    } catch (e) {}
+    recargar();
+  }
+  function revisar() {
+    if (intentos > 40) return;
+    intentos++;
+    fetch('version.json?t=' + Date.now(), {cache:'no-store'})
+      .then(function(r) { return r.json(); })
+      .then(function(d) { if (d && d.build && d.build !== BUILD) barra(d.build); })
+      .catch(function() {});
+  }
+  window.actualizarApp = actualizarApp;
+  sellarEnlaces();
+  revisar();
+  document.addEventListener('visibilitychange', function() { if (!document.hidden) revisar(); });
+})();
 </script>
 
 </body>
