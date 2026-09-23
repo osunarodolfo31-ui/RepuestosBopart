@@ -1,5 +1,48 @@
 # CHANGELOG — Repuesto BoParts
 
+## Code.gs v26 + cobros v3.2 — build 2026-09-22.4 — tres fallos que mueven dinero
+
+Los tres confirmados en produccion el 22/09, no en teoria.
+
+### 1. El abono no se puede cobrar dos veces
+`guardarAbono_` **escribia** el `idAbono` en la hoja y **nunca lo buscaba**. Con mala senal la pantalla
+dice "reintenta", el telefono reenvia, y quedaban dos abonos por un pago que entro una sola vez: el
+saldo del cliente bajaba el doble.
+
+Y el cliente empeoraba lo suyo: armaba el `idAbono` con la hora **en cada envio**, asi que al
+reintentar salia un ID distinto y ningun servidor del mundo habria podido reconocerlo.
+
+Arreglado en los dos lados. El servidor busca antes de escribir, dentro del lock que ya tenia
+`doPost`. El telefono fija el ID por **cliente + monto** y lo guarda hasta que el abono se confirma;
+si cambia el cliente o el monto es otro cobro y le toca ID nuevo. Caduca a los 15 minutos.
+La respuesta trae `repetido`, y la pantalla lo dice: *"Ese abono YA estaba registrado. No se duplico."*
+
+### 2. Entregar un apartado ya no puede duplicar la venta
+`entregarApartado_` armaba el `idVenta` con un timestamp. Si el script se caia entre crear la venta y
+marcar el apartado ENTREGADO, el reintento no encontraba la marca, entraba otra vez y generaba una
+**segunda venta** con otro ID — con su nota y su descuento de inventario. Ahora el ID sale del numero
+de apartado (`VAP-AP-0012`), que es unico por definicion: un apartado se entrega una sola vez.
+
+### 3. La comision del aliado se descongela cuando el cliente paga
+Una venta a credito con aliado nacia con la comision en `PENDIENTE COBRO` — correcto, para no pagarle
+al aliado plata que no entro. Lo que faltaba: **ninguna linea de codigo la sacaba de ahi.** El unico
+cambio de estado que existia era a `PAGADA`, al liquidarle, un camino al que estas comisiones nunca
+llegaban. El negocio quedaba debiendo comisiones que el sistema jamas mostraba como pagaderas.
+
+Ahora, al quedar la nota **pagada completa**, la comision pasa a `PENDIENTE` y entra a la liquidacion.
+Con abono parcial sigue congelada a proposito: si le pagas al aliado y el cliente no termina, pierdes
+dos veces.
+
+**Para lo ya registrado:** ejecutar **UNA VEZ** `repararComisionesCobradas()` desde el editor de Apps
+Script. Va aparte a proposito — reparar datos historicos dentro de una consulta es justo lo que la
+auditoria critica en su hallazgo #12. Se puede correr otra vez sin hacer dano.
+
+**Probado** con hojas simuladas, seis casos: el abono repetido se detecta; uno nuevo pasa; un ID vacio
+no bloquea; un CARGO con el mismo texto no se confunde con un ABONO; solo se libera la comision de la
+nota pagada completa (la parcial y la ya liquidada no se tocan); y correrlo dos veces libera cero.
+
+---
+
 ## build 2026-09-22.3 — ventas v14.7: el ID de la venta sobrevive a un refresco
 
 **Se duplico una venta real hoy 22/09.** Se pego la app de Reinaldo, le dio refrescar, y quedaron dos

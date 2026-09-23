@@ -1,7 +1,13 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_cobros.html
-  VERSION: v3.1 (2026-09-22) | build 2026-09-22.3 |
+  VERSION: v3.2 (2026-09-22) | build 2026-09-22.4 | REQUIERE Apps Script v26
+  v3.2: el ID del abono se conserva entre reintentos (por cliente + monto, caduca a los 15 min).
+  Antes se armaba con la hora en CADA envio, asi que al reintentar salia otro ID y el servidor no
+  podia saber que era el mismo pago: quedaban dos abonos y el saldo bajaba el doble.
+  Ademas avisa cuando el servidor reconoce un abono ya registrado, y cuando al pagarse la nota se
+  liberan comisiones de aliado que estaban congeladas.
+  VERSION anterior: v3.1 | build 2026-09-22.4 |
   v3.1: sesion, login y aviso de version salen del HTML y viven en boparts_sesion.js, un solo archivo
   para las 12 pantallas. Estaban copiados byte a byte doce veces; de ahi salio el leerJSON duplicado.
   REQUIERE subir boparts_sesion.js junto a este archivo.
@@ -333,7 +339,7 @@ select option{background:#1E1E1E;color:var(--ink)}
   </div>
 </div>
 
-<script src="boparts_sesion.js?v=2026-09-22.3"></script>
+<script src="boparts_sesion.js?v=2026-09-22.4"></script>
 <script>
 
 
@@ -481,7 +487,7 @@ function primerNombre(n) {
 }
 var ultimo = null;   // ultimo abono registrado (para el mensaje de WhatsApp)
 
-var APP_VERSION = 'v3.1';
+var APP_VERSION = 'v3.2';
 document.getElementById('fechaHdr').textContent = APP_VERSION + ' · ' + new Date().toLocaleDateString('es-VE', {weekday:'long', day:'numeric', month:'long'});
 
 // Metodos de pago (sin CREDITO)
@@ -573,6 +579,30 @@ function previewAbono() {
     (sel ? ' · saldo quedaria en <b>' + fmtUSD(Math.max(0, sel.saldoUSD - a.usd)) + '</b>' : '');
 }
 
+/* ===== ID DEL ABONO — el mismo cobro conserva su ID entre reintentos ======================
+   Antes se armaba con la hora EN CADA ENVIO: al reintentar salia un ID distinto, asi que el
+   servidor no tenia forma de saber que era el mismo pago y quedaban dos abonos. El saldo del
+   cliente bajaba el doble por una plata que entro una sola vez.
+   Ahora el ID se fija por cliente + monto y se guarda en el telefono hasta que el abono se
+   confirma. Si cambia el cliente o el monto, es otro cobro y le toca ID nuevo. Caduca a los 15
+   minutos, igual que el de ventas: pasado ese rato lo que viene es un pago distinto.
+   El servidor (v26) ademas lo busca antes de escribir, asi que la proteccion esta en los dos lados. */
+var AB_KEY = 'boparts_id_abono', AB_VIDA_MIN = 15;
+function idDeEsteAbono(cliente, usd) {
+  var huella = String(cliente || '').trim().toUpperCase() + '|' + (Math.round((usd || 0) * 100) / 100);
+  try {
+    var g = JSON.parse(localStorage.getItem(AB_KEY) || 'null');
+    if (g && g.id && g.huella === huella && (Date.now() - g.t) < AB_VIDA_MIN * 60000) return g.id;
+  } catch (e) {}
+  var n = new Date();
+  var id = 'A' + n.getFullYear() + pad2(n.getMonth()+1) + pad2(n.getDate()) + '-' +
+           pad2(n.getHours()) + pad2(n.getMinutes()) + pad2(n.getSeconds()) + '-' +
+           Math.random().toString(36).substr(2,4).toUpperCase();
+  try { localStorage.setItem(AB_KEY, JSON.stringify({id:id, huella:huella, t:Date.now()})); } catch (e) {}
+  return id;
+}
+function olvidarIdAbono() { try { localStorage.removeItem(AB_KEY); } catch (e) {} }
+
 function guardarAbono() {
   if (!sel) return;
   var quien = document.getElementById('selV').value;
@@ -586,7 +616,7 @@ function guardarAbono() {
   var payload = {
     tipo:'abono', cliente:sel.cliente, rif:sel.rif || '',
     fecha:now.toLocaleDateString('es-VE'), hora:now.toLocaleTimeString('es-VE', {hour:'2-digit', minute:'2-digit'}),
-    idAbono:'A' + now.getFullYear() + pad2(now.getMonth()+1) + pad2(now.getDate()) + '-' + pad2(now.getHours()) + pad2(now.getMinutes()) + pad2(now.getSeconds()),
+    idAbono:idDeEsteAbono(sel.cliente, a.usd),
     montoUSD:a.usd, moneda:a.moneda, montoPagado:a.monto, tasa:TASA,
     metodo:a.m.metodo, banco:a.m.banco, comision:a.com,
     registradoPor:quien, notas:document.getElementById('abNotas').value
@@ -598,8 +628,15 @@ function guardarAbono() {
     .then(function(d) {
       btn.disabled = false; btn.textContent = 'Registrar Abono';
       if (!d || d.ok !== true) throw new Error(d && d.error ? d.error : 'Respuesta invalida');
+      olvidarIdAbono();   // quedo confirmado: el proximo cobro empieza con ID nuevo
       ultimo = {cliente:sel.cliente, usd:a.usd, moneda:a.moneda, monto:a.monto, metodo:a.m.label, saldo:d.saldoUSD};
-      document.getElementById('successMsg').textContent = sel.cliente + ' - ' + fmtUSD(a.usd) + (a.moneda === 'BS' ? ' (' + fmtBS(a.monto) + ')' : '') + '\nSaldo: ' + fmtUSD(d.saldoUSD);
+      // v26: el servidor avisa cuando ese abono YA estaba registrado. Se dice, en vez de dejar
+      // creer que entro un segundo pago.
+      document.getElementById('successMsg').textContent =
+        (d.repetido ? 'Ese abono YA estaba registrado. No se duplico.\n\n' : '') +
+        sel.cliente + ' - ' + fmtUSD(a.usd) + (a.moneda === 'BS' ? ' (' + fmtBS(a.monto) + ')' : '') +
+        '\nSaldo: ' + fmtUSD(d.saldoUSD) +
+        (d.comisionesLiberadas ? '\n\nSe liberaron ' + d.comisionesLiberadas + ' comision(es) de aliado: la nota quedo pagada.' : '');
       document.getElementById('success').classList.add('open');
       cargar();
     })

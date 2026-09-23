@@ -1,6 +1,22 @@
 /**
  * Repuesto BoParts — Code.gs
- * VERSION: v25.1 (2026-09-21) | dos correcciones urgentes
+ * VERSION: v26 (2026-09-22) | integridad: abono, apartado y comision del aliado
+ *
+ * v26 — tres fallos que mueven dinero, los tres confirmados en produccion el 22/09:
+ *   1. ABONO IDEMPOTENTE. guardarAbono_ escribia el idAbono en la hoja y NUNCA lo buscaba. Con mala
+ *      senal la pantalla dice "reintenta", el telefono reenvia, y quedaban dos abonos por el mismo
+ *      pago: el saldo del cliente bajaba el doble. Ahora se busca antes de escribir, dentro del lock
+ *      que ya tenia doPost, y la respuesta trae 'repetido' para que la app lo diga.
+ *   2. ENTREGA DE APARTADO SIN DUPLICAR. El idVenta llevaba un timestamp: si el script se caia entre
+ *      crear la venta y marcar ENTREGADO, el reintento generaba una SEGUNDA venta con otro ID, con
+ *      su nota y su descuento de inventario. Ahora el ID sale del numero de apartado, que es unico.
+ *   3. COMISION DEL ALIADO QUE SE DESCONGELA. Una venta a credito con aliado nacia con la comision en
+ *      'PENDIENTE COBRO' y NINGUNA linea de codigo la sacaba de ahi cuando el cliente pagaba: el
+ *      negocio quedaba debiendo comisiones que el sistema jamas mostraba como pagaderas. Ahora, al
+ *      quedar la nota PAGADA COMPLETA, pasa a 'PENDIENTE' y entra a la liquidacion.
+ *      Para lo ya registrado: ejecutar UNA VEZ repararComisionesCobradas() desde el editor.
+ *
+ * VERSION anterior: v25.1 (2026-09-21) | dos correcciones urgentes
  *
  * v25.1:
  *   - LA VENTA ESTABA BLOQUEADA PARA LOS VENDEDORES. El permiso se calculaba desde data.tipo, pero la
@@ -427,7 +443,7 @@ function claveDePost_(data) {
 // OJO: esta constante es lo que ven las apps en el menu. Se habia quedado en v21.4 mientras el
 // encabezado ya decia v24, asi que el sello de version — que existe justamente para saber si lo
 // desplegado es lo que crees — estaba mintiendo. Cada version nueva se cambia AQUI tambien.
-var VERSION_SCRIPT = 'v25.1';
+var VERSION_SCRIPT = 'v26';
 
 function json_(obj) {
   // La version viaja en cada respuesta: es la forma rapida de saber si lo desplegado es lo que crees
@@ -909,8 +925,11 @@ function doPost(e) {
       var lockA = LockService.getScriptLock();
       lockA.waitLock(10000);
       try {
-        var saldo = guardarAbono_(ss, data);
-        return json_({ok:true,tipo:'abono',saldoUSD:saldo});
+        var r = guardarAbono_(ss, data);
+        // 'repetido' viaja a la app para que pueda decir "ese abono ya estaba" en vez de dejar
+        // creer que registro uno nuevo. Las pantallas viejas leen saldoUSD igual y no se rompen.
+        return json_({ok:true, tipo:'abono', saldoUSD:r.saldoUSD, repetido:!!r.repetido,
+                      comisionesLiberadas:r.comisionesLiberadas || 0});
       } finally {
         lockA.releaseLock();
       }
@@ -1131,11 +1150,34 @@ function hojaCxc_(ss) {
   return sh;
 }
 
+// v26 — Un abono no se puede cobrar dos veces.
+// Antes: el idAbono se ESCRIBIA en la hoja pero nunca se BUSCABA. Con mala senal, la pantalla dice
+// "reintenta", el telefono reenvia, y quedaban dos abonos por el mismo pago. El saldo del cliente
+// bajaba el doble. Corre dentro del lock que ya tenia doPost, asi que dos telefonos a la vez tampoco
+// se cuelan. Un reenvio ya no escribe nada y devuelve el saldo que corresponde.
+function abonoYaRegistrado_(cx, idAbono) {
+  var id = String(idAbono || '').trim();
+  if (!id || cx.getLastRow() < 2) return false;
+  var vals = cx.getRange(2, 5, cx.getLastRow() - 1, 2).getValues();   // E TIPO, F ID_VENTA/ID_ABONO
+  for (var i = 0; i < vals.length; i++) {
+    if (String(vals[i][0]).trim().toUpperCase() === 'ABONO' && String(vals[i][1]).trim() === id) return true;
+  }
+  return false;
+}
+
 function guardarAbono_(ss, d) {
   if (!d.cliente) throw new Error('Abono sin cliente');
   var montoUSD = Number(d.montoUSD) || 0;
   if (montoUSD <= 0) throw new Error('Monto invalido');
   var cx = hojaCxc_(ss);
+
+  if (abonoYaRegistrado_(cx, d.idAbono)) {
+    // Ya estaba. No se escribe nada y se devuelve el saldo real, con aviso para que la pantalla
+    // pueda decirlo en vez de dejar creer que se registro un segundo abono.
+    var estR = estadoCxc_(ss, d.cliente);
+    return {saldoUSD:estR.length ? estR[0].saldoUSD : 0, repetido:true};
+  }
+
   cx.appendRow([
     fechaVE_(d.fecha), d.hora, d.cliente, d.rif||'', 'ABONO', d.idAbono||'', '',
     montoUSD, d.moneda||'USD', Number(d.montoPagado)||0, Number(d.tasa)||0,
@@ -1143,7 +1185,40 @@ function guardarAbono_(ss, d) {
   ]);
   formatoFecha_(cx, cx.getLastRow(), 1);
   var est = estadoCxc_(ss, d.cliente);
-  return est.length ? est[0].saldoUSD : 0;
+
+  // v26 — al quedar pagada una nota, la comision de su aliado deja de estar congelada.
+  var liberadas = liberarComisionesCobradas_(ss, est.length ? est[0].notas : []);
+
+  return {saldoUSD:est.length ? est[0].saldoUSD : 0, repetido:false, comisionesLiberadas:liberadas};
+}
+
+// v26 — LA COMISION DEL ALIADO SE DESCONGELA CUANDO EL CLIENTE PAGA
+// Una venta a credito con aliado nace con la comision en 'PENDIENTE COBRO', para no pagarle al aliado
+// plata que todavia no entro. Correcto. Lo que faltaba: NINGUNA linea de codigo la sacaba de ahi.
+// El unico cambio de estado que existia era a 'PAGADA', al liquidarle — un camino al que estas
+// comisiones no llegaban nunca. Resultado: comisiones que el negocio debe y el sistema jamas muestra
+// como pagaderas. Aqui, cuando la nota queda PAGADA, la comision pasa a 'PENDIENTE' y entra a cobro.
+// Recibe las notas ya calculadas: no vuelve a leer CXC_MOV.
+function liberarComisionesCobradas_(ss, notas) {
+  var pagadas = {};
+  (notas || []).forEach(function(n) {
+    if (n.estado === 'PAGADA' && n.idVenta) pagadas[String(n.idVenta).trim()] = true;
+  });
+  if (!Object.keys(pagadas).length) return 0;
+
+  var sc = ss.getSheetByName('COMISIONES');
+  if (!sc || sc.getLastRow() < 2) return 0;
+  var n = sc.getLastRow() - 1;
+  var ancho = Math.max(sc.getLastColumn(), COM_USD);
+  var vals = sc.getRange(2, 1, n, ancho).getValues();
+  var libres = 0;
+  for (var i = 0; i < vals.length; i++) {
+    if (String(vals[i][COM_ESTADO - 1] || '').trim().toUpperCase() !== 'PENDIENTE COBRO') continue;
+    if (!pagadas[String(vals[i][11] || '').trim()]) continue;        // L = ID_VENTA
+    sc.getRange(i + 2, COM_ESTADO).setValue('PENDIENTE');
+    libres++;
+  }
+  return libres;
 }
 
 // Devuelve [{cliente, rif, saldoUSD, cargosUSD, abonosUSD, notas:[{idVenta, nota, fecha, montoUSD, abonadoUSD, pendienteUSD, estado}], movs:[...]}]
@@ -1605,7 +1680,13 @@ function entregarApartado_(ss, d) {
 
   var tasa = Number(d.tasa) || 0;
   var venta = {
-    idVenta:'V' + Utilities.formatDate(new Date(), TZ_VE, 'yyyyMMdd-HHmmss') + '-AP',
+    // v26 — El ID sale del NUMERO DE APARTADO, no de la hora.
+    // Antes llevaba un timestamp: si el script se caia entre crear la venta y marcar el apartado como
+    // ENTREGADO, el reintento no encontraba la marca, entraba otra vez y generaba una SEGUNDA venta
+    // con otro ID — doble nota y doble descuento de inventario. Un apartado solo se entrega una vez,
+    // asi que su numero es el identificador natural: ahora el reintento llega con el mismo ID,
+    // guardarVenta_ lo reconoce, devuelve la nota que ya existia y se limita a completar la marca.
+    idVenta:'VAP-' + String(d.num || '').trim(),
     fecha:d.fecha, hora:d.hora, vendedor:d.vendedor || String(sh.getRange(fila, 13).getValue()),
     canal:'APARTADO', productos:String(sh.getRange(fila, 7).getValue()),
     totalUSD:est.total, totalBS:Math.round(est.total * tasa), tasa:tasa,
@@ -2371,6 +2452,47 @@ function catalogoProveedores_(ss) {
   var vals = sh.getRange(1, 1, sh.getLastRow(), sh.getLastColumn()).getValues()
     .map(function(r) { return r.map(comoTexto_); });
   return {ok:true, hoja:sh.getName(), filas:vals};
+}
+
+// ============================================================
+// v26 — REPARAR LAS COMISIONES QUE QUEDARON CONGELADAS
+// ============================================================
+// Ejecuta esta funcion UNA VEZ desde el editor de Apps Script (boton Ejecutar).
+//
+// Desde que existe la liquidacion, toda venta a credito con aliado nacio con su comision en
+// 'PENDIENTE COBRO' y NADA la sacaba de ahi cuando el cliente pagaba. Asi que hay comisiones
+// ya ganadas, de notas ya cobradas, que el sistema nunca mostro como pagaderas. Desde v26 eso se
+// arregla solo al registrar cada abono; esto repara lo que quedo atras.
+//
+// Va aparte, y a proposito: reparar datos historicos NO debe pasar dentro de una consulta. Si lo
+// metieramos en la pantalla de liquidacion, nadie sabria cuando se modifico la hoja ni por que.
+// Aqui se ejecuta cuando tu decides, deja el resultado en el registro y se puede correr otra vez
+// sin hacer dano: una comision que ya paso a PENDIENTE no se vuelve a tocar.
+//
+// Solo libera comisiones de notas PAGADAS COMPLETAS. Con un abono parcial la comision sigue
+// congelada: si le pagas al aliado y el cliente no termina de pagar, pierdes dos veces.
+function repararComisionesCobradas() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    var todas = [];
+    (estadoCxc_(ss, '') || []).forEach(function(c) {
+      (c.notas || []).forEach(function(n) { todas.push(n); });
+    });
+    var pagadas = todas.filter(function(n) { return n.estado === 'PAGADA'; });
+    var libres = liberarComisionesCobradas_(ss, todas);
+    SpreadsheetApp.flush();
+    var msg = 'Notas pagadas encontradas: ' + pagadas.length +
+              '\nComisiones liberadas (PENDIENTE COBRO -> PENDIENTE): ' + libres +
+              (libres ? '\n\nYa aparecen como cobrables en Gerencia > Liquidacion de aliados.'
+                      : '\n\nNo habia ninguna congelada de una nota ya pagada.');
+    Logger.log(msg);
+    try { SpreadsheetApp.getUi().alert(msg); } catch (e) {}   // sin UI (ejecucion directa) no estorba
+    return msg;
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 // ============================================================
