@@ -1,13 +1,13 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_cobros.html
-  VERSION: v3.2 (2026-09-22) | build 2026-09-22.4 | REQUIERE Apps Script v26
+  VERSION: v3.2 (2026-09-22) | build 2026-09-22.5 | REQUIERE Apps Script v26
   v3.2: el ID del abono se conserva entre reintentos (por cliente + monto, caduca a los 15 min).
   Antes se armaba con la hora en CADA envio, asi que al reintentar salia otro ID y el servidor no
   podia saber que era el mismo pago: quedaban dos abonos y el saldo bajaba el doble.
   Ademas avisa cuando el servidor reconoce un abono ya registrado, y cuando al pagarse la nota se
   liberan comisiones de aliado que estaban congeladas.
-  VERSION anterior: v3.1 | build 2026-09-22.4 |
+  VERSION anterior: v3.1 | build 2026-09-22.5 |
   v3.1: sesion, login y aviso de version salen del HTML y viven en boparts_sesion.js, un solo archivo
   para las 12 pantallas. Estaban copiados byte a byte doce veces; de ahi salio el leerJSON duplicado.
   REQUIERE subir boparts_sesion.js junto a este archivo.
@@ -339,7 +339,7 @@ select option{background:#1E1E1E;color:var(--ink)}
   </div>
 </div>
 
-<script src="boparts_sesion.js?v=2026-09-22.4"></script>
+<script src="boparts_sesion.js?v=2026-09-22.5"></script>
 <script>
 
 
