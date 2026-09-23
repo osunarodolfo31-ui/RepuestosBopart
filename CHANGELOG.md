@@ -1,5 +1,38 @@
 # CHANGELOG — Repuesto BoParts
 
+## Code.gs v26.1 + ventas v14.8 — build 2026-09-23.1 — segunda venta duplicada, y por que
+
+**Se duplico otra venta el 23/09** (unos aceites Xpeso). A Reinaldo le salio un error y registro otra vez.
+Esta vez sin refrescar: el ID en memoria era el mismo, asi que el servidor TENIA que haberla reconocido.
+
+**Causa 1 — la pantalla le ordenaba duplicar.** El error decia *"No se guardo la venta. Reintenta"* y
+el codigo lo afirmaba en un comentario: `// La venta NO se guardo`. Pero cuando se pierde la
+RESPUESTA (la pagina de error `ppConfig` que se vio en Gerencia el 22), el servidor pudo haber
+terminado su trabajo. La pantalla no puede saberlo, y le aseguraba a Reinaldo que no quedo.
+
+Ahora dice: *"No se pudo CONFIRMAR si la venta quedo registrada. Toca Registrar otra vez: si ya habia
+quedado, el sistema lo detecta y NO la duplica."* — que es verdad desde v14.7 (el ID se conserva) y
+v26.1 (el servidor lo reconoce y lo dice).
+
+**Causa 2 — el candado no vaciaba la hoja.** Ninguna funcion llamaba `SpreadsheetApp.flush()` antes
+de soltar el candado: cero llamadas en `guardarVenta_`. Apps Script acumula las escrituras; el
+candado no las vacia solo, y Google lo pide explicitamente. Si el segundo intento entra en esa
+ventana, busca el ID, no lo encuentra todavia, y escribe la venta otra vez. Se agrego en **los 18
+puntos** donde se suelta un candado — no solo ventas: abonos, apartados, costeo, notas, facturas.
+
+**La respuesta de venta ahora trae `repetida`.** `guardarVenta_` ya no duplicaba, pero devolvia el
+mismo numero de nota que una venta nueva: la pantalla no podia distinguir "quedo" de "ya estaba".
+Ahora dice *"Esta venta YA estaba registrada como nota X. NO se duplico."*
+
+**Probado en Chromium, el caso exacto del 23/09:** el servidor guarda, la respuesta llega rota con la
+pagina `ppConfig`, Reinaldo reintenta. Resultado: dos envios con el mismo ID, **una sola venta en la
+hoja**, el primer mensaje ya no dice "no se guardo", el segundo dice "YA estaba registrada como nota".
+
+**Orden de despliegue:** `Code.gs` PRIMERO. El mensaje nuevo de ventas promete que reintentar es
+seguro, y eso solo es cierto con el servidor v26.1.
+
+---
+
 ## Code.gs v26 + cobros v3.2 — build 2026-09-22.4 — tres fallos que mueven dinero
 
 Los tres confirmados en produccion el 22/09, no en teoria.

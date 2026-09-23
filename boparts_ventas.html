@@ -1,7 +1,12 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_ventas.html
-  VERSION: v14.7 (2026-09-22) | build 2026-09-22.5 |
+  VERSION: v14.8 (2026-09-23) | build 2026-09-23.1 | REQUIERE Apps Script v26.1
+  v14.8: el mensaje de error decia "No se guardo la venta. Reintenta" y era MENTIRA. Cuando se pierde la
+  RESPUESTA, el servidor pudo haber guardado igual; la pantalla no lo sabe y le aseguraba a Reinaldo que
+  no, asi que la registraba otra vez. Paso el 22 y el 23/09. Ahora dice "No se pudo CONFIRMAR", y que
+  reintentar es seguro. Y cuando el servidor reconoce la venta repetida, lo dice con el numero de nota.
+  VERSION anterior: v14.7 | build 2026-09-23.1 |
   v14.7: el ID de la venta sobrevive a un refresco (vive en localStorage, caduca a los 15 min).
   Estaba en memoria: un refresco lo borraba y la siguiente vez se generaba otro, asi que el servidor
   no reconocia el reenvio. El 22/09 se pego la app, Reinaldo refresco y SE DUPLICO UNA VENTA REAL.
@@ -493,7 +498,7 @@ select option{background:#1E1E1E;color:var(--ink)}
   </div>
 </div>
 
-<script src="boparts_sesion.js?v=2026-09-22.5"></script>
+<script src="boparts_sesion.js?v=2026-09-23.1"></script>
 <script>
 
 
@@ -509,7 +514,7 @@ function sellarVersion(d) {
   if (t) t.textContent = 'app ' + APP_VERSION + ' \u00b7 script ' + VER_SCRIPT;
   return d;
 }
-var APP_VERSION = 'v14.7';
+var APP_VERSION = 'v14.8';
 var TASA        = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
 var TASA_ORIGEN = TASA ? 'guardada' : 'ninguna';
 
@@ -1377,14 +1382,25 @@ function guardarVenta() {
       FACT_CASHEA = cashea.financiado > 0 ? cashea : null;
       if (d.numNota) { NOTA_NUM = parseInt(d.numNota); localStorage.setItem('boparts_nota_num', NOTA_NUM); lastNotaAsignada = NOTA_NUM; } else { lastNotaAsignada = 0; }
       lastCredito = hayCredito ? {cliente:cliSel, usd:creditoUSD} : null;
-      document.getElementById('successMsg').textContent = vendedor + ' - ' + fmtUSD(usd) + ' / ' + fmtBS(bs) +
+      // v14.8: el servidor (v26.1) avisa cuando esa venta YA estaba. Se dice claro, porque es justo el
+      // caso en que Reinaldo reintento despues de un error y necesita saber que no quedaron dos.
+      document.getElementById('successMsg').textContent =
+        (d.repetida ? 'Esta venta YA estaba registrada' + (d.numNota ? ' como nota ' + d.numNota : '') +
+                      '. NO se duplico.\n\n' : '') +
+        vendedor + ' - ' + fmtUSD(usd) + ' / ' + fmtBS(bs) +
         (hayCredito ? '\nA credito: ' + fmtUSD(creditoUSD) + ' - ' + cliSel.nombre : '');
       document.getElementById('success').classList.add('open');
     })
     .catch(function(err) {
       if (btn) { btn.disabled = false; btn.textContent = 'Registrar Venta'; }
-      // La venta NO se guardo: el carrito queda intacto para reintentar
-      toast('No se guardo la venta (' + (err && err.message ? err.message : 'sin conexion') + '). Reintenta.', 'err');
+      // v14.8 — ESTO DECIA "No se guardo la venta. Reintenta", y era mentira: cuando se pierde la
+      // RESPUESTA, el servidor pudo haber guardado la venta igual. La pantalla no lo puede saber, y le
+      // aseguraba a Reinaldo que no quedo — asi que el la registraba otra vez. Paso el 22 y el 23/09.
+      // Ahora dice la verdad: no se sabe. Y reintentar ES seguro, porque el ID se conserva (v14.7) y
+      // el servidor reconoce la venta repetida y devuelve la nota que ya existia (v26.1).
+      toast('No se pudo CONFIRMAR si la venta quedo registrada (' +
+            (err && err.message ? err.message : 'sin conexion') + '). ' +
+            'Toca Registrar otra vez: si ya habia quedado, el sistema lo detecta y NO la duplica.', 'err');
     });
 }
 

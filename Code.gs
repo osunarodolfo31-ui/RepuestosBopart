@@ -1,6 +1,19 @@
 /**
  * Repuesto BoParts — Code.gs
- * VERSION: v26 (2026-09-22) | integridad: abono, apartado y comision del aliado
+ * VERSION: v26.1 (2026-09-23) | una venta repetida ya no se escribe dos veces
+ *
+ * v26.1 — El 23/09 se duplico otra venta (unos aceites Xpeso): salio un error y Reinaldo registro
+ *   otra vez. Dos causas, las dos corregidas:
+ *   1. EL CANDADO NO VACIABA LA HOJA. Ninguna funcion llamaba SpreadsheetApp.flush() antes de soltar
+ *      el candado. Apps Script acumula las escrituras y las manda al final; si el candado se suelta
+ *      antes, el siguiente intento puede buscar el ID de la venta, no encontrarlo todavia, y escribirla
+ *      otra vez. Google lo pide explicitamente para LockService. Se agrego en los 18 puntos donde se
+ *      suelta un candado: ventas, abonos, apartados, costeo, notas, facturas, todo lo que toca dinero.
+ *   2. LA VENTA NO DECIA QUE YA ESTABA. guardarVenta_ reconocia la repetida y no la duplicaba, pero
+ *      devolvia el mismo numero de nota que una nueva. Ahora la respuesta trae 'repetida', y la
+ *      pantalla dice "Esta venta YA estaba registrada como nota X. NO se duplico."
+ *
+ * VERSION anterior: v26 (2026-09-22) | integridad: abono, apartado y comision del aliado
  *
  * v26 — tres fallos que mueven dinero, los tres confirmados en produccion el 22/09:
  *   1. ABONO IDEMPOTENTE. guardarAbono_ escribia el idAbono en la hoja y NUNCA lo buscaba. Con mala
@@ -443,7 +456,7 @@ function claveDePost_(data) {
 // OJO: esta constante es lo que ven las apps en el menu. Se habia quedado en v21.4 mientras el
 // encabezado ya decia v24, asi que el sello de version — que existe justamente para saber si lo
 // desplegado es lo que crees — estaba mintiendo. Cada version nueva se cambia AQUI tambien.
-var VERSION_SCRIPT = 'v26';
+var VERSION_SCRIPT = 'v26.1';
 
 function json_(obj) {
   // La version viaja en cada respuesta: es la forma rapida de saber si lo desplegado es lo que crees
@@ -532,6 +545,7 @@ function rutearGet_(e) {
       if (idVenta) marcarNota_(ss, idVenta, next);
       return json_({ok:true, num:next});
     } finally {
+      SpreadsheetApp.flush();   // v26.1: vaciar ANTES de soltar el candado
       lock.releaseLock();
     }
   }
@@ -545,6 +559,7 @@ function rutearGet_(e) {
       SpreadsheetApp.flush();
       return json_({ok:true, num:nextC});
     } finally {
+      SpreadsheetApp.flush();   // v26.1: vaciar ANTES de soltar el candado
       lockC.releaseLock();
     }
   }
@@ -584,6 +599,7 @@ function rutearGet_(e) {
       SpreadsheetApp.flush();
       return json_({ok:true, factura:nf, control:nc, restantes:hasta ? hasta - nc : 0});
     } finally {
+      SpreadsheetApp.flush();   // v26.1: vaciar ANTES de soltar el candado
       lockF.releaseLock();
     }
   }
@@ -652,7 +668,7 @@ function doPost(e) {
     if (data.tipo === 'login') {
       var lockL = LockService.getScriptLock(); lockL.waitLock(10000);
       try { return json_(login_(ss, data)); }
-      finally { lockL.releaseLock(); }
+      finally { SpreadsheetApp.flush(); lockL.releaseLock(); }
     }
 
     // ---- BLOQUE D (v21): identidad y rol antes de tocar nada ----
@@ -740,7 +756,7 @@ function doPost(e) {
     if (data.tipo === 'costeo') {
       var lockK = LockService.getScriptLock(); lockK.waitLock(20000);
       try { return json_(costearCompra_(ss, data)); }
-      finally { lockK.releaseLock(); }
+      finally { SpreadsheetApp.flush(); lockK.releaseLock(); }
     }
     if (data.tipo === 'cxp_abono') {
       movCxp_(ss, data, 'ABONO');
@@ -752,45 +768,45 @@ function doPost(e) {
     if (data.tipo === 'tarea_marcar') {
       var lockT = LockService.getScriptLock(); lockT.waitLock(10000);
       try { return json_(marcarTarea_(ss, data, quien)); }
-      finally { lockT.releaseLock(); }
+      finally { SpreadsheetApp.flush(); lockT.releaseLock(); }
     }
     if (data.tipo === 'tarea_propia') {
       var lockT2 = LockService.getScriptLock(); lockT2.waitLock(10000);
       try { return json_(tareaPropia_(ss, data, quien)); }
-      finally { lockT2.releaseLock(); }
+      finally { SpreadsheetApp.flush(); lockT2.releaseLock(); }
     }
     if (data.tipo === 'tarea_def') {
       var lockT3 = LockService.getScriptLock(); lockT3.waitLock(10000);
       try { return json_(guardarTareaDef_(ss, data, quien)); }
-      finally { lockT3.releaseLock(); }
+      finally { SpreadsheetApp.flush(); lockT3.releaseLock(); }
     }
 
     // ---- CAMBIO DE PRECIO (v23) ----
     if (data.tipo === 'precio') {
       var lockP = LockService.getScriptLock(); lockP.waitLock(10000);
       try { return json_(cambiarPrecio_(ss, data, quien)); }
-      finally { lockP.releaseLock(); }
+      finally { SpreadsheetApp.flush(); lockP.releaseLock(); }
     }
 
     // ---- LIQUIDACION DE UN ALIADO (v22) ----
     if (data.tipo === 'liquidar_aliado') {
       var lockA = LockService.getScriptLock(); lockA.waitLock(15000);
       try { return json_(liquidarAliado_(ss, data)); }
-      finally { lockA.releaseLock(); }
+      finally { SpreadsheetApp.flush(); lockA.releaseLock(); }
     }
 
     // ---- FACTURA ASOCIADA A UNA VENTA (v20) ----
     if (data.tipo === 'factura_venta') {
       var lockFv = LockService.getScriptLock(); lockFv.waitLock(10000);
       try { return json_(guardarFacturaVenta_(ss, data)); }
-      finally { lockFv.releaseLock(); }
+      finally { SpreadsheetApp.flush(); lockFv.releaseLock(); }
     }
 
     // ---- CONTEO DE INVENTARIO (v17) ----
     if (data.tipo === 'conteo') {
       var lockC2 = LockService.getScriptLock(); lockC2.waitLock(10000);
       try { return json_(guardarConteo_(ss, data)); }
-      finally { lockC2.releaseLock(); }
+      finally { SpreadsheetApp.flush(); lockC2.releaseLock(); }
     }
     if (data.tipo === 'conteo_revision') {
       resolverConteo_(ss, data);
@@ -801,7 +817,7 @@ function doPost(e) {
     if (data.tipo === 'devolucion') {
       var lockD = LockService.getScriptLock(); lockD.waitLock(10000);
       try { return json_(registrarDevolucion_(ss, data)); }
-      finally { lockD.releaseLock(); }
+      finally { SpreadsheetApp.flush(); lockD.releaseLock(); }
     }
 
     // ---- APARTADOS / CONTRA PEDIDO (v14) ----
@@ -814,6 +830,7 @@ function doPost(e) {
         if (data.tipo === 'apartado_entregar')   return json_(entregarApartado_(ss, data));
         return json_(cerrarApartado_(ss, data));
       } finally {
+        SpreadsheetApp.flush();   // v26.1: vaciar ANTES de soltar el candado
         lockAp.releaseLock();
       }
     }
@@ -901,6 +918,7 @@ function doPost(e) {
         var resC = guardarCompra_(ss, data);
         return json_({ok:true,tipo:'compra',idCompra:data.idCompra||'',nuevos:resC.nuevos});
       } finally {
+        SpreadsheetApp.flush();   // v26.1: vaciar ANTES de soltar el candado
         lockP.releaseLock();
       }
     }
@@ -931,6 +949,7 @@ function doPost(e) {
         return json_({ok:true, tipo:'abono', saldoUSD:r.saldoUSD, repetido:!!r.repetido,
                       comisionesLiberadas:r.comisionesLiberadas || 0});
       } finally {
+        SpreadsheetApp.flush();   // v26.1: vaciar ANTES de soltar el candado
         lockA.releaseLock();
       }
     }
@@ -939,13 +958,22 @@ function doPost(e) {
     if (data.vendedor !== undefined) {
       var lock = LockService.getScriptLock();
       lock.waitLock(10000);
-      var numNota = 0;
+      var numNota = 0, repetida = false;
       try {
-        numNota = guardarVenta_(ss, data);
+        // v26.1 — Se mira ANTES si ya existe, para poder DECIRLO. guardarVenta_ igual lo detecta y no
+        // duplica, pero devolvia el mismo numero de nota que una venta nueva: la pantalla no podia
+        // distinguir "quedo registrada" de "ya estaba", y a Reinaldo le daba lo mismo reintentar.
+        var previa = ventaPorId_(ss, data.idVenta);
+        if (previa) { numNota = previa.numNota; repetida = true; }
+        else numNota = guardarVenta_(ss, data);
       } finally {
+        // v26.1 — EL CANDADO NO VACIA LA HOJA. Apps Script acumula las escrituras y las manda al final;
+        // si se suelta el candado antes, el siguiente intento puede buscar este ID, no encontrarlo
+        // todavia, y escribir la venta otra vez. Google lo pide explicitamente para LockService.
+        SpreadsheetApp.flush();
         lock.releaseLock();
       }
-      return json_({ok:true,tipo:'venta',idVenta:data.idVenta||'',numNota:numNota});
+      return json_({ok:true, tipo:'venta', idVenta:data.idVenta||'', numNota:numNota, repetida:repetida});
     }
 
     return json_({ok:false,error:'tipo desconocido'});
@@ -2491,6 +2519,7 @@ function repararComisionesCobradas() {
     try { SpreadsheetApp.getUi().alert(msg); } catch (e) {}   // sin UI (ejecucion directa) no estorba
     return msg;
   } finally {
+    SpreadsheetApp.flush();   // v26.1: vaciar ANTES de soltar el candado
     lock.releaseLock();
   }
 }
