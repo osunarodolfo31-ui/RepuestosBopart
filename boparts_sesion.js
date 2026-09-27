@@ -132,7 +132,10 @@ function hacerLogin() {
   if (!clave)   { err.textContent = 'Escribe tu PIN'; pin.focus(); return; }
   btn.disabled = true; btn.textContent = 'Entrando...';
   fetch(SCRIPT_URL_SESION, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'},
-                            body:JSON.stringify({tipo:'login', usuario:usuario, pin:clave})})
+                            body:JSON.stringify({tipo:'login', usuario:usuario, pin:clave,
+                                                 // v27: cada dispositivo tiene su propia sesion; esto solo
+                                                 // sirve para reconocerla en la hoja SESIONES
+                                                 dispositivo:String(navigator.userAgent || '').slice(0, 120)})})
     .then(function(r) { return r.text(); })
     .then(function(t) {
       var d; try { d = JSON.parse(t); } catch (e) { throw new Error('El script no respondio bien'); }
@@ -202,13 +205,30 @@ function revisarSesion(alTener) {
   };
 })();
 
+/* v27 — URL DE FOTO SEGURA (auditoria #8). Una URL guardada en la hoja se pegaba tal cual dentro de
+   src="...": con una comilla adentro podia salirse del atributo y meter codigo en la pantalla. Esta
+   funcion deja pasar solo https sin comillas, espacios ni signos < > ` y devuelve '' con cualquier otra
+   cosa. Las previsualizaciones locales (blob: y data:image) tambien pasan: nacen en el telefono. */
+function urlSegura(u) {
+  var t = String(u == null ? '' : u).trim();
+  if (/^https:\/\/[^\s"'<>`]+$/.test(t)) return t;
+  if (/^blob:https:\/\/[^\s"'<>`]+$/.test(t)) return t;
+  if (/^data:image\/(png|jpe?g|webp|gif);base64,[A-Za-z0-9+\/=]+$/.test(t)) return t;
+  return '';
+}
+// Escapa texto para meterlo en HTML, incluidas las comillas (sirve tambien dentro de atributos).
+function escAtributo(s) {
+  return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 /* ===================== ACTUALIZACION (2026-09-22) — identico en todas las pantallas =====================
    El telefono guarda la pantalla vieja y la sigue mostrando aunque ya haya una nueva en GitHub.
    Hasta hoy eso se arreglaba borrando la cache a mano. Ahora cada pantalla sabe con que build salio,
    version.json dice cual es la buena, y si no coinciden aparece una barra con un boton que borra la
    cache y recarga. Nadie tiene que saber que es "borrar cache".
    Ademas, todo enlace entre pantallas lleva ?v=BUILD: moverse por el menu ya no trae copias viejas. */
-var BUILD = '2026-09-23.1';
+var BUILD = '2026-09-24.1';
 (function() {
   var intentos = 0;
   function sellarEnlaces() {

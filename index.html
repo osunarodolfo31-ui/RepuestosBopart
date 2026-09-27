@@ -1,7 +1,11 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — index.html
-  VERSION: v11.5 (2026-09-22) | build 2026-09-23.1 |
+  VERSION: v11.6 (2026-09-24) | build 2026-09-24.1 | requiere Apps Script v27
+  v11.6: EQUIVALENCIAS llega por el script (action=equivalencias), con sesion: ya no queda ninguna hoja
+  publicada en internet. Auditoria #8: las fotos pasan por urlSegura() antes de pintarse y escHtml escapa
+  tambien comillas; una URL con comillas ya no puede meter codigo en la ficha.
+  VERSION anterior: v11.5 (2026-09-22) | build 2026-09-23.1 |
   v11.5: sesion, login y aviso de version salen del HTML y viven en boparts_sesion.js, un solo archivo
   para las 12 pantallas. Estaban copiados byte a byte doce veces; de ahi salio el leerJSON duplicado.
   REQUIERE subir boparts_sesion.js junto a este archivo.
@@ -301,13 +305,13 @@
   </div>
 </div>
 
-<script src="boparts_sesion.js?v=2026-09-23.1"></script>
+<script src="boparts_sesion.js?v=2026-09-24.1"></script>
 <script>
 
 
 // v10: la lista viene del script, no del CSV publicado. Asi LISTA DE PRODUCTOS puede dejar de estar publicada.
 const SCRIPT_URL_SESION = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
-const APP_VERSION = 'v11.5';
+const APP_VERSION = 'v11.6';
 var VER_SCRIPT = '?';
 /* v11.3: el sello mentia de otra forma. La version salia tambien de la LISTA GUARDADA en el telefono,
    que puede ser de hace dias, asi que la pantalla podia decir "script v21.4" con un v25 desplegado.
@@ -320,7 +324,8 @@ function sellarVersion(d) {
   return d;
 }
 const PROD_URL = SCRIPT_URL_SESION + '?action=productos';
-const EQUIV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRaAnGd-Bfaxo3LjUiGeV8p0F2weaKqHGwJ0hWibSMj02-h7dRAQPDMmGL5B8-XQg66Yjd3zgOAaz8X/pub?gid=1078159524&single=true&output=csv';
+// v11.6: EQUIVALENCIAS ya no se lee de un CSV publicado: viene del script, con sesion. Ninguna hoja queda publica.
+const EQUIV_URL = SCRIPT_URL_SESION + '?action=equivalencias';
 
 let PRODUCTS = [];
 let EQUIVALENCIAS = []; // {codigoExterno, miCodigo}
@@ -489,12 +494,13 @@ function loadData(force) {
       });
   }
 
-  conTiempo(fetch(EQUIV_URL + '&t=' + Date.now()), 12000)
+  // Si el script no responde, se quedan las equivalencias guardadas en el telefono: no se borra nada.
+  conTiempo(fetch(conToken(EQUIV_URL) + '&t=' + Date.now()), 25000)
     .then(function(r) { return r.ok ? r.text() : ''; })
     .then(function(equivText) {
       if (!equivText || equivText === cEquiv) return;
+      if (!cargarEquivalencias(equivText)) return;   // respuesta rara: no se guarda en cache
       guardarCache(EQUIV_KEY, equivText);
-      cargarEquivalencias(equivText);
     })
     .catch(function() {});
 }
@@ -508,9 +514,21 @@ function conTiempo(promesa, ms) {
 }
 function isValidCSV(t) { return typeof t === 'string' && t.length > 50 && t.indexOf('<html') < 0 && t.indexOf('<!DOCTYPE') < 0; }
 
+// Acepta la respuesta JSON del script (v11.6) o el CSV viejo que pueda quedar en la cache del telefono.
+// Devuelve true si entendio la respuesta; si no, deja las equivalencias que ya habia.
 function cargarEquivalencias(equivText) {
-  if (!equivText) return;
-  var erows = parseCSV(equivText);
+  if (!equivText) return false;
+  var erows;
+  var t = String(equivText).replace(/^\uFEFF/, '').trim();
+  if (t.charAt(0) === '{') {
+    var d; try { d = JSON.parse(t); } catch (e) { return false; }
+    if (!d || !d.ok || !Array.isArray(d.filas)) return false;
+    erows = d.filas.map(function(f) { return f.map(function(v) { return v == null ? '' : String(v); }); });
+  } else if (t.indexOf('<') === 0) {
+    return false;                                  // pagina de error de Google, no datos
+  } else {
+    erows = parseCSV(t);
+  }
   EQUIVALENCIAS = [];
   for (var i = 1; i < erows.length; i++) {
     var r = erows[i];
@@ -518,6 +536,7 @@ function cargarEquivalencias(equivText) {
       EQUIVALENCIAS.push({ codigoExterno: r[0].trim().toUpperCase(), miCodigo: r[1].trim().toUpperCase(), aplicacion: (r[3] || '').trim() });
     }
   }
+  return true;
 }
 
 // v10: el script responde JSON; el CSV se sigue entendiendo por si queda cache vieja en algun telefono.
@@ -633,7 +652,7 @@ function search() {
 
 let lastFiltered = [];
 
-function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }
+function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;') }
 function highlight(text, terms) {
   let s = escHtml(text);
   terms.forEach(t => {
@@ -674,7 +693,7 @@ function avisoViejo(msg) {
 }
 
 function showError(msg) {
-  document.getElementById('list').innerHTML = `<div class="state-box"><div class="icon">⚠️</div><p>No se pudo cargar la lista.<br><small>${msg}</small><br><small style="opacity:0.6">app ${APP_VERSION} · script ${VER_SCRIPT}</small></p><button class="retry" onclick="loadData(true)">Reintentar</button></div>`;
+  document.getElementById('list').innerHTML = `<div class="state-box"><div class="icon">⚠️</div><p>No se pudo cargar la lista.<br><small>${escHtml(msg)}</small><br><small style="opacity:0.6">app ${APP_VERSION} · script ${VER_SCRIPT}</small></p><button class="retry" onclick="loadData(true)">Reintentar</button></div>`;
 }
 
 function render(filtered) {
@@ -718,7 +737,7 @@ function openDetail(idx) {
   const p = PRODUCTS[idx];
   if (!p) return;
   detalleAbierto = idx;
-  const imgs = [p.imagen, p.imagen2, p.imagen3].filter(Boolean);
+  const imgs = [p.imagen, p.imagen2, p.imagen3].map(urlSegura).filter(Boolean);   // v11.6: auditoria #8
   let imgHtml = '';
   if (imgs.length > 0) {
     const slides = imgs.map((url, i) =>

@@ -1,7 +1,10 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_gerencia.html
-  VERSION: v3.1 (2026-09-22) | build 2026-09-23.1 |
+  VERSION: v3.2 (2026-09-24) | build 2026-09-24.1 | requiere Apps Script v27
+  v3.2: al liquidar a un aliado se pide DE QUE CUENTA sale el pago (para el flujo de caja). La liquidacion
+  ya no deja pagar si las comisiones suman cero o menos por devoluciones.
+  VERSION anterior: v3.1 (2026-09-22) | build 2026-09-23.1 |
   v3.1: VENTAS POR CATEGORIA, antes del detalle. Unidades, notas, utilidad y margen por categoria,
   y sobre todo el contraste % de ventas vs % de utilidad: lo que pesa en el mostrador y no en la
   ganancia sale marcado. La categoria no esta en VENTAS_DETALLE, asi que se trae LISTA DE PRODUCTOS
@@ -493,7 +496,7 @@ select option{background:#1E1E1E;color:var(--ink)}
   </div>
 </div>
 
-<script src="boparts_sesion.js?v=2026-09-23.1"></script>
+<script src="boparts_sesion.js?v=2026-09-24.1"></script>
 <script>
 
 
@@ -506,7 +509,7 @@ function sellarVersion(d) {
   if (t) t.textContent = 'app ' + APP_VERSION + ' \u00b7 script ' + VER_SCRIPT;
   return d;
 }
-var APP_VERSION = 'v3.1';
+var APP_VERSION = 'v3.2';
 var TASA = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
 var periodo = 'hoy', DATA = null;
 
@@ -1369,7 +1372,8 @@ function liquidar(nombre) {
   if (!quien) return;
   var metodo = '';
   if (a.neto > 0.009) {
-    metodo = prompt('Como le pagas los ' + usd(a.neto) + '?\n(Pago Movil, Efectivo USD, Transferencia...)', 'Pago Movil');
+    // v3.2: se pide la CUENTA de donde sale, para el flujo de caja (Efectivo USD, Banesco, Zelle...)
+    metodo = prompt('De que cuenta salen los ' + usd(a.neto) + '?\n(Efectivo USD, Efectivo Bs, Banesco, Bancamiga, Zelle, Binance...)', 'Banesco');
     if (metodo === null) return;
   }
   var resumen = a.nombre + '\n\nComisiones: ' + usd(a.comisiones) +

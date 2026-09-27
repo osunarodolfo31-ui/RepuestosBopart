@@ -1,5 +1,57 @@
 /**
  * Repuesto BoParts — Code.gs
+ * VERSION: v27 (2026-09-24) | seguridad, disponible, anular venta, cuentas para el flujo de caja
+ *
+ * v27 — lo que cambia, en el orden en que importa:
+ *   SEGURIDAD (auditoria #5, #6, #7, #8, #10, #11)
+ *   - El login falla CERRADO: solo un NO escrito a mano en CONFIG!B15 lo apaga. Vacio, error o texto raro
+ *     = login activo. Antes, si CONFIG no se leia, todos entraban como socio sin clave.
+ *   - Una sesion por DISPOSITIVO (hoja SESIONES): Rodolfo y Reinaldo ya no se sacan entre si. Las sesiones
+ *     abiertas antes de v27 siguen valiendo hasta vencer. Cambiar el PIN cierra todas las de esa persona.
+ *   - 5 PIN errados bloquean ese usuario 15 minutos.
+ *   - stock y nota ya no entregan el costo a un vendedor.
+ *   - La venta rechaza lista vacia, cantidades/precios invalidos, total negativo, credito mayor que el total
+ *     y un total que no cuadra con sus productos (fuera de 50%-125%). El costo SIEMPRE sale de la hoja.
+ *     El apartado congela el costo de la hoja; la devolucion toma precio y costo de la nota original.
+ *   - Solo se guardan fotos de Cloudinary sin comillas ni signos raros.
+ *   - El autor de abonos, apartados, pagos a proveedor, liquidaciones y tasa lo pone el servidor.
+ *   INVENTARIO
+ *   - action=stock trae APARTADO y DISPONIBLE (stock - apartado). Reservan los apartados abiertos o listos
+ *     sin vencer, y los contra pedido solo cuando ya llegaron. Sin conteo, disponible = null.
+ *   - Vender mas de lo disponible NO se bloquea: la venta sale con 'avisos' y queda en SOBREVENTAS.
+ *   DINERO
+ *   - La deuda de un cliente se agrupa por CEDULA, no por nombre ("TALLER DIESEL" y "Taller Diesel Luis"
+ *     eran dos cuentas). La deuda de un aliado en Liquidacion tambien se busca por cedula.
+ *   - tipo=anular_venta (solo socios): quita venta, detalle, deuda y comision juntos y deja copia en
+ *     VENTAS_ANULADAS. No anula ventas con factura, con devoluciones, ni entregas de apartado.
+ *   - Devolucion: baja la comision del aliado (fila negativa) y no deja "devolver" en pago movil una nota
+ *     a credito que el cliente aun debe. Liquidacion no paga si las comisiones suman cero o menos.
+ *   - Gasto con candado y sin duplicar (por ID_GASTO). Costeo recuperable: COSTEADA se marca al final y
+ *     la deuda con el proveedor no se duplica en un reintento (auditoria #4).
+ *   FLUJO DE CAJA (captura desde el 1/10; el reporte viene despues)
+ *   - Hoja CUENTAS (Efectivo USD, Efectivo Bs, Banesco, Bancamiga, Bancrecer, Bancrecer Empresarial, Zelle,
+ *     Binance) y action=cuentas. Hoja MOV_CUENTAS y tipo=mov_cuenta: saldo inicial, traspasos y cambios de
+ *     moneda, ajustes de arqueo, retiros/aportes/reembolsos de socios.
+ *   - Compra de contado: la cuenta de donde salio, o el socio que la pago (queda como prestamo).
+ *   - action=equivalencias: la ultima hoja publicada ya se puede despublicar.
+ *   CONCILIACION
+ *   - Compara solo los renglones originales con la venta (devoluciones y cambios aparte), revisa cambios
+ *     con diferencia sin cobrar, el numero de nota en las tres hojas, y las fechas con dia y mes invertidos
+ *     del historico. repararFechasInvertidas() las corrige de una vez desde el editor.
+ *
+ * VERSION anterior: v26.2 (2026-09-23) | conciliacion de solo lectura
+ *
+ * v26.2 — conciliar(): se ejecuta desde el editor y deja el resultado en la hoja CONCILIACION. No modifica
+ *   ninguna hoja de datos (probado contra el libro real: cero escrituras fuera de CONCILIACION). No llama
+ *   a estadoCxc_ porque esa funcion ESCRIBE en CXC_MOV (completarProductos_): calcula el estado de las
+ *   notas por su cuenta con la misma regla. Revisa 11 controles: ID repetido, duplicado con ID distinto
+ *   (a menos de 30 min), venta partida en dos IDs, venta sin detalle, detalle sin venta, renglon repetido,
+ *   detalle que no cuadra, notas repetidas y faltantes, CXC (deuda de venta inexistente, credito sin cargo,
+ *   cargo distinto, cargo doble), abonos repetidos, comisiones (aliado o venta inexistente, congelada con
+ *   la nota pagada), compras a credito sin CXP y facturas numeradas sin registro.
+ *   Tambien: el aviso de repararComisionesCobradas() sale del candado (en v26.1 lo retenia mientras
+ *   esperaba que alguien tocara Aceptar, y las ventas desde los telefonos fallaban).
+ *
  * VERSION: v26.1 (2026-09-23) | una venta repetida ya no se escribe dos veces
  *
  * v26.1 — El 23/09 se duplico otra venta (unos aceites Xpeso): salio un error y Reinaldo registro
@@ -268,6 +320,8 @@ var COL_NOTA    = 25;   // Y
 var SH_USUARIOS = 'USUARIOS';
 var SAL_PIN     = 'BoParts.2026.';        // sal del hash: cambiarla invalida todos los PIN a la vez
 var HORAS_SESION = 12;
+var SH_SESIONES = 'SESIONES';
+var MAX_INTENTOS = 5, MIN_BLOQUEO = 15;
 
 // USUARIOS: A NOMBRE, B ROL, C ACTIVO, D PIN_NUEVO, E PIN_HASH, F TOKEN, G TOKEN_VENCE, H ULTIMO_ACCESO
 var U_NOMBRE = 1, U_ROL = 2, U_ACTIVO = 3, U_PIN_NUEVO = 4, U_HASH = 5, U_TOKEN = 6, U_VENCE = 7, U_ULT = 8;
@@ -326,7 +380,7 @@ function listaAliados_(ss) {
 var PERMISOS_GET = {
   config:'VENDEDOR', nextNota:'VENDEDOR', nextCot:'VENDEDOR', nextFactura:'VENDEDOR', nota:'VENDEDOR',
   apartados:'VENDEDOR', proveedores:'VENDEDOR', stock:'VENDEDOR', conteos:'VENDEDOR', clientes:'VENDEDOR',
-  cxc:'VENDEDOR', productos:'VENDEDOR', catalogo:'VENDEDOR', metodos:'VENDEDOR',
+  cxc:'VENDEDOR', productos:'VENDEDOR', catalogo:'VENDEDOR', metodos:'VENDEDOR', equivalencias:'VENDEDOR', cuentas:'VENDEDOR',
   tareas:'VENDEDOR',
   producto:'SOCIO',
   ventas:'SOCIO', socios:'SOCIO', cxp:'SOCIO', cliente_stats:'SOCIO', compras:'SOCIO', diag:'SOCIO',
@@ -338,14 +392,18 @@ var PERMISOS_POST = {
   factura_venta:'VENDEDOR', apartado:'VENDEDOR', apartado_abono:'VENDEDOR', apartado_entregar:'VENDEDOR',
   tarea_marcar:'VENDEDOR', tarea_propia:'VENDEDOR',
   costeo:'SOCIO', cxp_abono:'SOCIO', conteo_revision:'SOCIO', devolucion:'SOCIO', apartado_cerrar:'SOCIO',
-  tasa:'SOCIO', socio:'SOCIO', liquidar_aliado:'SOCIO', precio:'SOCIO', tarea_def:'SOCIO'
+  tasa:'SOCIO', socio:'SOCIO', liquidar_aliado:'SOCIO', precio:'SOCIO', tarea_def:'SOCIO',
+  anular_venta:'SOCIO', mov_cuenta:'SOCIO'
 };
 
+// v27 — FALLA CERRADO (auditoria #5). Antes, si CONFIG no se podia leer o B15 traia cualquier cosa
+// distinta de SI, el login se apagaba y TODO el mundo entraba como socio sin clave. Ahora el login
+// solo se apaga si alguien escribe NO a mano en CONFIG!B15. Vacio, error o texto raro = login activo.
 function authActiva_(ss) {
   try {
     var v = String(ss.getSheetByName('CONFIG').getRange('B15').getValue() || '').trim().toUpperCase();
-    return v === 'SI' || v === 'SÍ' || v === 'TRUE' || v === '1';
-  } catch (err) { return false; }
+    return v !== 'NO';
+  } catch (err) { return true; }
 }
 
 function hojaUsuarios_(ss) {
@@ -360,6 +418,40 @@ function hojaUsuarios_(ss) {
     sh.getRange('D:E').setNumberFormat('@');
   }
   return sh;
+}
+
+// v27 — UNA SESION POR DISPOSITIVO (auditoria #11). Antes cada usuario tenia UN solo token en USUARIOS:
+// entrar desde el telefono sacaba la computadora, y viceversa. Ahora cada inicio de sesion es una fila
+// de SESIONES. USUARIOS!F (TOKEN) queda solo para las sesiones abiertas antes de v27, que siguen valiendo
+// hasta que venzan: el dia del despliegue nadie tiene que volver a entrar.
+// SESIONES: A TOKEN, B NOMBRE, C CREADA, D VENCE, E DISPOSITIVO
+function hojaSesiones_(ss) {
+  return hojaAp_(ss, SH_SESIONES, ['TOKEN','NOMBRE','CREADA','VENCE','DISPOSITIVO']);
+}
+
+// Cierra todas las sesiones de un usuario (cambio de PIN). Devuelve cuantas cerro.
+function cerrarSesionesDe_(ss, nombre) {
+  var sh = ss.getSheetByName(SH_SESIONES);
+  if (!sh || sh.getLastRow() < 2) return 0;
+  var vals = sh.getRange(2, 1, sh.getLastRow() - 1, 2).getValues();
+  var cache = CacheService.getScriptCache(), n = 0;
+  for (var i = vals.length - 1; i >= 0; i--) {
+    if (String(vals[i][1] || '').trim().toUpperCase() !== String(nombre || '').trim().toUpperCase()) continue;
+    cache.remove('ses_' + String(vals[i][0]));
+    sh.deleteRow(i + 2); n++;
+  }
+  return n;
+}
+
+// Borra las sesiones vencidas. Se llama al iniciar sesion, que es poco frecuente: la hoja no crece sin fin.
+function limpiarSesiones_(ss) {
+  var sh = ss.getSheetByName(SH_SESIONES);
+  if (!sh || sh.getLastRow() < 2) return;
+  var vals = sh.getRange(2, 4, sh.getLastRow() - 1, 1).getValues(), ahora = Date.now();
+  for (var i = vals.length - 1; i >= 0; i--) {
+    var v = vals[i][0];
+    if (!esFecha_(v) || v.getTime() < ahora) sh.deleteRow(i + 2);
+  }
 }
 
 function hashPin_(pin) {
@@ -378,17 +470,29 @@ function sincronizarPines_(ss) {
     if (!nuevo) continue;
     sh.getRange(i + 2, U_HASH).setValue(hashPin_(nuevo));
     sh.getRange(i + 2, U_PIN_NUEVO).setValue('');
+    var cachePin = CacheService.getScriptCache();
+    if (String(vals[i][U_TOKEN - 1] || '').trim()) cachePin.remove('ses_' + String(vals[i][U_TOKEN - 1]).trim());
+    cachePin.remove('fallos_' + String(vals[i][U_NOMBRE - 1] || '').trim().toUpperCase());   // PIN nuevo = desbloqueado
     sh.getRange(i + 2, U_TOKEN).setValue('');       // cambiar el PIN cierra las sesiones abiertas
     sh.getRange(i + 2, U_VENCE).setValue('');
+    cerrarSesionesDe_(ss, vals[i][U_NOMBRE - 1]);    // ...en todos los dispositivos
   }
   return sh;
 }
 
+// v27 — LIMITE DE INTENTOS (auditoria #11). 5 PIN errados seguidos bloquean ESE usuario 15 minutos.
+// Se cuenta en la cache del script, no en la hoja: no deja rastro del PIN y no hace crecer ninguna hoja.
+// Un PIN correcto borra el contador. Para desbloquear antes: esperar, o cambiar el PIN desde la hoja.
 function login_(ss, d) {
   var sh = sincronizarPines_(ss);
   var usuario = String(d.usuario || '').trim().toUpperCase();
   var pin = String(d.pin || '').trim();
   if (!usuario || !pin) throw new Error('Falta usuario o PIN');
+  var cache = CacheService.getScriptCache(), claveF = 'fallos_' + usuario;
+  var fallos = Number(cache.get(claveF)) || 0;
+  if (fallos >= MAX_INTENTOS) {
+    throw new Error('Demasiados PIN errados. Ese usuario queda bloqueado ' + MIN_BLOQUEO + ' minutos.');
+  }
   if (sh.getLastRow() < 2) throw new Error('No hay usuarios configurados');
   var n = sh.getLastRow() - 1;
   var vals = sh.getRange(2, 1, n, 8).getValues();
@@ -397,13 +501,22 @@ function login_(ss, d) {
     if (String(vals[i][U_ACTIVO - 1] || '').trim().toUpperCase() === 'NO') throw new Error('Usuario desactivado');
     var hash = String(vals[i][U_HASH - 1] || '').trim();
     if (!hash) throw new Error('Ese usuario todavia no tiene PIN. Escribelo en la columna PIN_NUEVO de la hoja USUARIOS.');
-    if (hash !== hashPin_(pin)) throw new Error('PIN incorrecto');
+    if (hash !== hashPin_(pin)) {
+      fallos++;
+      cache.put(claveF, String(fallos), MIN_BLOQUEO * 60);
+      var quedan = MAX_INTENTOS - fallos;
+      throw new Error(quedan > 0 ? 'PIN incorrecto. Te quedan ' + quedan + ' intento(s).'
+                                 : 'PIN incorrecto. Ese usuario queda bloqueado ' + MIN_BLOQUEO + ' minutos.');
+    }
+    cache.remove(claveF);
     var token = Utilities.getUuid().replace(/-/g, '');
-    var vence = new Date(Date.now() + HORAS_SESION * 3600 * 1000);
-    sh.getRange(i + 2, U_TOKEN).setValue(token);
-    sh.getRange(i + 2, U_VENCE).setValue(vence);
-    sh.getRange(i + 2, U_ULT).setValue(new Date());
-    return {ok:true, tipo:'login', token:token, nombre:String(vals[i][U_NOMBRE - 1]),
+    var ahora = new Date();
+    var vence = new Date(ahora.getTime() + HORAS_SESION * 3600 * 1000);
+    var nombre = String(vals[i][U_NOMBRE - 1]);
+    limpiarSesiones_(ss);
+    hojaSesiones_(ss).appendRow([token, nombre, ahora, vence, String(d.dispositivo || '').slice(0, 120)]);
+    sh.getRange(i + 2, U_ULT).setValue(ahora);
+    return {ok:true, tipo:'login', token:token, nombre:nombre,
             rol:String(vals[i][U_ROL - 1] || 'VENDEDOR').toUpperCase(),
             vence:Utilities.formatDate(vence, TZ_VE, 'yyyy-MM-dd HH:mm')};
   }
@@ -411,26 +524,63 @@ function login_(ss, d) {
 }
 
 // Devuelve {nombre, rol} o lanza SESION (token invalido/vencido) o PERMISO (rol insuficiente).
-// Con el interruptor en NO devuelve un usuario generico y nunca bloquea: la operacion sigue igual que en v20.
+// Solo con CONFIG!B15 = NO devuelve un usuario generico (modo de emergencia escrito a mano).
+// v27: busca el token en SESIONES (y, por compatibilidad, en USUARIOS). El rol y ACTIVO se leen SIEMPRE
+// de USUARIOS, asi que desactivar a alguien o cambiarle el rol surte efecto en la siguiente llamada.
+// La cache solo guarda token -> nombre + vencimiento (10 min), para no leer SESIONES en cada consulta.
 function auth_(ss, token, rolMin) {
   if (!authActiva_(ss)) return {nombre:'', rol:'SOCIO', libre:true};
   token = String(token || '').trim();
   if (!token) throw new Error('SESION');
   var sh = hojaUsuarios_(ss);
   if (sh.getLastRow() < 2) throw new Error('SESION');
-  var n = sh.getLastRow() - 1;
-  var vals = sh.getRange(2, 1, n, 8).getValues();
-  for (var i = 0; i < n; i++) {
-    if (String(vals[i][U_TOKEN - 1] || '').trim() !== token) continue;
+  var vals = sh.getRange(2, 1, sh.getLastRow() - 1, 8).getValues();
+
+  var nombre = '', venceMs = 0;
+  var cache = CacheService.getScriptCache();
+  var enCache = cache.get('ses_' + token);
+  if (enCache) {
+    var p = enCache.split('|'); nombre = p[0]; venceMs = Number(p[1]) || 0;
+  } else {
+    var shS = ss.getSheetByName(SH_SESIONES);
+    if (shS && shS.getLastRow() >= 2) {
+      var sv = shS.getRange(2, 1, shS.getLastRow() - 1, 4).getValues();
+      for (var k = 0; k < sv.length; k++) {
+        if (String(sv[k][0] || '').trim() !== token) continue;
+        nombre = String(sv[k][1] || ''); venceMs = esFecha_(sv[k][3]) ? sv[k][3].getTime() : 0;
+        break;
+      }
+    }
+    if (!nombre) {   // sesion abierta antes de v27
+      for (var j = 0; j < vals.length; j++) {
+        if (String(vals[j][U_TOKEN - 1] || '').trim() !== token) continue;
+        nombre = String(vals[j][U_NOMBRE - 1] || ''); venceMs = esFecha_(vals[j][U_VENCE - 1]) ? vals[j][U_VENCE - 1].getTime() : 0;
+        break;
+      }
+    }
+    if (nombre && venceMs > Date.now()) cache.put('ses_' + token, nombre + '|' + venceMs, 600);
+  }
+  if (!nombre || venceMs < Date.now()) throw new Error('SESION');
+
+  for (var i = 0; i < vals.length; i++) {
+    if (String(vals[i][U_NOMBRE - 1] || '').trim().toUpperCase() !== nombre.trim().toUpperCase()) continue;
     if (String(vals[i][U_ACTIVO - 1] || '').trim().toUpperCase() === 'NO') throw new Error('SESION');
-    var v = vals[i][U_VENCE - 1];
-    if (!esFecha_(v) || v.getTime() < Date.now()) throw new Error('SESION');
     var rol = String(vals[i][U_ROL - 1] || 'VENDEDOR').toUpperCase();
     if (rolMin === 'SOCIO' && rol !== 'SOCIO') throw new Error('PERMISO');
     return {nombre:String(vals[i][U_NOMBRE - 1]), rol:rol, libre:false};
   }
-  throw new Error('SESION');
+  throw new Error('SESION');   // el usuario ya no existe en USUARIOS
 }
+
+// v27 — auditoria #8. Una URL de foto valida: https, de Cloudinary, sin comillas, espacios ni < > `.
+function urlFotoOk_(u) {
+  return /^https:\/\/res\.cloudinary\.com\/[^\s"'<>`]+$/.test(String(u || '').trim());
+}
+
+// v27 — un rechazo es un NO del servidor ANTES de escribir nada (validacion). La pantalla puede decir
+// "no se registro" sin mentir. Cualquier otro error puede haber llegado a escribir algo: ahi la pantalla
+// dice "no se pudo confirmar" y el reintento es seguro porque el ID se conserva.
+function rechazo_(msg) { var e = new Error(msg); e.rechazo = true; return e; }
 
 function rolDe_(tabla, clave) {
   var r = tabla[clave];
@@ -456,7 +606,7 @@ function claveDePost_(data) {
 // OJO: esta constante es lo que ven las apps en el menu. Se habia quedado en v21.4 mientras el
 // encabezado ya decia v24, asi que el sello de version — que existe justamente para saber si lo
 // desplegado es lo que crees — estaba mintiendo. Cada version nueva se cambia AQUI tambien.
-var VERSION_SCRIPT = 'v26.1';
+var VERSION_SCRIPT = 'v27';
 
 function json_(obj) {
   // La version viaja en cada respuesta: es la forma rapida de saber si lo desplegado es lo que crees
@@ -508,6 +658,17 @@ function rutearGet_(e) {
   // A un vendedor se le entrega sin las columnas de costo: no viajan a su telefono.
   if (accion === 'productos') {
     return json_(listaProductos_(ssA, usr.rol === 'SOCIO'));
+  }
+  // v27: EQUIVALENCIAS por el script, para despublicar la ultima hoja que seguia publica en internet.
+  if (accion === 'equivalencias') {
+    var shE = ssA.getSheetByName('EQUIVALENCIAS');
+    if (!shE) return json_({ok:false, error:'No existe la hoja EQUIVALENCIAS'});
+    var fe = shE.getLastRow() >= 1 ? shE.getRange(1, 1, shE.getLastRow(), 4).getValues()
+      .map(function(r) { return r.map(comoTexto_); }) : [];
+    return json_({ok:true, filas:fe});
+  }
+  if (accion === 'cuentas') {
+    return json_({ok:true, cuentas:listaCuentas_(ssA)});
   }
   if (accion === 'catalogo') {
     return json_(catalogoProveedores_(ssA));
@@ -579,7 +740,10 @@ function rutearGet_(e) {
     return json_(out);
   }
   if (e.parameter.action === 'nota') {
-    return json_(buscarNota_(SpreadsheetApp.getActiveSpreadsheet(), e.parameter.num));
+    var rN = buscarNota_(SpreadsheetApp.getActiveSpreadsheet(), e.parameter.num);
+    // v27 — auditoria #6: el costo no viaja al telefono de un vendedor, tampoco por aqui.
+    if (usr.rol !== 'SOCIO' && rN && rN.lineas) rN.lineas.forEach(function(l) { delete l.costo; });
+    return json_(rN);
   }
   if (e.parameter.action === 'apartados') {
     return json_({ok:true, apartados:listaApartados_(SpreadsheetApp.getActiveSpreadsheet(), e.parameter.estado || '')});
@@ -625,7 +789,10 @@ function rutearGet_(e) {
     return json_(estadoCxp_(SpreadsheetApp.getActiveSpreadsheet()));
   }
   if (e.parameter.action === 'stock') {
-    return json_(calcularStock_(SpreadsheetApp.getActiveSpreadsheet(), e.parameter.codigo || ''));
+    var rS = calcularStock_(SpreadsheetApp.getActiveSpreadsheet(), e.parameter.codigo || '');
+    // v27 — auditoria #6: stock lo usa el vendedor para contar; el costo es solo de socios.
+    if (usr.rol !== 'SOCIO' && rS && rS.productos) rS.productos.forEach(function(p) { delete p.costo; });
+    return json_(rS);
   }
   if (e.parameter.action === 'conteos') {
     return json_(conteosPendientes_(SpreadsheetApp.getActiveSpreadsheet()));
@@ -681,7 +848,11 @@ function doPost(e) {
       if (claveP === 'compra')  data.recibidoPor = quien.nombre;
       if (claveP === 'gasto')   data.registradoPor = quien.nombre;
       if (claveP === 'conteo')  data.contadoPor = quien.nombre;
-      if (claveP === 'costeo')  data.quien = quien.nombre;
+      if (claveP === 'costeo')  { data.quien = quien.nombre; data.costeadoPor = quien.nombre; }
+      // v27 — auditoria #10: el autor de estos registros tambien lo pone el servidor.
+      if (claveP === 'abono' || claveP === 'cxp_abono' || claveP === 'socio') data.registradoPor = quien.nombre;
+      if (claveP === 'apartado' || claveP === 'apartado_abono' || claveP === 'apartado_entregar') { data.vendedor = quien.nombre; data.registradoPor = quien.nombre; }
+      if (claveP === 'liquidar_aliado' || claveP === 'tasa') data.quien = quien.nombre;
     }
 
     // ---- FOTOS (v11.5: por codigo, con la fila como respaldo) ----
@@ -704,6 +875,11 @@ function doPost(e) {
           return json_({ok:false, error:'La fila ' + fila + ' es "' + enHoja + '", no coincide. Recarga la lista.'});
         }
       }
+      // v27 — auditoria #8: solo se guardan URL de Cloudinary sin comillas ni signos raros. Antes se guardaba
+      // cualquier texto, y la lista de precios lo pegaba dentro de src="...": una comilla bastaba para
+      // meter codigo en el telefono de quien abriera la ficha.
+      var malas = [data.imagen, data.imagen2, data.imagen3].filter(function(u) { return u && !urlFotoOk_(u); });
+      if (malas.length) return json_({ok:false, error:'Esa foto no viene de Cloudinary. No se guardo nada.'});
       // v24: se mira que habia ANTES para saber cuantas fotos son nuevas de verdad y cuantas reemplazan.
       // Para medir el trabajo sobre el catalogo, lo que cuenta es lo nuevo, no lo que se volvio a subir.
       var antes = sheet.getRange(fila, 12, 1, 3).getValues()[0];
@@ -737,8 +913,11 @@ function doPost(e) {
       return json_(guardarCliente_(ss, data));
     }
 
-    // ---- DEMANDA (sin cambios) ----
+    // ---- DEMANDA ----
     if (data.tipo === 'demanda') {
+      // v27: una foto que no sea de Cloudinary se descarta (auditoria #8); el resto de la demanda se guarda igual.
+      if (data.foto1 && !urlFotoOk_(data.foto1)) data.foto1 = '';
+      if (data.foto2 && !urlFotoOk_(data.foto2)) data.foto2 = '';
       const sheet = ss.getSheetByName('DEMANDA_NO_ATENDIDA');
       sheet.appendRow([
         data.fecha, data.hora, data.vendedor,
@@ -813,6 +992,20 @@ function doPost(e) {
       return json_({ok:true, tipo:'conteo_revision'});
     }
 
+    // ---- MOVIMIENTO ENTRE CUENTAS / SALDO INICIAL / SOCIOS (v27) ----
+    if (data.tipo === 'mov_cuenta') {
+      var lockMc = LockService.getScriptLock(); lockMc.waitLock(10000);
+      try { return json_(movCuenta_(ss, data, quien)); }
+      finally { SpreadsheetApp.flush(); lockMc.releaseLock(); }
+    }
+
+    // ---- ANULAR UNA VENTA COMPLETA (v27) ----
+    if (data.tipo === 'anular_venta') {
+      var lockX = LockService.getScriptLock(); lockX.waitLock(20000);
+      try { return json_(anularVenta_(ss, data, quien)); }
+      finally { SpreadsheetApp.flush(); lockX.releaseLock(); }
+    }
+
     // ---- DEVOLUCIONES Y CAMBIOS (v15) ----
     if (data.tipo === 'devolucion') {
       var lockD = LockService.getScriptLock(); lockD.waitLock(10000);
@@ -882,26 +1075,9 @@ function doPost(e) {
 
     // ---- GASTO (v11.1) ----
     if (data.tipo === 'gasto') {
-      var shG = ss.getSheetByName('GASTOS');
-      if (!shG) {
-        shG = ss.insertSheet('GASTOS');
-        shG.appendRow(['ID_GASTO','FECHA','HORA','CATEGORIA','DESCRIPCION','MONTO','MONEDA','TASA','MONTO_USD','MONTO_BS','METODO','BANCO','PAGADO_POR','REGISTRADO_POR','COMPROBANTE','NOTAS']);
-        shG.setFrozenRows(1);
-      }
-      var monto = Number(data.monto) || 0, tasaG = Number(data.tasa) || 0;
-      var usd = data.moneda === 'BS' ? (tasaG ? monto / tasaG : 0) : monto;
-      var bs  = data.moneda === 'BS' ? monto : monto * tasaG;
-      shG.appendRow([data.idGasto||'', fechaVE_(data.fecha), data.hora||'', data.categoria||'', data.descripcion||'',
-        monto, data.moneda||'USD', tasaG, Math.round(usd*100)/100, Math.round(bs), data.metodo||'', data.banco||'',
-        data.pagadoPor||'', data.registradoPor||'', data.comprobante||'', data.notas||'']);
-      formatoFecha_(shG, shG.getLastRow(), 2);
-      // Si lo pago un socio de su bolsillo, la tienda se lo debe: PRESTAMO en la cuenta corriente del socio
-      var pp = String(data.pagadoPor||'').toUpperCase();
-      if (pp === 'RODOLFO' || pp === 'JAVIER') {
-        movSocio_(ss, {fecha:data.fecha, socio:pp, tipo:'PRESTAMO', montoUSD:Math.round(usd*100)/100, moneda:data.moneda||'USD',
-                       montoPagado:monto, tasa:tasaG, origen:data.idGasto||'', descripcion:(data.categoria||'') + ' - ' + (data.descripcion||''), registradoPor:data.registradoPor||''});
-      }
-      return json_({ok:true,tipo:'gasto'});
+      var lockG = LockService.getScriptLock(); lockG.waitLock(10000);
+      try { return json_(guardarGasto_(ss, data)); }
+      finally { SpreadsheetApp.flush(); lockG.releaseLock(); }
     }
 
     // ---- PROVEEDOR NUEVO (v11) ----
@@ -956,6 +1132,8 @@ function doPost(e) {
 
     // ---- VENTA (v8) ----
     if (data.vendedor !== undefined) {
+      delete data.__costoCongelado;      // v27: esas marcas solo las pone el servidor, nunca el telefono
+      delete data.__apartadoNum; delete data.__avisos;
       var lock = LockService.getScriptLock();
       lock.waitLock(10000);
       var numNota = 0, repetida = false;
@@ -973,7 +1151,8 @@ function doPost(e) {
         SpreadsheetApp.flush();
         lock.releaseLock();
       }
-      return json_({ok:true, tipo:'venta', idVenta:data.idVenta||'', numNota:numNota, repetida:repetida});
+      return json_({ok:true, tipo:'venta', idVenta:data.idVenta||'', numNota:numNota, repetida:repetida,
+                    avisos:data.__avisos || []});
     }
 
     return json_({ok:false,error:'tipo desconocido'});
@@ -982,7 +1161,7 @@ function doPost(e) {
     var mp = String(err && err.message ? err.message : err);
     if (mp === 'SESION')  return json_({ok:false, sesion:true,  error:'Tu sesion vencio. Vuelve a entrar.'});
     if (mp === 'PERMISO') return json_({ok:false, permiso:true, error:'Esa accion es solo para los socios.'});
-    return json_({ok:false,error:mp});
+    return json_({ok:false, error:mp, rechazada:!!(err && err.rechazo)});
   }
 }
 
@@ -1011,11 +1190,27 @@ function guardarVenta_(ss, data) {
   if (yaEsta) return yaEsta.numNota;
 
   // Validaciones ANTES de escribir nada: si algo falla, no queda media venta ni se gasta una nota.
-  if (!data.vendedor) throw new Error('Venta sin vendedor');
-  if (Number(data.creditoUSD) > 0 && !(data.cliente && data.cliente.nombre)) throw new Error('Venta a credito sin cliente');
+  if (!data.vendedor) throw rechazo_('Venta sin vendedor');
+  if (Number(data.creditoUSD) > 0 && !(data.cliente && data.cliente.nombre)) throw rechazo_('Venta a credito sin cliente');
   var lineasV = data.lineas || [];
+  // v27 — auditoria #7: el servidor revisa que la venta tenga sentido antes de escribir nada.
+  if (!lineasV.length) throw rechazo_('La venta no tiene productos');
+  var sumaLineas = 0;
   for (var li = 0; li < lineasV.length; li++) {
-    if (!(Number(lineasV[li].cantidad) > 0)) throw new Error('Hay una linea sin cantidad');
+    var cL = Number(lineasV[li].cantidad), pL = Number(lineasV[li].precio);
+    if (!(cL > 0) || !isFinite(cL)) throw rechazo_('Hay una linea sin cantidad');
+    if (!(pL >= 0) || !isFinite(pL)) throw rechazo_('Hay una linea con precio invalido: ' + (lineasV[li].producto || lineasV[li].codigo || ''));
+    sumaLineas += cL * pL;
+  }
+  var totV = Number(data.totalUSD);
+  if (!isFinite(totV) || totV < 0) throw rechazo_('El total de la venta es invalido');
+  if (!(Number(data.creditoUSD) >= 0)) data.creditoUSD = 0;
+  if (Number(data.creditoUSD) > totV + 0.05) throw rechazo_('El credito no puede ser mayor que el total de la venta');
+  // Un descuento es normal; un total muy por encima o muy por debajo de sus productos no lo es.
+  // Limites amplios a proposito: solo frenan lo que no puede ser una venta real.
+  if (sumaLineas > 0 && (totV > sumaLineas * 1.25 + 1 || totV < sumaLineas * 0.5 - 0.01)) {
+    throw rechazo_('El total ($' + round2_(totV) + ') no cuadra con los productos ($' + round2_(sumaLineas) +
+                    '). Revisa precios y descuento antes de registrar.');
   }
 
   // Numero de nota: toda venta consume uno (sin saltos). Se llama dentro del lock de la venta.
@@ -1106,6 +1301,12 @@ function guardarVenta_(ss, data) {
   const lineas = data.lineas || [];
   if (!lineas.length) return numNota;
 
+  // v27 — VENDER MAS DE LO DISPONIBLE: AVISO, NO BLOQUEO. Se mira ANTES de escribir el detalle (despues
+  // ya estaria descontado). La venta sigue igual; queda constancia en SOBREVENTAS y la pantalla lo dice.
+  // Si esta revision falla por cualquier motivo, la venta NO se detiene: el mostrador manda.
+  data.__avisos = [];
+  try { data.__avisos = revisarDisponible_(ss, lineas, data.__apartadoNum); } catch (errD) { data.__avisos = []; }
+
   var det = ss.getSheetByName(SH_DETALLE);
   if (!det) {
     det = ss.insertSheet(SH_DETALLE);
@@ -1120,8 +1321,10 @@ function guardarVenta_(ss, data) {
   var costoHoja = costosPorCodigo_(ss, lineas.map(function(l) { return l.codigo; }));
   const rows = lineas.map(function(l) {
     var cant = Number(l.cantidad) || 0, pre = Number(l.precio) || 0;
-    var cos = Number(l.costo) || 0;
-    if (!cos) cos = costoHoja[String(l.codigo || '').trim().toUpperCase()] || 0;
+    // v27 — auditoria #7: el costo SIEMPRE sale de la hoja. Lo que mande el telefono se ignora, salvo en
+    // una entrega de apartado, donde el costo quedo congelado por el propio servidor al apartar.
+    var cos = costoHoja[String(l.codigo || '').trim().toUpperCase()] || 0;
+    if (data.__costoCongelado && Number(l.costo) > 0) cos = Number(l.costo);
     var sub = cant * pre, cost = cant * cos;
     return [idVenta, fechaV, data.hora, data.vendedor, data.canal, l.codigo||'', l.producto||'',
             cant, pre, cos, sub, cost, sub - cost, tasa, Math.round(sub * tasa), numNota];
@@ -1129,7 +1332,44 @@ function guardarVenta_(ss, data) {
   var r0 = det.getLastRow() + 1;
   det.getRange(r0, 1, rows.length, rows[0].length).setValues(rows);
   det.getRange(r0, 2, rows.length, 1).setNumberFormat('dd/MM/yyyy');
+  if (data.__avisos && data.__avisos.length) {
+    try {
+      var sb = hojaAp_(ss, 'SOBREVENTAS', ['FECHA','HORA','ID_VENTA','NOTA','VENDEDOR','CODIGO','PRODUCTO',
+        'VENDIDO','STOCK','APARTADO','DISPONIBLE','FALTANTE']);
+      data.__avisos.forEach(function(a) {
+        sb.appendRow([fechaV, data.hora || '', idVenta, numNota, data.vendedor || '', a.codigo, a.producto,
+                      a.vendido, a.stock, a.apartado, a.disponible, round2_(a.vendido - a.disponible)]);
+        formatoFecha_(sb, sb.getLastRow(), 1);
+      });
+    } catch (errS) {}
+  }
   return numNota;
+}
+
+// v27 — por cada producto de la venta, si se vende mas de lo disponible (stock - apartado).
+// Un producto sin conteo no se revisa: no sabemos cuanto hay, y un aviso sobre un numero inventado
+// ensenaria a ignorar los avisos. Suma el mismo codigo si viene en dos lineas.
+function revisarDisponible_(ss, lineas, excluirApartado) {
+  var pedido = {}, nombre = {};
+  lineas.forEach(function(l) {
+    var k = String(l.codigo || '').trim().toUpperCase();
+    if (!k) return;
+    pedido[k] = (pedido[k] || 0) + (Number(l.cantidad) || 0);
+    nombre[k] = l.producto || k;
+  });
+  var cods = Object.keys(pedido);
+  if (!cods.length) return [];
+  var st = calcularStock_(ss, cods, excluirApartado);
+  var avisos = [];
+  (st.productos || []).forEach(function(p) {
+    var k = String(p.codigo).trim().toUpperCase();
+    if (p.disponible === null || p.disponible === undefined) return;
+    if (pedido[k] > p.disponible + 0.0001) {
+      avisos.push({codigo:p.codigo, producto:nombre[k] || p.producto, vendido:pedido[k],
+                   stock:p.stock, apartado:p.apartado, disponible:p.disponible});
+    }
+  });
+  return avisos;
 }
 
 // ============================================================
@@ -1193,6 +1433,14 @@ function abonoYaRegistrado_(cx, idAbono) {
   return false;
 }
 
+// v27 — el saldo de la cuenta del abono: la de esa cedula si viene; si no, la primera.
+function saldoDeCuenta_(est, rif) {
+  if (!est || !est.length) return 0;
+  var dig = soloDigitos_(rif);
+  if (dig.length >= 5) for (var i = 0; i < est.length; i++) if (soloDigitos_(est[i].rif) === dig) return est[i].saldoUSD;
+  return est[0].saldoUSD;
+}
+
 function guardarAbono_(ss, d) {
   if (!d.cliente) throw new Error('Abono sin cliente');
   var montoUSD = Number(d.montoUSD) || 0;
@@ -1203,7 +1451,7 @@ function guardarAbono_(ss, d) {
     // Ya estaba. No se escribe nada y se devuelve el saldo real, con aviso para que la pantalla
     // pueda decirlo en vez de dejar creer que se registro un segundo abono.
     var estR = estadoCxc_(ss, d.cliente);
-    return {saldoUSD:estR.length ? estR[0].saldoUSD : 0, repetido:true};
+    return {saldoUSD:saldoDeCuenta_(estR, d.rif), repetido:true};
   }
 
   cx.appendRow([
@@ -1215,9 +1463,12 @@ function guardarAbono_(ss, d) {
   var est = estadoCxc_(ss, d.cliente);
 
   // v26 — al quedar pagada una nota, la comision de su aliado deja de estar congelada.
-  var liberadas = liberarComisionesCobradas_(ss, est.length ? est[0].notas : []);
+  // v27: con cuentas por cedula puede volver mas de una cuenta con ese nombre: se revisan las notas de todas.
+  var todasNotas = [];
+  est.forEach(function(c) { todasNotas = todasNotas.concat(c.notas || []); });
+  var liberadas = liberarComisionesCobradas_(ss, todasNotas);
 
-  return {saldoUSD:est.length ? est[0].saldoUSD : 0, repetido:false, comisionesLiberadas:liberadas};
+  return {saldoUSD:saldoDeCuenta_(est, d.rif), repetido:false, comisionesLiberadas:liberadas};
 }
 
 // v26 — LA COMISION DEL ALIADO SE DESCONGELA CUANDO EL CLIENTE PAGA
@@ -1255,11 +1506,44 @@ function estadoCxc_(ss, soloCliente) {
   if (!sh || sh.getLastRow() < 2) return [];
   var rows = sh.getRange(2, 1, sh.getLastRow() - 1, 17).getValues();
   completarProductos_(ss, sh, rows);
+  // v27 — LA CUENTA ES DE LA CEDULA, NO DEL NOMBRE. Se agrupaba por nombre escrito: cuando "Taller Diesel
+  // Luis" paso a llamarse "TALLER DIESEL", su cuenta se partio en dos y cada mitad mostraba solo parte de
+  // la deuda (la venta a credito comparaba el limite contra la mitad). Ahora manda la cedula/RIF; el
+  // nombre solo se usa cuando no hay una cedula de verdad (vacia o de relleno como V-00000000).
+  var claveCli = function(nombre, rif) {
+    var dig = soloDigitos_(rif);
+    return (dig.length >= 5 && !/^0+$/.test(dig)) ? 'R' + dig : 'N' + String(nombre).trim().toLowerCase();
+  };
+  // Si el mismo nombre aparece con UNA sola cedula real, sus filas sin cedula van a esa cuenta: una
+  // deuda vieja sin RIF y una nueva con RIF del mismo cliente son la misma cuenta, no dos.
+  var cedulaDeNombre = {};
+  rows.forEach(function(r) {
+    var k = claveCli(r[2], r[3]); if (k.charAt(0) !== 'R') return;
+    var nm = String(r[2]).trim().toLowerCase();
+    if (cedulaDeNombre[nm] === undefined) cedulaDeNombre[nm] = k;
+    else if (cedulaDeNombre[nm] !== k) cedulaDeNombre[nm] = null;     // dos cedulas: ambiguo, no se une
+  });
+  var claveBase = claveCli;
+  claveCli = function(nombre, rif) {
+    var k = claveBase(nombre, rif);
+    if (k.charAt(0) === 'N') { var u = cedulaDeNombre[String(nombre).trim().toLowerCase()]; if (u) return u; }
+    return k;
+  };
+  var claveBuscada = {};
+  if (soloCliente) {
+    var buscado = String(soloCliente).trim().toLowerCase();
+    rows.forEach(function(r) {
+      if (String(r[2]).trim().toLowerCase() === buscado) claveBuscada[claveCli(r[2], r[3])] = true;
+    });
+  }
   var porCliente = {};
   rows.forEach(function(r) {
     var cli = String(r[2]).trim(); if (!cli) return;
-    if (soloCliente && cli.toLowerCase() !== String(soloCliente).toLowerCase()) return;
-    var c = porCliente[cli] || (porCliente[cli] = {cliente:cli, rif:String(r[3]||''), cargosUSD:0, abonosUSD:0, notas:[], movs:[]});
+    var clave = claveCli(cli, r[3]);
+    if (soloCliente && !claveBuscada[clave]) return;
+    var c = porCliente[clave] || (porCliente[clave] = {cliente:cli, rif:String(r[3]||''), cargosUSD:0, abonosUSD:0, notas:[], movs:[], nombres:{}});
+    c.cliente = cli;                       // queda el nombre mas reciente
+    c.nombres[cli] = true;
     var monto = Number(r[7]) || 0;
     var mov = {fecha:fmtFecha_(r[0]), hora:String(r[1]||''), tipo:String(r[4]), idVenta:String(r[5]||''), nota:r[6]||'', montoUSD:monto,
                moneda:String(r[8]||''), montoPagado:Number(r[9])||0, tasa:Number(r[10])||0, metodo:String(r[11]||''), banco:String(r[12]||''),
@@ -1280,6 +1564,9 @@ function estadoCxc_(ss, soloCliente) {
     });
     c.cargosUSD = round2_(c.cargosUSD); c.abonosUSD = round2_(c.abonosUSD);
     c.saldoUSD = round2_(c.cargosUSD - c.abonosUSD);
+    var otros = Object.keys(c.nombres).filter(function(n) { return n !== c.cliente; });
+    c.tambienComo = otros;                 // otros nombres con que aparece la misma cedula
+    delete c.nombres;
     out.push(c);
   });
   out.sort(function(a, b) { return b.saldoUSD - a.saldoUSD; });
@@ -1627,8 +1914,15 @@ function crearApartado_(ss, d) {
   var num = 'AP-' + ('000' + n).slice(-4);
 
   var total = 0, texto = [];
+  // v27 — auditoria #7: cantidad y precio validos; el costo congelado sale de la hoja, no del telefono.
+  var costoHojaAp = costosPorCodigo_(ss, lineas.map(function(l) { return l.codigo; }));
+  lineas.forEach(function(l) {
+    if (!(Number(l.cantidad) > 0) || !isFinite(Number(l.cantidad))) throw new Error('Cantidad invalida en ' + (l.producto || l.codigo || ''));
+    if (!(Number(l.precio) >= 0) || !isFinite(Number(l.precio))) throw new Error('Precio invalido en ' + (l.producto || l.codigo || ''));
+  });
   var filas = lineas.map(function(l) {
-    var cant = Number(l.cantidad) || 0, pre = Number(l.precio) || 0, cos = Number(l.costo) || 0;
+    var cant = Number(l.cantidad) || 0, pre = Number(l.precio) || 0;
+    var cos = costoHojaAp[String(l.codigo || '').trim().toUpperCase()] || 0;
     total += cant * pre;
     texto.push(l.producto + ' x' + cant);
     return [num, l.codigo || '', l.producto || '', cant, pre, cos, Math.round(cant * pre * 100) / 100];
@@ -1724,7 +2018,9 @@ function entregarApartado_(ss, d) {
     aliado:'', aliadoNegocio:'', aliadoPct:0, aliadoComision:0,
     notas:'Entrega de ' + d.num + (d.notas ? ' · ' + d.notas : ''),
     cliente:{nombre:String(sh.getRange(fila, 4).getValue()), rif:String(sh.getRange(fila, 5).getValue()), tel:String(sh.getRange(fila, 6).getValue())},
-    creditoUSD:0, lineas:lineas
+    creditoUSD:0, lineas:lineas,
+    __costoCongelado:true,     // v27: el costo de estas lineas lo congelo el servidor al apartar
+    __apartadoNum:String(d.num || '').trim()   // v27: su propia reserva no cuenta como 'apartado' al entregar
   };
   var numNota = guardarVenta_(ss, venta);
 
@@ -1863,6 +2159,17 @@ function registrarDevolucion_(ss, d) {
     disp[k] -= c;
   });
 
+  // v27 — una venta a CREDITO que el cliente aun no paga no se "devuelve" en efectivo: nunca entro ese
+  // dinero. Lo devuelto tiene que bajar su deuda (saldo a favor). Se revisa ANTES de escribir nada.
+  var resol = String(d.resolucion || '').toUpperCase();
+  if (resol === 'PAGO_MOVIL' && nota.cliente) {
+    var pend = pendienteDeNota_(ss, nota.cliente, nota.idVenta);
+    if (pend > 0.009) {
+      throw new Error('Esa nota se vendio a credito y ' + nota.cliente + ' todavia debe $' + round2_(pend) +
+                      ' de ella. La devolucion tiene que quedar como saldo a favor (baja su deuda), no como pago movil.');
+    }
+  }
+
   var cfg = ss.getSheetByName('CONFIG');
   var num = (parseInt(cfg.getRange('B8').getValue()) || 0) + 1;
   cfg.getRange('A8').setValue('DEVOLUCION_NUM');
@@ -1872,9 +2179,25 @@ function registrarDevolucion_(ss, d) {
   var det = ss.getSheetByName(SH_DETALLE);
   var filasDet = [], valDev = 0, valNue = 0;
 
+  // v27 — auditoria #7: el precio y el costo de lo devuelto salen de la NOTA ORIGINAL, no del telefono.
+  // Antes se tomaban de lo que mandaba la pantalla: con un precio inflado, la devolucion "devolvia" mas
+  // dinero del que se cobro. El costo del producto nuevo (cambio) sale de la hoja.
+  var original = {};
+  nota.lineas.forEach(function(l) { original[String(l.codigo).trim().toUpperCase()] = l; });
+  var costoHojaCambio = costosPorCodigo_(ss, nuevas.map(function(l) { return l.codigo; }));
+  nuevas.forEach(function(l) {
+    var c = Number(l.cantidad), p = Number(l.precio);
+    if (!(c > 0) || !isFinite(c)) throw new Error('Cantidad invalida en ' + (l.producto || l.codigo || 'el cambio'));
+    if (!(p >= 0) || !isFinite(p)) throw new Error('Precio invalido en ' + (l.producto || l.codigo || 'el cambio'));
+    l.costo = costoHojaCambio[String(l.codigo || '').trim().toUpperCase()] || 0;
+  });
+
   // Lineas negativas: revierten la venta original con su costo congelado
   devueltas.forEach(function(l) {
-    var c = Number(l.cantidad) || 0, p = Number(l.precio) || 0, co = Number(l.costo) || 0;
+    var o = original[String(l.codigo).trim().toUpperCase()] || {};
+    l.precio = Number(o.precio) || 0;
+    l.costo = Number(o.costo) || 0;
+    var c = Number(l.cantidad) || 0, p = l.precio, co = l.costo;
     valDev += c * p;
     filasDet.push([d.idVenta || '', fecha, d.hora || '', d.autorizadoPor, 'DEVOLUCION', l.codigo || '', l.producto || '',
                    -c, p, co, -(c * p), -(c * co), -(c * p - c * co), tasa, -Math.round(c * p * tasa), d.nota || '']);
@@ -1906,12 +2229,159 @@ function registrarDevolucion_(ss, d) {
     .concat(nuevas.map(function(l) { return [num, d.nota || '', 'ENTREGADO', l.codigo || '', Number(l.cantidad) || 0, Number(l.precio) || 0]; }));
   dd.getRange(dd.getLastRow() + 1, 1, fd.length, 6).setValues(fd);
 
+  // v27 — LA COMISION DEL ALIADO SIGUE A LA DEVOLUCION. Si la venta tenia aliado y se devolvio mercancia
+  // (la venta se achico), su comision baja en la misma proporcion: queda una fila NEGATIVA en COMISIONES.
+  // Si la comision original ya se le pago, la negativa se descuenta en su proxima liquidacion.
+  if (diferencia < 0 && d.idVenta) {
+    try { ajustarComisionPorDevolucion_(ss, d.idVenta, -diferencia, tasa, num); } catch (errC) {}
+  }
+
   // Saldo a favor del cliente: se anota en CXC_MOV como abono sin cargo (saldo negativo = la tienda le debe)
   if (String(d.resolucion || '').toUpperCase() === 'CREDITO_A_FAVOR' && diferencia < 0 && d.cliente) {
     hojaCxc_(ss).appendRow([fecha, d.hora || '', d.cliente, d.rif || '', 'ABONO', 'DEV-' + num, d.nota || '',
                             Math.abs(diferencia), 'USD', Math.abs(diferencia), tasa, 'Credito a favor', '', 0, d.autorizadoPor, 'Devolucion ' + num]);
   }
   return {ok:true, tipo:'devolucion', num:num, diferencia:diferencia, valorDevuelto:Math.round(valDev * 100) / 100, valorNuevo:Math.round(valNue * 100) / 100};
+}
+
+// ============================================================
+// ANULAR UNA VENTA COMPLETA (v27)
+// ============================================================
+// Para lo que hasta hoy se hacia borrando filas a mano: una venta de prueba, duplicada o que no ocurrio.
+// Borrar a mano dejaba mitades: el detalle sin su venta (seguia restando stock), la deuda sin su venta,
+// la comision sin su venta. Aqui se hace TODO junto, con candado, y nada se pierde: cada fila sale de su
+// hoja y se copia a VENTAS_ANULADAS con de que hoja vino, quien anulo, cuando y por que.
+//
+// Que NO se anula aqui (se rechaza con el motivo):
+//   - una venta con FACTURA fiscal: eso necesita una nota de credito, no un borrado;
+//   - una venta con devoluciones o cambios: primero se revisa eso;
+//   - la entrega de un apartado (VAP-): se maneja desde Apartados.
+// Si la comision del aliado ya se le PAGO, no se borra: queda una fila negativa que se le descuenta en
+// la proxima liquidacion. Si el cliente ya habia abonado algo, ese abono queda y pasa a ser saldo a favor.
+function anularVenta_(ss, d, quien) {
+  var motivo = String(d.motivo || '').trim();
+  if (motivo.length < 5) throw new Error('Escribe el motivo de la anulacion');
+  var idVenta = String(d.idVenta || '').trim();
+  var shV = ss.getSheetByName(SH_VENTAS);
+  if (!shV || shV.getLastRow() < 2) throw new Error('No hay ventas');
+  var anchoV = shV.getLastColumn();
+  var vV = shV.getRange(2, 1, shV.getLastRow() - 1, anchoV).getValues();
+  var filaV = -1;
+  if (!idVenta && d.nota) {
+    for (var a = 0; a < vV.length; a++) if (Number(vV[a][COL_NOTA - 1]) === Number(d.nota)) { idVenta = String(vV[a][COL_ID - 1]).trim(); break; }
+  }
+  if (!idVenta) throw new Error('No se encontro la venta' + (d.nota ? ' de la nota ' + d.nota : ''));
+  var coincidencias = 0;
+  for (var b = 0; b < vV.length; b++) if (String(vV[b][COL_ID - 1]).trim() === idVenta) { filaV = b + 2; coincidencias++; }
+  if (filaV < 0) throw new Error('No se encontro la venta ' + idVenta + ' en VENTAS');
+  if (coincidencias > 1) throw new Error('Esa venta aparece ' + coincidencias + ' veces en VENTAS. Corre conciliar() y revisala antes de anular.');
+  if (idVenta.indexOf('VAP-') === 0) throw new Error('Es la entrega de un apartado: se maneja desde Apartados, no aqui.');
+  var rowV = vV[filaV - 2];
+  var nota = rowV[COL_NOTA - 1];
+  if (String(rowV[35] || '').trim()) throw new Error('Esa venta tiene la factura ' + rowV[35] + '. Una factura no se borra: necesita una nota de credito.');
+
+  // Lo que hay que mover, hoja por hoja: [hoja, columna del ID (base 0), filtro opcional]
+  var shD = ss.getSheetByName(SH_DETALLE), shC = ss.getSheetByName(SH_CXC), shK = ss.getSheetByName('COMISIONES');
+  function filasDe(sh, colId, filtro) {
+    var out = [];
+    if (!sh || sh.getLastRow() < 2) return out;
+    var vals = sh.getRange(2, 1, sh.getLastRow() - 1, sh.getLastColumn()).getValues();
+    for (var i = 0; i < vals.length; i++) {
+      if (String(vals[i][colId]).trim() !== idVenta) continue;
+      if (filtro && !filtro(vals[i])) continue;
+      out.push({fila:i + 2, valores:vals[i]});
+    }
+    return out;
+  }
+  var det = filasDe(shD, 0);
+  if (det.some(function(x) { var t = String(x.valores[4] || '').toUpperCase(); return t === 'DEVOLUCION' || t === 'CAMBIO'; })) {
+    throw new Error('Esa venta tiene devoluciones o cambios registrados. Revisalos antes de anularla.');
+  }
+  var cargos = filasDe(shC, 5, function(r) { return String(r[4]).toUpperCase() === 'CARGO'; });
+  var coms = filasDe(shK, 11);
+
+  var reg = hojaAp_(ss, 'VENTAS_ANULADAS', ['FECHA_ANULACION','ANULADA_POR','MOTIVO','ID_VENTA','NOTA','HOJA','FILA_ORIGINAL','DATOS']);
+  var ahora = new Date(), por = (quien && quien.nombre) || d.quien || '';
+  function guardarCopia(hoja, x) {
+    reg.appendRow([ahora, por, motivo, idVenta, nota, hoja, x.fila,
+                   JSON.stringify(x.valores.map(function(v) { return esFecha_(v) ? Utilities.formatDate(v, TZ_VE, 'yyyy-MM-dd HH:mm') : v; }))]);
+  }
+  guardarCopia(SH_VENTAS, {fila:filaV, valores:rowV});
+  det.forEach(function(x) { guardarCopia(SH_DETALLE, x); });
+  cargos.forEach(function(x) { guardarCopia(SH_CXC, x); });
+
+  // Comisiones: la no pagada se va; la pagada se compensa con una negativa.
+  var comNegativas = 0, comBorrar = [];
+  // Reintento despues de una caida: la compensacion que ya se escribio se queda y no se escribe otra.
+  function esCompensacion(x) { return String(x.valores[4] || '').indexOf('ANULACION de') === 0; }
+  var yaNeg = coms.some(esCompensacion);
+  coms.forEach(function(x) {
+    if (esCompensacion(x)) return;
+    var est = String(x.valores[COM_ESTADO - 1] || '').trim().toUpperCase();
+    guardarCopia('COMISIONES', x);
+    if (est.indexOf('PAGADA') === 0) {
+      var r = x.valores;
+      if (yaNeg) return;
+      shK.appendRow([ahora, '', r[COM_ALIADO - 1], r[3], 'ANULACION de ' + String(r[4] || ''), -(Number(r[5]) || 0), r[6],
+                     -(Number(r[COM_BS - 1]) || 0), r[8], 'PENDIENTE', '', idVenta, r[COM_CEDULA - 1], -(Number(r[COM_USD - 1]) || 0)]);
+      comNegativas++;
+    } else {
+      comBorrar.push(x.fila);
+    }
+  });
+  SpreadsheetApp.flush();
+
+  // Borrar de abajo hacia arriba en cada hoja, para que los numeros de fila no se corran.
+  function borrar(sh, filas) { filas.sort(function(p, q) { return q - p; }).forEach(function(f) { sh.deleteRow(f); }); }
+  borrar(shK, comBorrar);
+  borrar(shC, cargos.map(function(x) { return x.fila; }));
+  borrar(shD, det.map(function(x) { return x.fila; }));
+  borrar(shV, [filaV]);
+  formatoFecha_(reg, reg.getLastRow(), 1);
+
+  return {ok:true, tipo:'anular_venta', idVenta:idVenta, nota:nota,
+          movidas:{venta:1, detalle:det.length, deuda:cargos.length, comisiones:comBorrar.length},
+          comisionesCompensadas:comNegativas,
+          aviso:cargos.length ? 'Si el cliente ya habia abonado a esta nota, ese abono queda como saldo a favor.' : ''};
+}
+
+// v27 — cuanto falta por pagar de una nota a credito (0 si no fue a credito o ya esta pagada).
+function pendienteDeNota_(ss, cliente, idVenta) {
+  if (!idVenta) return 0;
+  var est = estadoCxc_(ss, cliente) || [];
+  for (var i = 0; i < est.length; i++) {
+    var ns = est[i].notas || [];
+    for (var j = 0; j < ns.length; j++) {
+      if (String(ns[j].idVenta).trim() === String(idVenta).trim()) return Number(ns[j].pendienteUSD) || 0;
+    }
+  }
+  return 0;
+}
+
+// v27 — fila negativa en COMISIONES por lo devuelto de una venta con aliado.
+function ajustarComisionPorDevolucion_(ss, idVenta, valorDevueltoUSD, tasa, numDev) {
+  var sc = ss.getSheetByName('COMISIONES');
+  if (!sc || sc.getLastRow() < 2) return 0;
+  var ancho = Math.max(sc.getLastColumn(), COM_USD);
+  var vals = sc.getRange(2, 1, sc.getLastRow() - 1, ancho).getValues();
+  for (var i = 0; i < vals.length; i++) {
+    var r = vals[i];
+    if (String(r[11] || '').trim() !== String(idVenta).trim()) continue;
+    var estado = String(r[COM_ESTADO - 1] || '').trim().toUpperCase();
+    if (estado.indexOf('ANULADA') === 0) return 0;
+    var pct = Number(r[6]) || 0;
+    if (!(pct > 0)) return 0;
+    var usd = round2_(valorDevueltoUSD * pct / 100);
+    var bs = Math.round(usd * (Number(tasa) || 0));
+    // Si la original sigue congelada (credito sin cobrar), la negativa tambien; si no, entra a la
+    // proxima liquidacion y se resta de lo que se le pague.
+    var nuevoEstado = estado === 'PENDIENTE COBRO' ? 'PENDIENTE COBRO' : 'PENDIENTE';
+    sc.appendRow([new Date(), '', r[COM_ALIADO - 1], r[3], 'Devolucion ' + numDev + ' de ' + String(r[4] || ''),
+                  -Math.round(valorDevueltoUSD * (Number(tasa) || 0)), pct, -bs, r[8], nuevoEstado, '', idVenta,
+                  r[COM_CEDULA - 1], -usd]);
+    return -usd;
+  }
+  return 0;
 }
 
 // ============================================================
@@ -2077,18 +2547,54 @@ function movimientosDesde_(ss, desdePorCodigo) {
   return mov;
 }
 
-function calcularStock_(ss, codigo) {
+// v27 — LO APARTADO NO ESTA DISPONIBLE. Cuanto hay reservado de cada producto para un cliente:
+//   - APARTADO abierto o listo, que no haya vencido: la mercancia esta en tienda y ya tiene dueno.
+//   - CONTRA PEDIDO solo cuando ya LLEGO (LISTO): antes de eso no hay nada en el estante que reservar.
+//   - Vencido, entregado, devuelto o cerrado: ya no reserva nada.
+// excluirNum: al ENTREGAR un apartado, su propia reserva no cuenta contra si misma.
+function apartadoPorCodigo_(ss, excluirNum) {
+  var cab = ss.getSheetByName('APARTADOS'), det = ss.getSheetByName('APARTADOS_DET');
+  if (!cab || !det || cab.getLastRow() < 2 || det.getLastRow() < 2) return {};
+  var hoy = Utilities.formatDate(new Date(), TZ_VE, 'yyyy-MM-dd');
+  var vivos = {};
+  cab.getRange(2, 1, cab.getLastRow() - 1, 12).getValues().forEach(function(r) {
+    var num = String(r[0] || '').trim();
+    if (!num || num === String(excluirNum || '').trim()) return;
+    var tipo = String(r[2] || '').trim().toUpperCase(), est = String(r[10] || '').trim().toUpperCase();
+    var reserva = tipo === 'CONTRA_PEDIDO' ? est === 'LISTO' : (est === 'ABIERTO' || est === 'LISTO');
+    if (!reserva) return;
+    var vence = iso_(r[11]);
+    if (vence && vence < hoy) return;
+    vivos[num] = true;
+  });
+  var out = {};
+  det.getRange(2, 1, det.getLastRow() - 1, 4).getValues().forEach(function(r) {
+    if (!vivos[String(r[0] || '').trim()]) return;
+    var cod = String(r[1] || '').trim().toUpperCase();
+    if (cod) out[cod] = (out[cod] || 0) + (Number(r[3]) || 0);
+  });
+  return out;
+}
+
+// codigo: un codigo, una lista de codigos, o vacio para todos.
+function calcularStock_(ss, codigo, excluirApartado) {
   var sh = ss.getSheetByName('LISTA DE PRODUCTOS');
   if (!sh || sh.getLastRow() < 3) return {ok:true, productos:[]};
   var n = sh.getLastRow() - 2;
   var vals = sh.getRange(3, 1, n, 16).getValues();
-  var filtro = String(codigo || '').trim().toUpperCase();
+  var filtros = {}, hayFiltro = false;
+  (Array.isArray(codigo) ? codigo : [codigo]).forEach(function(c) {
+    var k = String(c || '').trim().toUpperCase();
+    if (k) { filtros[k] = true; hayFiltro = true; }
+  });
+  var apartado = apartadoPorCodigo_(ss, excluirApartado);
 
   var desde = {};
   vals.forEach(function(r) {
     var cod = String(r[0] || '').trim().toUpperCase();
     var v = r[COL_STK_FECHA - 1];
     if (!cod || !v) return;
+    if (hayFiltro && !filtros[cod]) return;      // v27: con filtro, solo se recorren esos movimientos
     // La celda del conteo guarda fecha y hora: ese es el corte exacto
     desde[cod] = esFecha_(v) ? Utilities.formatDate(v, TZ_VE, 'yyyy-MM-dd HH:mm') : (iso_(v) ? iso_(v) + ' 00:00' : '');
     if (!desde[cod]) delete desde[cod];
@@ -2099,16 +2605,20 @@ function calcularStock_(ss, codigo) {
   vals.forEach(function(r) {
     var cod = String(r[0] || '').trim().toUpperCase();
     if (!cod) return;
-    if (filtro && cod !== filtro) return;
+    if (hayFiltro && !filtros[cod]) return;
     var contado = r[COL_STK - 1], fecha = iso_(r[COL_STK_FECHA - 1]);
     var corte = desde[cod] || '';
     var tiene = fecha && contado !== '' && contado !== null;
     var m = mov[cod] || {vendido:0, comprado:0};
+    var stk = tiene ? (Number(contado) || 0) + m.comprado - m.vendido : null;
+    var ap = apartado[cod] || 0;
     out.push({codigo:String(r[0] || '').trim(), producto:String(r[2] || '').trim(), categoria:String(r[3] || '').trim(),
               costo:Number(r[7]) || 0, precio:Number(r[8]) || 0,
               contado:tiene ? Number(contado) || 0 : null, fechaConteo:tiene ? fecha : '', corteConteo:tiene ? corte : '',
               vendido:m.vendido, comprado:m.comprado,
-              stock:tiene ? (Number(contado) || 0) + m.comprado - m.vendido : null});
+              stock:stk,
+              apartado:ap,                                         // v27
+              disponible:stk === null ? null : stk - ap});         // v27: sin conteo no se sabe, no se inventa
   });
   return {ok:true, productos:out};
 }
@@ -2227,9 +2737,22 @@ function costearCompra_(ss, d) {
             vence:sh.getRange(fila, 17).getValue() ? iso_(sh.getRange(fila, 17).getValue()) : '', actualizados:[]};
   }
 
+  // v27: lo que puede hacer fallar el final se revisa ANTES de tocar nada.
+  var condPrev = String(d.condicion || 'CONTADO').toUpperCase();
+  var totalPrev = 0;
+  lineas.forEach(function(l) { totalPrev += (Number(l.costo) || 0) * (Number(l.cantidad) || 0); });
+  if (condPrev === 'CREDITO' && !(totalPrev > 0)) throw new Error('Una compra a credito necesita un total mayor que cero');
+  if (condPrev === 'CREDITO' && !d.proveedor) throw new Error('Falta el proveedor');
+
   // Costos en el detalle
   var dt = ss.getSheetByName('COMPRAS_DETALLE');
   var dtRows = dt.getRange(2, 1, dt.getLastRow() - 1, 10).getValues();
+  // v27: si un intento anterior ya costeo estas lineas (y se cayo antes del final), el promedio del costo
+  // YA se aplico: repetirlo lo correria otra vez. Esas lineas no vuelven a promediar.
+  var yaPromediado = {};
+  dtRows.forEach(function(r) {
+    if (String(r[0]) === String(d.id) && String(r[9]).toUpperCase() === 'COSTEADA') yaPromediado[String(r[3]).trim().toUpperCase()] = true;
+  });
   var total = 0;
   lineas.forEach(function(l) {
     var c = Number(l.costo) || 0, cant = Number(l.cantidad) || 0;
@@ -2254,6 +2777,7 @@ function costearCompra_(ss, d) {
   lineas.forEach(function(l) {
     var f = filaProducto_(lp, l.codigo);
     if (!f) return;
+    if (yaPromediado[String(l.codigo).trim().toUpperCase()]) return;
     var p = porCod[String(l.codigo).trim().toUpperCase()] || {};
     var costoViejo = Number(p.costo) || 0;
     var stockPrevio = (p.stock === null || p.stock === undefined) ? 0 : Math.max(0, Number(p.stock) - (Number(l.cantidad) || 0));
@@ -2283,7 +2807,9 @@ function costearCompra_(ss, d) {
     vd.setDate(vd.getDate() + dias);
     vence = vd;
   }
-  sh.getRange(fila, 9).setValue('COSTEADA');
+  // v27 — auditoria #4: COSTEADA se marca AL FINAL, despues de la deuda con el proveedor. Antes se marcaba
+  // primero: si algo fallaba antes de crear la deuda, el reintento veia COSTEADA, decia "ya estaba" y la
+  // compra a credito quedaba sin cuenta por pagar.
   sh.getRange(fila, 10).setValue(total);
   sh.getRange(fila, 13).setValue(d.costeadoPor || '');
   sh.getRange(fila, 14).setValue(new Date());
@@ -2291,8 +2817,15 @@ function costearCompra_(ss, d) {
   sh.getRange(fila, 15).setValue(condicion);
   sh.getRange(fila, 16).setValue(dias);
   if (vence) { sh.getRange(fila, 17).setValue(vence); formatoFecha_(sh, fila, 17); }
+  // v27: de contado, DE QUE CUENTA salio el dinero (banco = cuenta), para el flujo de caja. Si lo pago un
+  // socio de su bolsillo, queda en PAGADO_POR y la tienda se lo debe, igual que con los gastos.
   sh.getRange(fila, 18).setValue(d.metodo || '');
   sh.getRange(fila, 19).setValue(d.banco || '');
+  var pagoSocio = String(d.pagadoPor || '').trim().toUpperCase();
+  if (condicion === 'CONTADO' && (pagoSocio === 'RODOLFO' || pagoSocio === 'JAVIER')) sh.getRange(fila, 20).setValue(pagoSocio);
+  if (!sh.getRange(1, 18).getValue()) {
+    sh.getRange(1, 15, 1, 6).setValues([['CONDICION','DIAS','VENCE','METODO_PAGO','CUENTA_PAGO','PAGADO_POR_SOCIO']]);
+  }
 
   // Dias de credito del proveedor, para proponerlos la proxima vez
   if (dias > 0 && d.proveedor) {
@@ -2309,12 +2842,35 @@ function costearCompra_(ss, d) {
     }
   }
 
-  // A credito: nace el compromiso de pago
-  if (condicion === 'CREDITO') {
+  // A credito: nace el compromiso de pago (v27: sin duplicar si un reintento llega hasta aqui)
+  if (condicion === 'CREDITO' && !cargoCxpExiste_(ss, d.id)) {
     movCxp_(ss, {fecha:d.fecha, hora:d.hora, proveedor:d.proveedor, id:d.id, factura:d.factura,
                  montoUSD:total, registradoPor:d.costeadoPor, notas:'Compra a ' + dias + ' dias'}, 'CARGO');
   }
+  // De contado pagada por un socio: la tienda le debe (sin duplicar).
+  if (condicion === 'CONTADO' && (pagoSocio === 'RODOLFO' || pagoSocio === 'JAVIER') && !movSocioExiste_(ss, d.id)) {
+    movSocio_(ss, {fecha:d.fecha, socio:pagoSocio, tipo:'PRESTAMO', montoUSD:total, moneda:'USD', montoPagado:total, tasa:0,
+                   origen:d.id, descripcion:'Compra ' + (d.proveedor || '') + (d.factura ? ' fact. ' + d.factura : ''),
+                   registradoPor:d.costeadoPor || ''});
+  }
+  SpreadsheetApp.flush();
+  sh.getRange(fila, 9).setValue('COSTEADA');     // ultimo paso: todo lo anterior ya quedo escrito
   return {ok:true, tipo:'costeo', id:d.id, total:total, condicion:condicion, vence:vence ? iso_(vence) : '', actualizados:actualizados};
+}
+
+function cargoCxpExiste_(ss, idCompra) {
+  var sh = ss.getSheetByName('CXP_MOV');
+  if (!sh || sh.getLastRow() < 2) return false;
+  var v = sh.getRange(2, 4, sh.getLastRow() - 1, 2).getValues();     // D TIPO, E ID_COMPRA
+  for (var i = 0; i < v.length; i++) if (String(v[i][0]).toUpperCase() === 'CARGO' && String(v[i][1]).trim() === String(idCompra).trim()) return true;
+  return false;
+}
+function movSocioExiste_(ss, origen) {
+  var sh = ss.getSheetByName('SOCIOS_MOV');
+  if (!sh || sh.getLastRow() < 2) return false;
+  var v = sh.getRange(2, 8, sh.getLastRow() - 1, 1).getValues();     // H ORIGEN
+  for (var i = 0; i < v.length; i++) if (String(v[i][0]).trim() === String(origen).trim()) return true;
+  return false;
 }
 
 function hojaCxp_(ss) {
@@ -2503,6 +3059,7 @@ function repararComisionesCobradas() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var lock = LockService.getScriptLock();
   lock.waitLock(30000);
+  var msg;
   try {
     var todas = [];
     (estadoCxc_(ss, '') || []).forEach(function(c) {
@@ -2510,18 +3067,389 @@ function repararComisionesCobradas() {
     });
     var pagadas = todas.filter(function(n) { return n.estado === 'PAGADA'; });
     var libres = liberarComisionesCobradas_(ss, todas);
-    SpreadsheetApp.flush();
-    var msg = 'Notas pagadas encontradas: ' + pagadas.length +
-              '\nComisiones liberadas (PENDIENTE COBRO -> PENDIENTE): ' + libres +
-              (libres ? '\n\nYa aparecen como cobrables en Gerencia > Liquidacion de aliados.'
-                      : '\n\nNo habia ninguna congelada de una nota ya pagada.');
+    msg = 'Notas pagadas encontradas: ' + pagadas.length +
+          '\nComisiones liberadas (PENDIENTE COBRO -> PENDIENTE): ' + libres +
+          (libres ? '\n\nYa aparecen como cobrables en Gerencia > Liquidacion de aliados.'
+                  : '\n\nNo habia ninguna congelada de una nota ya pagada.');
     Logger.log(msg);
-    try { SpreadsheetApp.getUi().alert(msg); } catch (e) {}   // sin UI (ejecucion directa) no estorba
-    return msg;
   } finally {
-    SpreadsheetApp.flush();   // v26.1: vaciar ANTES de soltar el candado
+    SpreadsheetApp.flush();
     lock.releaseLock();
   }
+  // v26.2 — el aviso va DESPUES de soltar el candado. En v26.1 estaba adentro: alert() espera a que
+  // alguien toque Aceptar en la pestana de la hoja, y mientras tanto el candado seguia tomado. Toda
+  // venta o abono desde los telefonos esperaba 10 s y fallaba. Paso el 23/09 al correrla por primera vez.
+  try { SpreadsheetApp.getUi().alert(msg); } catch (e) {}   // sin UI (ejecucion directa) no estorba
+  return msg;
+}
+
+// ============================================================
+// v26.2 — CONCILIACION DE SOLO LECTURA
+// ============================================================
+// Ejecuta conciliar() desde el editor. NO modifica ninguna hoja de datos: solo lee y deja el resultado
+// en la hoja CONCILIACION (la borra y la rehace en cada corrida). Ese resultado es el que se le entrega
+// al revisor externo: aqui no se decide nada, solo se listan las inconsistencias con su fila.
+// Correla con la tienda quieta: si entra una venta a mitad de la lectura puede salir un falso "sin detalle".
+// No toma el candado a proposito: leer seis hojas tarda, y bloquear las ventas mientras tanto es peor.
+//
+// El historico importado (IDs H-VTA-###) queda fuera: no tiene ID en VENTAS por diseno.
+function conciliar() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var H = [];
+  function hallar(control, grav, det, filas) { H.push([grav, control, det, String(filas || '')]); }
+  function hoja(n) { var sh = ss.getSheetByName(n); return sh && sh.getLastRow() >= 1 ? sh.getDataRange().getValues() : null; }
+  function datos(F) {
+    var out = []; if (!F) return out;
+    for (var i = 1; i < F.length; i++) if (F[i].some(function(v) { return v !== '' && v !== null; })) out.push([i + 1, F[i]]);
+    return out;
+  }
+  function s(v) { return String(v == null ? '' : v).trim(); }
+  function n(v) { var x = Number(v); return isNaN(x) ? 0 : x; }
+  function esApp(id) { return !!id && id.indexOf('H-') !== 0; }
+  function minutos(h) {
+    if (esFecha_(h)) return h.getHours() * 60 + h.getMinutes();
+    var m = /^\s*(\d{1,2}):(\d{2})\s*([ap])?/.exec(s(h).toLowerCase());
+    if (!m) return null;
+    var hh = Number(m[1]), mm = Number(m[2]);
+    if (m[3] === 'p' && hh !== 12) hh += 12;
+    if (m[3] === 'a' && hh === 12) hh = 0;
+    return hh * 60 + mm;
+  }
+  function usd(x) { return '$' + (Math.round(x * 100) / 100).toFixed(2); }
+
+  var V = datos(hoja(SH_VENTAS)), D = datos(hoja(SH_DETALLE)), CX = datos(hoja(SH_CXC));
+  var CO = datos(hoja('COMISIONES')), CL = hoja('CLIENTES'), CP = datos(hoja('COMPRAS')), PX = datos(hoja('CXP_MOV'));
+  var CFG = hoja('CONFIG') || [];
+
+  var ventas = {}, det = {};
+  V.forEach(function(x) { var id = s(x[1][COL_ID - 1]); if (id) (ventas[id] = ventas[id] || []).push(x); });
+  D.forEach(function(x) { var id = s(x[1][0]); if (esApp(id)) (det[id] = det[id] || []).push(x); });
+  // v27: solo los renglones ORIGINALES de la venta. Las devoluciones y cambios se registran en el
+  // detalle con el mismo ID, pero no son parte de lo que se cobro en la venta: se revisan aparte (12).
+  function esOriginal(x) { var t = s(x[1][4]).toUpperCase(); return t !== 'DEVOLUCION' && t !== 'CAMBIO'; }
+  function sumDet(L) { return L.filter(esOriginal).reduce(function(a, x) { return a + n(x[1][10]); }, 0); }
+  function filasDe(L) { return L.map(function(x) { return x[0]; }).join(', '); }
+
+  // 1. ID de venta repetido
+  Object.keys(ventas).forEach(function(id) {
+    var L = ventas[id];
+    if (L.length > 1) hallar('Venta con ID repetido', 'ALTA', id + ' aparece ' + L.length + ' veces en VENTAS (notas ' +
+      L.map(function(x) { return s(x[1][24]); }).join(', ') + ')', filasDe(L));
+  });
+
+  // 2. Posible duplicado con ID distinto: mismo dia, cliente, total y productos, a menos de 30 minutos.
+  //    Dos ventas iguales el mismo dia son normales; un reintento duplicado cae en minutos.
+  var firma = {};
+  Object.keys(ventas).forEach(function(id) {
+    var r = ventas[id][0][1];
+    if (n(r[5]) <= 0) return;
+    var k = [iso_(r[0]), s(r[25]).toUpperCase(), n(r[5]).toFixed(2), s(r[4]).toUpperCase()].join('|');
+    (firma[k] = firma[k] || []).push({fila:ventas[id][0][0], id:id, min:minutos(r[1]), nota:s(r[24]), hora:s(r[1])});
+  });
+  Object.keys(firma).forEach(function(k) {
+    var L = firma[k]; if (L.length < 2) return;
+    var cerca = L.filter(function(a) {
+      return a.min !== null && L.some(function(b) { return b !== a && b.min !== null && Math.abs(a.min - b.min) <= 30; });
+    });
+    if (cerca.length > 1) {
+      var p = k.split('|');
+      hallar('Posible venta duplicada (ID distinto)', 'ALTA', p[0] + ' · ' + (p[1] || 'sin cliente') + ' · $' + p[2] + ' · ' +
+        cerca.length + ' veces: ' + cerca.map(function(x) { return 'nota ' + x.nota + ' ' + x.hora; }).join('; '),
+        cerca.map(function(x) { return x.fila; }).join(', '));
+    }
+  });
+
+  // 3. Venta partida: resumen con un ID y renglones con otro, mismo dia, mismo monto, mismo producto.
+  //    Se empareja ANTES de listar "sin detalle" / "sin venta", porque son la misma venta y no dos problemas.
+  var sinDet = {}, huerf = {}, emparejadas = {};
+  Object.keys(ventas).forEach(function(id) { if (esApp(id) && !det[id]) sinDet[id] = ventas[id][0]; });
+  Object.keys(det).forEach(function(id) { if (!ventas[id]) huerf[id] = det[id]; });
+  Object.keys(sinDet).forEach(function(iv) {
+    var fv = sinDet[iv][0], rv = sinDet[iv][1];
+    var ids = Object.keys(huerf);
+    for (var j = 0; j < ids.length; j++) {
+      var idd = ids[j], Ld = huerf[idd];
+      if (emparejadas[idd] || iso_(Ld[0][1][1]) !== iso_(rv[0])) continue;
+      var prod = s(Ld[0][1][6]).toUpperCase().slice(0, 20);
+      if (Math.abs(sumDet(Ld) - n(rv[5])) <= 0.01 && prod && s(rv[4]).toUpperCase().indexOf(prod) >= 0) {
+        hallar('Venta partida en dos IDs', 'MEDIA', 'nota ' + s(rv[24]) + ' (' + usd(n(rv[5])) + ', ' + s(Ld[0][1][6]).slice(0, 30) +
+          '): el resumen dice ' + iv + ' y sus renglones dicen ' + idd + '. Esta contada UNA vez pero desconectada: ' +
+          'una devolucion por esa nota no encuentra los productos. NO borrar ninguna: en VENTAS_DETALLE fila ' + filasDe(Ld) +
+          ' poner ID_VENTA=' + iv + ' y NOTA_NUM=' + s(rv[24]) + '.', 'VENTAS ' + fv + ' / DETALLE ' + filasDe(Ld));
+        emparejadas[idd] = true; delete sinDet[iv]; break;
+      }
+    }
+  });
+  Object.keys(sinDet).forEach(function(id) {
+    var r = sinDet[id][1];
+    hallar('Venta sin detalle', 'ALTA', id + ' nota ' + s(r[24]) + ' del ' + iso_(r[0]) + ' (' + usd(n(r[5])) +
+      '): no tiene renglones. No descuenta stock ni tiene utilidad calculable.', sinDet[id][0]);
+  });
+  Object.keys(huerf).forEach(function(id) {
+    if (emparejadas[id]) return;
+    var L = huerf[id];
+    hallar('Detalle sin venta', 'ALTA', id + ': ' + L.length + ' renglon(es), ' + usd(sumDet(L)) + ', pero la venta no existe en ' +
+      'VENTAS. Siguen descontando stock y sumando utilidad. ' +
+      L.slice(0, 3).map(function(x) { return s(x[1][6]).slice(0, 30) + ' x' + s(x[1][7]); }).join('; '), filasDe(L));
+  });
+
+  // 4. Renglon repetido dentro de una misma venta
+  Object.keys(det).forEach(function(id) {
+    if (!ventas[id]) return;
+    var c = {};
+    det[id].filter(esOriginal).forEach(function(x) { var k = s(x[1][5]).toUpperCase() + ' x' + n(x[1][7]); c[k] = (c[k] || 0) + 1; });
+    var rep = Object.keys(c).filter(function(k) { return c[k] > 1; });
+    if (rep.length) hallar('Renglon repetido en una venta', 'MEDIA', id + ': ' +
+      rep.map(function(k) { return k + ' aparece ' + c[k] + ' veces'; }).join('; '), filasDe(det[id]));
+  });
+
+  // 5. Detalle que no cuadra con el total. Sin IVA ~100%; con IVA 16% ~86%. Fuera de 80-105% no lo explica el IVA.
+  Object.keys(ventas).forEach(function(id) {
+    if (!esApp(id) || !det[id]) return;
+    var r = ventas[id][0][1], tv = n(r[5]), td = sumDet(det[id]);
+    if (tv <= 0) return;
+    var q = td / tv;
+    if (q > 1.05 || q < 0.80) hallar('Detalle no cuadra con la venta', q >= 1.5 ? 'ALTA' : 'MEDIA', id + ' nota ' + s(r[24]) +
+      ': venta ' + usd(tv) + ', renglones suman ' + usd(td) + ' (' + Math.round(q * 100) + '%)', ventas[id][0][0]);
+  });
+
+  // 6. Notas repetidas y notas faltantes
+  var notas = {};
+  Object.keys(ventas).forEach(function(id) {
+    if (!esApp(id)) return;
+    ventas[id].forEach(function(x) { var k = s(x[1][24]); if (k) (notas[k] = notas[k] || {})[id] = x[0]; });
+  });
+  Object.keys(notas).forEach(function(k) {
+    var ids = Object.keys(notas[k]);
+    if (ids.length > 1) hallar('Nota repetida', 'ALTA', 'nota ' + k + ' usada por ' + ids.length + ' ventas: ' + ids.join(', '),
+      ids.map(function(i) { return notas[k][i]; }).join(', '));
+  });
+  var nums = Object.keys(notas).map(Number).filter(function(x) { return x > 0; }).sort(function(a, b) { return a - b; });
+  if (nums.length) {
+    var hay = {}; nums.forEach(function(x) { hay[x] = 1; });
+    var falt = [];
+    for (var q2 = nums[0]; q2 <= nums[nums.length - 1]; q2++) if (!hay[q2]) falt.push(q2);
+    if (falt.length) hallar('Notas faltantes en la numeracion', 'MEDIA', falt.length + ' nota(s) entre la ' + nums[0] + ' y la ' +
+      nums[nums.length - 1] + ' no estan en VENTAS: ' + falt.join(', ') + '. Cada una es una venta borrada o un numero ' +
+      'reservado que no llego a venta. Si se borro un duplicado, esta bien; si no, falta una venta.', 'VENTAS');
+  }
+
+  // 7. Cuentas por cobrar
+  var cargos = {}, abonos = [];
+  CX.forEach(function(x) {
+    var t = s(x[1][4]).toUpperCase();
+    if (t === 'CARGO') (cargos[s(x[1][5])] = cargos[s(x[1][5])] || []).push(x);
+    else if (t === 'ABONO') abonos.push(x);
+  });
+  Object.keys(cargos).forEach(function(id) {
+    if (id && esApp(id) && !ventas[id]) cargos[id].forEach(function(x) {
+      hallar('Deuda de una venta que no existe', 'ALTA', s(x[1][2]) + ' debe ' + usd(n(x[1][7])) + ' por ' + id +
+        ', pero esa venta no esta en VENTAS', x[0]);
+    });
+    if (cargos[id].length > 1) hallar('Deuda cargada dos veces', 'ALTA', id + ': ' + cargos[id].length + ' cargos en CXC_MOV', filasDe(cargos[id]));
+  });
+  Object.keys(ventas).forEach(function(id) {
+    var r = ventas[id][0][1], cred = n(r[30]);
+    if (!esApp(id) || cred <= 0.009) return;
+    if (!cargos[id]) hallar('Venta a credito sin deuda registrada', 'ALTA', id + ' nota ' + s(r[24]) + ': ' + usd(cred) +
+      ' a credito a ' + s(r[25]) + ', sin cargo en CXC_MOV', ventas[id][0][0]);
+    else {
+      var tc = cargos[id].reduce(function(a, x) { return a + n(x[1][7]); }, 0);
+      if (Math.abs(tc - cred) > 0.05) hallar('Deuda distinta al credito de la venta', 'MEDIA', id + ' nota ' + s(r[24]) +
+        ': credito ' + usd(cred) + ', cargo ' + usd(tc), ventas[id][0][0]);
+    }
+  });
+
+  // 8. Abonos repetidos: por ID, y por cliente + fecha + minuto + monto
+  var ida = {}, fa = {};
+  abonos.forEach(function(x) {
+    var r = x[1];
+    if (s(r[5])) (ida[s(r[5])] = ida[s(r[5])] || []).push(x[0]);
+    var k = [s(r[2]).toUpperCase(), iso_(r[0]), s(r[1]).slice(0, 5), n(r[7]).toFixed(2)].join('|');
+    (fa[k] = fa[k] || []).push(x[0]);
+  });
+  Object.keys(ida).forEach(function(k) { if (ida[k].length > 1) hallar('Abono con ID repetido', 'ALTA', k + ' registrado ' + ida[k].length + ' veces', ida[k].join(', ')); });
+  Object.keys(fa).forEach(function(k) {
+    if (fa[k].length > 1) { var p = k.split('|'); hallar('Posible abono duplicado', 'ALTA', p[0] + ' el ' + p[1] + ' a las ' + p[2] + ': $' + p[3] + ', ' + fa[k].length + ' veces', fa[k].join(', ')); }
+  });
+
+  // 9. Comisiones: aliado inexistente, venta inexistente, congelada con la nota pagada
+  var cab = (CL && CL[0] || []).map(function(x) { return s(x).toUpperCase(); });
+  var iA = cab.indexOf('ALIADO'), iR = cab.indexOf('RIF'), aNom = {}, aCed = {};
+  if (CL && iA >= 0) for (var c1 = 1; c1 < CL.length; c1++) {
+    if (['SI', 'SÍ'].indexOf(s(CL[c1][iA]).toUpperCase()) < 0) continue;
+    aNom[s(CL[c1][0]).toUpperCase()] = 1;
+    var cd = s(CL[c1][iR]).replace(/\D/g, ''); if (cd) aCed[cd] = 1;
+  }
+  // Estado de cada nota calculado AQUI, con la misma regla de estadoCxc_ (abonos a las notas mas viejas primero).
+  // No se llama a estadoCxc_ a proposito: esa funcion llama a completarProductos_, que ESCRIBE en CXC_MOV.
+  // Una conciliacion que modifica los datos que esta revisando deja de servir como control.
+  var estNota = {}, porCli = {};
+  CX.forEach(function(x) {
+    var r = x[1], t = s(r[4]).toUpperCase(), k = s(r[2]).toUpperCase();
+    var p = porCli[k] || (porCli[k] = {c:[], a:0});
+    if (t === 'CARGO') p.c.push([s(r[5]), n(r[7])]); else if (t === 'ABONO') p.a += n(r[7]);
+  });
+  Object.keys(porCli).forEach(function(k) {
+    var resto = porCli[k].a;
+    porCli[k].c.forEach(function(c) {
+      var ap = Math.min(c[1], resto); resto -= ap;
+      estNota[c[0]] = (c[1] - ap <= 0.009) ? 'PAGADA' : (ap > 0 ? 'PARCIAL' : 'PENDIENTE');
+    });
+  });
+  CO.forEach(function(x) {
+    var r = x[1], nom = s(r[2]), ced = s(r[12]).replace(/\D/g, ''), est = s(r[9]).toUpperCase(), id = s(r[11]);
+    if (est.indexOf('PAGADA') === 0 || est.indexOf('ANULADA') === 0) return;
+    if (!(ced && aCed[ced]) && !aNom[nom.toUpperCase()]) hallar('Comision de un aliado que no existe', 'MEDIA', '"' + nom + '" (' + est +
+      ', Bs ' + Math.round(n(r[7])) + '): no coincide con ningun aliado de CLIENTES ni por nombre ni por cedula. No sale en Liquidacion.', x[0]);
+    if (id && esApp(id) && !ventas[id]) hallar('Comision de una venta que no existe', 'MEDIA', est + ' de ' + nom + ': la venta ' + id + ' no esta en VENTAS', x[0]);
+    if (est === 'PENDIENTE COBRO' && estNota[id] === 'PAGADA') hallar('Comision congelada con la nota ya pagada', 'MEDIA',
+      nom + ': la nota ' + id + ' esta pagada y la comision sigue en PENDIENTE COBRO', x[0]);
+  });
+
+  // 10. Compras a credito sin cuenta por pagar
+  var cxp = {};
+  PX.forEach(function(x) { if (s(x[1][3]).toUpperCase() === 'CARGO') cxp[s(x[1][4])] = 1; });
+  CP.forEach(function(x) {
+    var r = x[1];
+    if (s(r[8]).toUpperCase() === 'COSTEADA' && s(r[14]).toUpperCase() === 'CREDITO' && !cxp[s(r[0])])
+      hallar('Compra a credito sin deuda con el proveedor', 'ALTA', s(r[0]) + ' de ' + s(r[3]) + ' (' + usd(n(r[9])) +
+        '): costeada a credito, sin cargo en CXP_MOV', x[0]);
+  });
+
+  // 11. Facturas: numeros reservados contra registrados
+  var fnum = 0;
+  CFG.forEach(function(r) { if (s(r[0]).toUpperCase() === 'FACTURA_NUM') fnum = Math.round(n(r[1])); });
+  var registradas = 0;
+  Object.keys(ventas).forEach(function(id) { if (s(ventas[id][0][1][35])) registradas++; });
+  if (fnum > registradas) hallar('Facturas numeradas sin registro', 'ALTA', 'CONFIG reservo ' + fnum + ' numero(s) de factura y hay ' +
+    registradas + ' registrada(s)' + (ss.getSheetByName('FACTURAS') ? '' : ' (la hoja FACTURAS no existe)') +
+    '. Cada diferencia es un PDF fiscal que pudo entregarse sin quedar en las hojas.', 'CONFIG');
+
+  // 12. Cambios con diferencia a favor de la tienda que no se cobraron (v27)
+  var DV = datos(hoja('DEVOLUCIONES'));
+  DV.forEach(function(x) {
+    var r = x[1], dif = n(r[9]), res = s(r[10]).toUpperCase();
+    if (dif > 0.009 && res !== 'COBRO') hallar('Cambio con diferencia sin cobrar', 'MEDIA', 'devolucion ' + s(r[0]) + ' (nota ' + s(r[3]) +
+      '): el cliente se llevo ' + usd(dif) + ' mas de lo que devolvio y la resolucion es "' + (res || 'vacia') + '". Si fue un descuento, esta bien.', x[0]);
+  });
+
+  // 13. El mismo numero de nota en las tres hojas (v27). La nota es lo que el cliente tiene en la mano:
+  //     si VENTAS dice una y el detalle o la deuda dicen otra, buscar por nota da resultados distintos.
+  Object.keys(ventas).forEach(function(id) {
+    if (!esApp(id)) return;
+    var r = ventas[id][0][1], nv = s(r[24]); if (!nv) return;
+    var malD = (det[id] || []).filter(function(x) { return s(x[1][15]) && s(x[1][15]) !== nv; });
+    var malC = (cargos[id] || []).filter(function(x) { return s(x[1][6]) && s(x[1][6]) !== nv; });
+    if (malD.length || malC.length) hallar('Nota distinta entre hojas', 'MEDIA', id + ': VENTAS dice nota ' + nv +
+      (malD.length ? '; el detalle dice ' + malD.map(function(x) { return s(x[1][15]); }).filter(function(v, i, a) { return a.indexOf(v) === i; }).join('/') + ' (filas ' + filasDe(malD) + ')' : '') +
+      (malC.length ? '; la deuda dice ' + malC.map(function(x) { return s(x[1][6]); }).join('/') + ' (filas CXC ' + filasDe(malC) + ')' : ''), ventas[id][0][0]);
+  });
+
+  // 14. Fechas (v27): dia y mes invertidos en el historico importado, y fechas en el futuro.
+  var FV = hoja(SH_VENTAS) || [];
+  var inv = fechasInvertidas_(FV);
+  if (inv.length) {
+    var tramos = [], t0 = null;
+    inv.forEach(function(x) {
+      if (t0 && x.fila === t0.hasta + 1) { t0.hasta = x.fila; t0.n++; }
+      else { t0 = {desde:x.fila, hasta:x.fila, n:1, ej:x}; tramos.push(t0); }
+    });
+    hallar('Fechas con dia y mes invertidos', 'ALTA', inv.length + ' ventas del historico importado tienen el dia y el mes al reves ' +
+      '(ej. fila ' + inv[0].fila + ': dice ' + inv[0].actual + ', es ' + inv[0].correcta + '). Gerencia las suma en el ' +
+      'mes equivocado. Tramos: ' + tramos.map(function(t) { return t.desde === t.hasta ? String(t.desde) : t.desde + '-' + t.hasta; }).join(', ') +
+      '. Se corrigen de una vez con repararFechasInvertidas() desde el editor.', 'VENTAS');
+  }
+  var hoyIso = Utilities.formatDate(new Date(), TZ_VE, 'yyyy-MM-dd'), futuras = [];
+  for (var fi = 1; fi < FV.length; fi++) { var fz = iso_(FV[fi][0]); if (fz && fz > hoyIso) futuras.push(fi + 1); }
+  var futurasSolas = futuras.filter(function(f) { return !inv.some(function(x) { return x.fila === f; }); });
+  if (futurasSolas.length) hallar('Venta con fecha en el futuro', 'ALTA', futurasSolas.length + ' venta(s) con fecha posterior a hoy que no se ' +
+    'explican por dia/mes invertido. Revisarlas a mano.', futurasSolas.join(', '));
+
+  // ---------- informe ----------
+  var orden = {ALTA:0, MEDIA:1};
+  H.sort(function(a, b) { return (orden[a[0]] - orden[b[0]]) || a[1].localeCompare(b[1]); });
+  var sh = ss.getSheetByName('CONCILIACION') || ss.insertSheet('CONCILIACION');
+  sh.clear();
+  var ahora = Utilities.formatDate(new Date(), TZ_VE, 'dd/MM/yyyy HH:mm');
+  var alta = H.filter(function(h) { return h[0] === 'ALTA'; }).length;
+  sh.getRange(1, 1, 3, 1).setValues([['CONCILIACION · ' + ahora + ' · solo lectura, no se modifico ninguna hoja'],
+    [H.length + ' hallazgos: ' + alta + ' ALTA, ' + (H.length - alta) + ' MEDIA · ' + Object.keys(ventas).length +
+     ' ventas con ID revisadas · ' + D.length + ' renglones · ' + CX.length + ' movimientos CXC · ' + CO.length + ' comisiones'],
+    ['El historico importado (H-VTA-###) queda fuera por diseno.']]);
+  sh.getRange(5, 1, 1, 4).setValues([['GRAVEDAD', 'CONTROL', 'DETALLE', 'FILAS']]).setFontWeight('bold');
+  if (H.length) sh.getRange(6, 1, H.length, 4).setValues(H);
+  sh.getRange(1, 1).setFontWeight('bold');
+  sh.setColumnWidth(1, 80); sh.setColumnWidth(2, 260); sh.setColumnWidth(3, 720); sh.setColumnWidth(4, 160);
+  sh.getRange(6, 3, Math.max(H.length, 1), 1).setWrap(true);
+  SpreadsheetApp.flush();
+
+  var msg = 'Conciliacion lista: ' + H.length + ' hallazgos (' + alta + ' ALTA). Estan en la hoja CONCILIACION.';
+  Logger.log(msg);
+  try { SpreadsheetApp.getUi().alert(msg); } catch (e) {}
+  return msg;
+}
+
+// v27 — FECHAS CON DIA Y MES INVERTIDOS. Al importar el historico, la hoja leyo "09/07/2026" (9 de julio)
+// como 7 de septiembre: cuando el dia es 12 o menos, cabe como mes. Las filas quedaron guardadas como fecha
+// real, solo que la equivocada, y Gerencia sumaba ventas de julio y agosto en septiembre, noviembre o
+// diciembre. Como se reconocen sin adivinar:
+//   - solo se miran filas del historico (sin ID de la app: la app siempre escribio bien la fecha);
+//   - solo fechas guardadas como FECHA con dia <= 12 y distinto del mes (las demas no pueden estar invertidas);
+//   - las filas estan en orden de llegada, asi que cada una se compara con las vecinas que NO pueden estar
+//     invertidas (texto dd/mm/aaaa, dia > 12, o venta de la app). Es invertida si la fecha al reves cae entre
+//     sus vecinas y la fecha como esta no. Si ninguna de las dos cae, no se toca: se revisa a mano.
+function fechasInvertidas_(F) {
+  // Todo con la fecha en texto ISO de Venezuela (iso_): asi la zona horaria del proyecto no corre un dia.
+  function dias(iso) { var p = iso.split('-'); return Date.UTC(+p[0], +p[1] - 1, +p[2]) / 86400000; }
+  function ddmm(iso) { var p = iso.split('-'); return p[2] + '/' + p[1] + '/' + p[0]; }
+  var filas = [];
+  for (var i = 1; i < F.length; i++) {
+    var v = F[i][0], id = String(F[i][COL_ID - 1] || '').trim();
+    var iso = iso_(v);
+    if (!iso) continue;
+    var p = iso.split('-'), dia = +p[2], mes = +p[1];
+    var candidata = esFecha_(v) && !id && dia <= 12 && dia !== mes;
+    filas.push({fila:i + 1, iso:iso, candidata:candidata, alReves:p[0] + '-' + p[2] + '-' + p[1]});
+  }
+  var out = [];
+  for (var k = 0; k < filas.length; k++) {
+    var x = filas[k];
+    if (!x.candidata) continue;
+    var lo = null, hi = null;
+    for (var a = k - 1; a >= 0; a--) if (!filas[a].candidata) { lo = dias(filas[a].iso); break; }
+    for (var b = k + 1; b < filas.length; b++) if (!filas[b].candidata) { hi = dias(filas[b].iso); break; }
+    var cabe = function(iso) { var d = dias(iso); return (lo === null || d >= lo - 1) && (hi === null || d <= hi + 1); };
+    if (cabe(x.alReves) && !cabe(x.iso)) out.push({fila:x.fila, actual:ddmm(x.iso), correcta:ddmm(x.alReves)});
+  }
+  return out;
+}
+
+// Se ejecuta UNA VEZ desde el editor. Corrige las fechas que fechasInvertidas_ reconoce y deja cada cambio
+// en la hoja FECHAS_CORREGIDAS (fila, fecha que tenia, fecha que quedo). Correrla otra vez no hace nada.
+function repararFechasInvertidas() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var lock = LockService.getScriptLock(); lock.waitLock(30000);
+  var inv = [];
+  try {
+    var sh = ss.getSheetByName(SH_VENTAS);
+    inv = fechasInvertidas_(sh.getDataRange().getValues());
+    if (inv.length) {
+      var reg = hojaAp_(ss, 'FECHAS_CORREGIDAS', ['CORREGIDO','HOJA','FILA','TENIA','QUEDO']);
+      var ahora = new Date();
+      inv.forEach(function(x) {
+        sh.getRange(x.fila, 1).setValue(fechaVE_(x.correcta));      // mediodia de Venezuela, como la app
+        formatoFecha_(sh, x.fila, 1);
+        reg.appendRow([ahora, SH_VENTAS, x.fila, x.actual, x.correcta]);
+      });
+    }
+    SpreadsheetApp.flush();
+  } finally { lock.releaseLock(); }
+  var msg = inv.length ? inv.length + ' fechas corregidas en VENTAS. El detalle de cada una esta en la hoja FECHAS_CORREGIDAS.'
+                       : 'No hay fechas invertidas: nada que corregir.';
+  Logger.log(msg);
+  try { SpreadsheetApp.getUi().alert(msg); } catch (e) {}
+  return msg;
 }
 
 // ============================================================
@@ -2695,18 +3623,35 @@ function comisionesDe_(ss, nombre, cedula, tasaHoy) {
   return out;
 }
 
+// v27 — lo que debe un aliado como cliente: por su cedula primero (la cuenta ya se agrupa por cedula) y,
+// si no tiene cedula, por su nombre o cualquiera de los nombres con que aparece esa cuenta.
+function deudaDeAliado_(deudas, nombre, cedula) {
+  var c = cuentaDeAliado_(deudas, nombre, cedula);
+  // Un saldo a favor NO es deuda: si se tomara negativo, la liquidacion le pagaria de mas.
+  return c ? Math.max(0, round2_(Number(c.saldoUSD) || 0)) : 0;
+}
+function cuentaDeAliado_(deudas, nombre, cedula) {
+  var ced = soloDigitos_(cedula), nom = String(nombre || '').trim().toUpperCase();
+  for (var i = 0; i < (deudas || []).length; i++) {
+    if (ced && ced.length >= 5 && soloDigitos_(deudas[i].rif) === ced) return deudas[i];
+  }
+  for (var j = 0; j < (deudas || []).length; j++) {
+    var c2 = deudas[j];
+    var nombres = [c2.cliente].concat(c2.tambienComo || []).map(function(x) { return String(x).trim().toUpperCase(); });
+    if (nombres.indexOf(nom) >= 0) return c2;
+  }
+  return null;
+}
+
 // Lo que cada aliado tiene ganado y lo que debe, para la pantalla de liquidacion.
 function estadoLiquidacion_(ss) {
   var tasa = leerTasa_(ss);
   var deudas = estadoCxc_(ss, '');
-  var porNombre = {};
-  (deudas || []).forEach(function(c) { porNombre[String(c.cliente || '').trim().toUpperCase()] = c; });
 
   var out = [];
   listaAliados_(ss).forEach(function(a) {
     var com = comisionesDe_(ss, a.nombre, a.cedula, tasa);
-    var d = porNombre[String(a.nombre).trim().toUpperCase()];
-    var deuda = d ? round2_(Number(d.saldoUSD) || 0) : 0;
+    var deuda = deudaDeAliado_(deudas, a.nombre, a.cedula);
     out.push({nombre:a.nombre, cedula:a.cedula, negocio:a.negocio, pct:a.pct,
               comisiones:com.totalUSD, ventas:com.cobrables.length, porCobrar:com.porCobrar,
               aproximadas:com.aproximadas, deuda:deuda, neto:round2_(com.totalUSD - deuda)});
@@ -2725,12 +3670,13 @@ function liquidarAliado_(ss, d) {
 
   var com = comisionesDe_(ss, ali.nombre, ali.cedula, tasa);
   if (!com.cobrables.length) throw new Error('Ese aliado no tiene comisiones por pagar');
+  // v27: con devoluciones, las comisiones pueden sumar cero o menos. Entonces no hay nada que pagar.
+  if (!(com.totalUSD > 0)) throw new Error('Las comisiones de ' + ali.nombre + ' suman $' + com.totalUSD +
+                                            ' (hay devoluciones que las descuentan). No hay nada que pagar.');
 
-  var deudas = estadoCxc_(ss, ali.nombre);
-  var deuda = 0;
-  (deudas || []).forEach(function(c) {
-    if (String(c.cliente || '').trim().toUpperCase() === String(ali.nombre).trim().toUpperCase()) deuda = Number(c.saldoUSD) || 0;
-  });
+  var todas = estadoCxc_(ss, '');
+  var cuentaDeuda = cuentaDeAliado_(todas, ali.nombre, ali.cedula);
+  var deuda = deudaDeAliado_(todas, ali.nombre, ali.cedula);
 
   var ganado = com.totalUSD;
   var compensa = round2_(Math.min(ganado, deuda));    // lo que se le descuenta de la deuda
@@ -2754,7 +3700,10 @@ function liquidarAliado_(ss, d) {
     var cx = hojaCxc_(ss);
     // Mismas columnas que un abono normal: MONTO_USD en la 8. Metodo COMPENSACION y MONTO_PAGADO en 0,
     // porque no entro dinero: si entrara como cobro normal, al conciliar la caja sobraria ese monto.
-    cx.appendRow([fechaVE_(fechaHoy), Utilities.formatDate(hoy, TZ_VE, 'HH:mm'), ali.nombre, ali.cedula,
+    // v27: el abono va a la MISMA cuenta donde esta la deuda (su nombre y su cedula). Si se escribiera con la
+    // cedula del aliado y la deuda estuviera bajo otra, la deuda no bajaria y quedaria un saldo a favor falso.
+    cx.appendRow([fechaVE_(fechaHoy), Utilities.formatDate(hoy, TZ_VE, 'HH:mm'),
+                  cuentaDeuda ? cuentaDeuda.cliente : ali.nombre, cuentaDeuda ? cuentaDeuda.rif : ali.cedula,
                   'ABONO', idLiq, '', compensa, 'USD', 0, tasa, 'COMPENSACION', '', 0, d.quien,
                   'Comisiones aplicadas a su deuda (liquidacion ' + idLiq + ')', '']);
     formatoFecha_(cx, cx.getLastRow(), 1);
@@ -2773,6 +3722,132 @@ function liquidarAliado_(ss, d) {
           deudaAntes:round2_(deuda), deudaDespues:round2_(deuda - compensa)};
 }
 
+
+// v27 — GASTO: con candado y sin duplicar. Antes no tenia ni lo uno ni lo otro: con mala senal la
+// pantalla decia "reintenta", el telefono reenviaba y el gasto quedaba dos veces (y el prestamo del
+// socio tambien). Ahora se busca el ID_GASTO antes de escribir; la pantalla lo conserva al reintentar.
+function guardarGasto_(ss, data) {
+  var shG = ss.getSheetByName('GASTOS');
+  if (!shG) {
+    shG = ss.insertSheet('GASTOS');
+    shG.appendRow(['ID_GASTO','FECHA','HORA','CATEGORIA','DESCRIPCION','MONTO','MONEDA','TASA','MONTO_USD','MONTO_BS','METODO','BANCO','PAGADO_POR','REGISTRADO_POR','COMPROBANTE','NOTAS']);
+    shG.setFrozenRows(1);
+  }
+  var monto = Number(data.monto), tasaG = Number(data.tasa) || 0;
+  if (!(monto > 0) || !isFinite(monto)) throw new Error('Monto invalido');
+  var idG = String(data.idGasto || '').trim();
+  if (idG && shG.getLastRow() >= 2) {
+    var ids = shG.getRange(2, 1, shG.getLastRow() - 1, 1).getValues();
+    for (var i = ids.length - 1; i >= 0; i--) {
+      if (String(ids[i][0]).trim() === idG) return {ok:true, tipo:'gasto', repetido:true};
+    }
+  }
+  var usd = data.moneda === 'BS' ? (tasaG ? monto / tasaG : 0) : monto;
+  var bs  = data.moneda === 'BS' ? monto : monto * tasaG;
+  shG.appendRow([idG, fechaVE_(data.fecha), data.hora||'', data.categoria||'', data.descripcion||'',
+    monto, data.moneda||'USD', tasaG, Math.round(usd*100)/100, Math.round(bs), data.metodo||'', data.banco||'',
+    data.pagadoPor||'', data.registradoPor||'', urlFotoOk_(data.comprobante) ? data.comprobante : '', data.notas||'']);
+  formatoFecha_(shG, shG.getLastRow(), 2);
+  // Si lo pago un socio de su bolsillo, la tienda se lo debe: PRESTAMO en la cuenta corriente del socio
+  var pp = String(data.pagadoPor||'').toUpperCase();
+  if (pp === 'RODOLFO' || pp === 'JAVIER') {
+    movSocio_(ss, {fecha:data.fecha, socio:pp, tipo:'PRESTAMO', montoUSD:Math.round(usd*100)/100, moneda:data.moneda||'USD',
+                   montoPagado:monto, tasa:tasaG, origen:idG, descripcion:(data.categoria||'') + ' - ' + (data.descripcion||''), registradoPor:data.registradoPor||''});
+  }
+  return {ok:true, tipo:'gasto', repetido:false};
+}
+
+// ============================================================
+// CUENTAS Y MOVIMIENTOS ENTRE CUENTAS (v27) — la base del flujo de caja
+// ============================================================
+// El flujo de caja necesita saber DONDE esta el dinero, no solo cuanto entro y salio. Hasta v26 las
+// ventas, abonos y gastos traian metodo y banco, pero nada registraba:
+//   - con cuanto arranco cada cuenta (SALDO_INICIAL, se carga el 30/09 contando la caja),
+//   - el dinero que se mueve de una cuenta a otra sin ser venta ni gasto: depositar efectivo en el
+//     banco, cambiar bolivares a dolares, pasar de Banesco a Bancamiga (TRASPASO),
+//   - lo que sale para un socio o entra de un socio (RETIRO_SOCIO, APORTE_SOCIO, REEMBOLSO_SOCIO),
+//   - la diferencia que aparece al contar la caja (AJUSTE).
+// CUENTAS es una hoja: agregar una cuenta nueva no requiere tocar codigo.
+var CUENTAS_DEFECTO = [
+  ['Efectivo USD', 'USD', 'SI'], ['Efectivo Bs', 'BS', 'SI'], ['Banesco', 'BS', 'SI'], ['Bancamiga', 'BS', 'SI'],
+  ['Bancrecer', 'BS', 'SI'], ['Bancrecer Empresarial', 'BS', 'SI'], ['Zelle', 'USD', 'SI'], ['Binance', 'USD', 'SI']
+];
+function listaCuentas_(ss) {
+  var sh = hojaSemilla_(ss, 'CUENTAS', ['CUENTA', 'MONEDA', 'ACTIVA'], CUENTAS_DEFECTO);
+  var out = [];
+  var filas = (sh && sh.getLastRow() >= 2) ? sh.getRange(2, 1, sh.getLastRow() - 1, 3).getValues() : CUENTAS_DEFECTO;
+  filas.forEach(function(r) {
+    var n = String(r[0] || '').trim(), m = String(r[1] || '').trim().toUpperCase();
+    if (!n || (m !== 'USD' && m !== 'BS') || !siNo_(r[2], true)) return;
+    out.push({cuenta:n, moneda:m});
+  });
+  return out;
+}
+function hojaMovCuentas_(ss) {
+  return hojaAp_(ss, 'MOV_CUENTAS', ['ID','FECHA','HORA','TIPO','CUENTA_ORIGEN','MONTO_ORIGEN','MONEDA_ORIGEN',
+    'CUENTA_DESTINO','MONTO_DESTINO','MONEDA_DESTINO','TASA','SOCIO','REGISTRADO_POR','NOTAS']);
+}
+var TIPOS_MOV_CUENTA = {SALDO_INICIAL:'D', TRASPASO:'OD', AJUSTE_ENTRA:'D', AJUSTE_SALE:'O',
+                        RETIRO_SOCIO:'O', REEMBOLSO_SOCIO:'O', APORTE_SOCIO:'D'};
+function movCuenta_(ss, d, quien) {
+  var tipo = String(d.tipoMov || '').trim().toUpperCase();
+  var forma = TIPOS_MOV_CUENTA[tipo];
+  if (!forma) throw new Error('Tipo de movimiento invalido');
+  var id = String(d.idMov || '').trim();
+  if (!id) throw new Error('Falta el identificador del movimiento');
+  var sh = hojaMovCuentas_(ss);
+  if (sh.getLastRow() >= 2) {
+    var ids = sh.getRange(2, 1, sh.getLastRow() - 1, 1).getValues();
+    for (var i = 0; i < ids.length; i++) if (String(ids[i][0]).trim() === id) return {ok:true, tipo:'mov_cuenta', id:id, repetido:true};
+  }
+  var cuentas = {};
+  listaCuentas_(ss).forEach(function(c) { cuentas[c.cuenta.toUpperCase()] = c; });
+  function cuenta(nombre, que) {
+    var c = cuentas[String(nombre || '').trim().toUpperCase()];
+    if (!c) throw new Error('Cuenta ' + que + ' invalida: ' + (nombre || '(vacia)') + '. Las cuentas estan en la hoja CUENTAS.');
+    return c;
+  }
+  function monto(v, que) {
+    var n = Number(v);
+    if (!(n > 0) || !isFinite(n)) throw new Error('Monto ' + que + ' invalido');
+    return round2_(n);
+  }
+  var o = null, mo = '', dd = null, md = '';
+  if (forma.indexOf('O') >= 0) { o = cuenta(d.origen, 'de origen'); mo = monto(d.montoOrigen, 'que sale'); }
+  if (forma.indexOf('D') >= 0) { dd = cuenta(d.destino, 'de destino'); md = monto(d.montoDestino, 'que entra'); }
+  if (o && dd && o.cuenta === dd.cuenta) throw new Error('El origen y el destino son la misma cuenta');
+  var socio = '';
+  if (tipo.indexOf('SOCIO') >= 0) {
+    socio = String(d.socio || '').trim().toUpperCase();
+    if (socio !== 'RODOLFO' && socio !== 'JAVIER') throw new Error('Indica el socio');
+  }
+  var tasa = Number(d.tasa) || 0;
+  // En un cambio de moneda la tasa sale de los dos montos: es la tasa a la que de verdad se cambio.
+  if (o && dd && o.moneda !== dd.moneda) tasa = o.moneda === 'BS' ? round2_(mo / md) : round2_(md / mo);
+  // Todo lo que puede fallar se revisa ANTES de escribir: si no, un reintento veria el ID ya escrito,
+  // diria "ya estaba" y el movimiento del socio nunca llegaria a su cuenta corriente.
+  var usdSocio = 0;
+  if (socio) {
+    var cS = o || dd, mS = o ? mo : md;
+    usdSocio = cS.moneda === 'USD' ? mS : (tasa ? round2_(mS / tasa) : 0);
+    if (!usdSocio) throw new Error('Para un movimiento en bolivares con un socio hace falta la tasa');
+  }
+  var ahora = new Date();
+  sh.appendRow([id, fechaVE_(d.fecha), d.hora || Utilities.formatDate(ahora, TZ_VE, 'HH:mm'), tipo,
+                o ? o.cuenta : '', o ? mo : '', o ? o.moneda : '', dd ? dd.cuenta : '', dd ? md : '', dd ? dd.moneda : '',
+                tasa, socio, (quien && quien.nombre) || d.registradoPor || '', String(d.notas || '').slice(0, 300)]);
+  formatoFecha_(sh, sh.getLastRow(), 2);
+
+  // Los movimientos con socio tambien van a su cuenta corriente, que es donde se ve cuanto se le debe.
+  if (socio) {
+    var c = o || dd, m = o ? mo : md, usd = usdSocio;
+    var tipoSocio = {RETIRO_SOCIO:'RETIRO', REEMBOLSO_SOCIO:'REEMBOLSO', APORTE_SOCIO:'APORTE_CAPITAL'}[tipo];
+    movSocio_(ss, {fecha:d.fecha, socio:socio, tipo:tipoSocio, montoUSD:usd, moneda:c.moneda, montoPagado:m, tasa:tasa,
+                   origen:id, descripcion:(o ? 'Sale de ' + o.cuenta : 'Entra a ' + dd.cuenta) + (d.notas ? ' - ' + d.notas : ''),
+                   registradoPor:(quien && quien.nombre) || ''});
+  }
+  return {ok:true, tipo:'mov_cuenta', id:id, repetido:false};
+}
 
 // ============================================================
 // FICHA DEL PRODUCTO (v23)

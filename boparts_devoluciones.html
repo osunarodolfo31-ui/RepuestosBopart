@@ -1,7 +1,11 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_devoluciones.html
-  VERSION: v1.7 (2026-09-22) | build 2026-09-23.1 |
+  VERSION: v1.8 (2026-09-24) | build 2026-09-24.1 | requiere Apps Script v27
+  v1.8: boton "Anular la venta completa" (prueba, duplicada, venta que no ocurrio). Quita venta, detalle,
+  deuda y comision juntos y deja copia en VENTAS_ANULADAS; reemplaza el borrar filas a mano. El precio y
+  el costo de lo devuelto ahora los pone el servidor desde la nota original.
+  VERSION anterior: v1.7 (2026-09-22) | build 2026-09-23.1 |
   v1.7: sesion, login y aviso de version salen del HTML y viven en boparts_sesion.js, un solo archivo
   para las 12 pantallas. Estaban copiados byte a byte doce veces; de ahi salio el leerJSON duplicado.
   REQUIERE subir boparts_sesion.js junto a este archivo.
@@ -298,7 +302,7 @@ select option{background:#1E1E1E;color:var(--ink)}
   </div>
 </div>
 
-<script src="boparts_sesion.js?v=2026-09-23.1"></script>
+<script src="boparts_sesion.js?v=2026-09-24.1"></script>
 <script>
 
 
@@ -312,7 +316,7 @@ function sellarVersion(d) {
   return d;
 }
 function txt_(v) { return v == null ? '' : String(v); }
-var APP_VERSION = 'v1.7';
+var APP_VERSION = 'v1.8';
 var PIN_HASH_SOCIOS = 911136;      // mismo PIN de Gerencia
 var PLAZO_DIAS = 5;                // maximo acordado para aceptar un cambio
 var TASA = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
@@ -434,8 +438,41 @@ function render() {
     '<div class="field"><label>Motivo *</label><input type="text" id="inMotivo" placeholder="Se equivoco de modelo, no le sirvio..." oninput="guardarForm()" value="' + escHtml(FORM.motivo) + '"></div>' +
     '<button class="nbtn nbtn-p" onclick="guardar()">Registrar ' + (nuevas.length ? 'cambio' : 'devolucion') + '</button></div>';
 
+  // v1.8: anular la venta completa (prueba, duplicada, venta que no ocurrio). Reemplaza el borrar filas a mano.
+  h += '<div class="section" style="border:1px solid rgba(255,107,107,.35)"><div class="stitle">Anular la venta completa</div>' +
+    '<div class="cominfo warn">Solo para una venta que NO debio existir: prueba, duplicada o que no ocurrio. Si el cliente devolvio ' +
+    'mercancia, usa la devolucion de arriba. Se quita la venta, su detalle, su deuda y la comision del aliado, todo junto, ' +
+    'y queda copia en la hoja VENTAS_ANULADAS con tu nombre y el motivo.</div>' +
+    '<div class="field"><label>Por que se anula *</label><input type="text" id="inMotivoAnular" placeholder="Venta duplicada, era prueba, el cliente no se la llevo..."></div>' +
+    '<button class="nbtn" style="background:var(--red);color:#fff" onclick="anularVenta()">Anular la nota NE-' + ('000' + NOTA.nota).slice(-4) + '</button></div>';
+
   document.getElementById('cuerpo').innerHTML = h;
   renderNuevas();
+}
+
+function anularVenta() {
+  if (!NOTA) return;
+  var motivo = (document.getElementById('inMotivoAnular').value || '').trim();
+  if (motivo.length < 5) { toast('Escribe por que se anula', 'err'); return; }
+  if (!confirm('Anular COMPLETA la nota NE-' + ('000' + NOTA.nota).slice(-4) + '?\n\nSe quita de ventas, inventario, deudas y comisiones. Queda copia en VENTAS_ANULADAS.')) return;
+  if (!pedirPin()) return;
+  fetch(SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'},
+                     body:JSON.stringify({tipo:'anular_venta', idVenta:NOTA.idVenta, nota:NOTA.nota, motivo:motivo})})
+    .then(function(r) { return r.text(); })
+    .then(function(t) {
+      var d; try { d = JSON.parse(t); } catch (e) { throw new Error('El script respondio: ' + t.replace(/<[^>]+>/g, ' ').slice(0, 90)); }
+      if (d && d.sesion) { olvidarSesion(); mostrarLogin(); throw new Error('tu sesion vencio, entra otra vez'); }
+      if (!d || !d.ok) throw new Error(d && d.error ? d.error : 'no se anulo');
+      var m = d.movidas || {};
+      toast('Nota ' + d.nota + ' anulada: venta, ' + (m.detalle || 0) + ' producto(s), ' + (m.deuda || 0) + ' deuda(s), ' +
+            (m.comisiones || 0) + ' comision(es)' + (d.comisionesCompensadas ? ', ' + d.comisionesCompensadas + ' comision pagada compensada' : '') +
+            '. ' + (d.aviso || ''), 'ok');
+      NOTA = null; sel = {}; nuevas = [];
+      document.getElementById('cuerpo').innerHTML = '';
+      document.getElementById('notaInfo').innerHTML = '<div class="cominfo">Venta anulada. Queda copia en VENTAS_ANULADAS.</div>';
+      document.getElementById('inNota').value = '';
+    })
+    .catch(function(e) { toast('No se anulo: ' + e.message, 'err'); });
 }
 
 function opcionesMetodos() {

@@ -1,7 +1,14 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_ventas.html
-  VERSION: v14.8 (2026-09-23) | build 2026-09-23.1 | REQUIERE Apps Script v26.1
+  VERSION: v14.9 (2026-09-24) | build 2026-09-24.1 | REQUIERE Apps Script v27
+  v14.9: (1) DISPONIBLE = stock - apartado. Cada linea del carrito avisa si se vende mas de lo disponible
+  (aviso, no bloqueo; el servidor lo deja en SOBREVENTAS). Un producto sin conteo no avisa: no se sabe
+  cuanto hay. (2) Auditoria #9: "no se sabe cuanto debe" ya no cuenta como "debe cero": sin saldo
+  confirmado no se da credito. La lista de productos se guarda en cache solo si llego bien, y si no se
+  pudo actualizar se avisa. (3) Si el servidor RECHAZA la venta (total que no cuadra, sin productos), se
+  dice que NO se registro y por que; el "no se pudo confirmar" queda solo para cuando se pierde la respuesta.
+  VERSION anterior: v14.8 (2026-09-23) | build 2026-09-23.1 | REQUIERE Apps Script v26.1
   v14.8: el mensaje de error decia "No se guardo la venta. Reintenta" y era MENTIRA. Cuando se pierde la
   RESPUESTA, el servidor pudo haber guardado igual; la pantalla no lo sabe y le aseguraba a Reinaldo que
   no, asi que la registraba otra vez. Paso el 22 y el 23/09. Ahora dice "No se pudo CONFIRMAR", y que
@@ -498,7 +505,7 @@ select option{background:#1E1E1E;color:var(--ink)}
   </div>
 </div>
 
-<script src="boparts_sesion.js?v=2026-09-23.1"></script>
+<script src="boparts_sesion.js?v=2026-09-24.1"></script>
 <script>
 
 
@@ -514,7 +521,7 @@ function sellarVersion(d) {
   if (t) t.textContent = 'app ' + APP_VERSION + ' \u00b7 script ' + VER_SCRIPT;
   return d;
 }
-var APP_VERSION = 'v14.8';
+var APP_VERSION = 'v14.9';
 var TASA        = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
 var TASA_ORIGEN = TASA ? 'guardada' : 'ninguna';
 
@@ -599,6 +606,7 @@ function alEntrar() { arrancarVenta(); }
 function arrancarVenta() {
   cargarMetodosYAliados();
   loadProducts();
+  cargarDisponible();
   sincronizarTasa();
   loadClientes();
   fijarPersonaDeSesion();
@@ -639,16 +647,23 @@ function isValidCSV(txt) {
 // ============================================================
 function loadProducts() {
   // Arranca con lo ultimo que se bajo en este telefono, para poder vender aunque el script tarde
-  var cached = sessionStorage.getItem('boparts_prod_v14');
-  if (cached) { try { parseProducts(cached); } catch (e) {} }
+  // v14.9 (auditoria #9): la lista se guarda en cache SOLO despues de entenderla, y si no se pudo
+  // actualizar se DICE. Antes el error se tragaba: se vendia con precios viejos sin saberlo.
+  var cached = null;
+  try { cached = sessionStorage.getItem('boparts_prod_v14'); } catch (e) {}
+  if (cached) { try { parseProducts(cached); } catch (e) { cached = null; } }
   fetch(SCRIPT_URL + '?action=productos&t=' + Date.now())
     .then(function(r) { return r.text(); })
     .then(function(txt) {
-      if (!txt || txt.charAt(0) !== '{') return;
+      if (!txt || txt.charAt(0) !== '{') throw new Error('el script no devolvio la lista');
+      parseProducts(txt);                                   // si falla, lanza y NO se guarda
       try { sessionStorage.setItem('boparts_prod_v14', txt); } catch (e) {}
-      parseProducts(txt);
     })
-    .catch(function() {});
+    .catch(function(e) {
+      if (e && e.message === 'SESION') return;
+      toast(cached ? 'No se pudo actualizar la lista de productos: estas viendo la ultima que bajo este telefono. Recarga para reintentar.'
+                   : 'No se pudo cargar la lista de productos (' + (e && e.message || 'sin conexion') + '). Recarga para reintentar.', 'err');
+    });
 }
 
 // v14: el script responde JSON. Se convierte a la misma forma de filas que traia el CSV para no tocar
@@ -781,6 +796,38 @@ document.addEventListener('click', function(e) {
 });
 
 // ============================================================
+// DISPONIBLE (v14.9): stock - apartado, por codigo. Se baja una vez al abrir, en segundo plano.
+// Si no llega, el carrito simplemente no avisa: nunca frena una venta.
+// ============================================================
+var DISP = {};
+function cargarDisponible() {
+  fetch(SCRIPT_URL + '?action=stock&t=' + Date.now())
+    .then(leerJSON)
+    .then(function(d) {
+      if (!d || !d.ok || !d.productos) return;
+      var m = {};
+      d.productos.forEach(function(p) {
+        if (p.disponible === null || p.disponible === undefined) return;
+        m[String(p.codigo).trim().toUpperCase()] = {disponible:Number(p.disponible), apartado:Number(p.apartado) || 0};
+      });
+      DISP = m;
+      if (cart.length) renderCart();
+    })
+    .catch(function() {});
+}
+function avisoDisponible(c) {
+  var k = String(c.codigo || '').trim().toUpperCase();
+  var d = DISP[k];
+  if (!d) return '';
+  var enCarrito = 0;
+  for (var i = 0; i < cart.length; i++) if (String(cart[i].codigo || '').trim().toUpperCase() === k) enCarrito += Number(cart[i].cantidad) || 0;
+  if (enCarrito <= d.disponible) return '';
+  return '<div class="cominfo" style="border-left-color:var(--red)">&#9888; Disponible: <b>' + Math.max(0, d.disponible) + '</b>' +
+    (d.apartado ? ' (hay ' + d.apartado + ' apartado' + (d.apartado > 1 ? 's' : '') + ' para otro cliente)' : '') +
+    '. Puedes vender igual; queda registrado.</div>';
+}
+
+// ============================================================
 // CART
 // ============================================================
 function addToCart(idx) {
@@ -799,7 +846,7 @@ function addToCart(idx) {
 function delCart(i)  { cart.splice(i, 1); renderCart(); updateTotals(); }
 function qUp(i)      { cart[i].cantidad++; renderCart(); updateTotals(); }
 function qDn(i)      { if (cart[i].cantidad > 1) { cart[i].cantidad--; renderCart(); updateTotals(); } }
-function setQ(i, v)  { cart[i].cantidad = parseInt(v) || 1; updateTotals(); }
+function setQ(i, v)  { cart[i].cantidad = parseInt(v) || 1; renderCart(); updateTotals(); }
 function setP(i, v)  { cart[i].precio   = parseFloat(v) || 0; updateTotals(); }
 
 function renderCart() {
@@ -833,6 +880,7 @@ function renderCart() {
           '<div class="csub">' + fmtUSD(c.precio * c.cantidad) + '</div>' +
         '</div>' +
       '</div>' +
+      avisoDisponible(c) +
     '</div>';
   }
   el.innerHTML = h;
@@ -994,18 +1042,25 @@ function selClienteVenta(i) {
   pintarClienteVenta();
 }
 var saldoCliente = 0;
+// v14.9 (auditoria #9): "no se sabe cuanto debe" ya no se confunde con "no debe nada".
+// saldoConocido queda en false mientras no llegue una respuesta buena, y sin eso no se da credito.
+var saldoConocido = false;
 // Cuanto debe hoy el cliente elegido, para comparar con su limite antes de dar mas credito.
 function cargarSaldoCliente() {
-  saldoCliente = 0;
+  saldoCliente = 0; saldoConocido = false;
   if (!clienteVenta) return;
-  fetch(SCRIPT_URL + '?action=cxc&cliente=' + encodeURIComponent(clienteVenta.nombre) + '&t=' + Date.now())
+  var quien = clienteVenta.nombre;
+  fetch(SCRIPT_URL + '?action=cxc&cliente=' + encodeURIComponent(quien) + '&t=' + Date.now())
     .then(leerJSON)
     .then(function(d) {
-      if (!d || !d.ok || !d.clientes || !d.clientes.length) return;
-      saldoCliente = parseNum(d.clientes[0].saldoUSD);
+      if (!clienteVenta || clienteVenta.nombre !== quien) return;     // cambiaron de cliente mientras tanto
+      if (!d || !d.ok) throw new Error(d && d.error || 'sin respuesta');
+      // Un cliente que nunca ha comprado a credito no aparece en la lista: ese SI debe cero.
+      saldoCliente = (d.clientes && d.clientes.length) ? parseNum(d.clientes[0].saldoUSD) : 0;
+      saldoConocido = true;
       renderPagos();
     })
-    .catch(function() {});
+    .catch(function() { saldoConocido = false; try { renderPagos(); } catch (e) {} });
 }
 
 function irACliente() {
@@ -1118,6 +1173,12 @@ function renderCredito(pagoId, on) {
         ' no esta autorizado para credito. Un socio lo autoriza desde Gerencia.</div>';
     } else {
       var lim2 = parseNum(clienteVenta.limite);
+      if (!saldoConocido) {
+        box.innerHTML = '<div class="cominfo" style="border-left-color:var(--red)">No se pudo confirmar cuanto debe <b>' +
+          escHtml(clienteVenta.nombre) + '</b>. Sin eso no se puede dar credito. ' +
+          '<a href="#" onclick="cargarSaldoCliente();return false" style="color:var(--brand)">Reintentar</a></div>';
+        return;
+      }
       var pasa = lim2 > 0 && saldoCliente >= lim2;
       box.innerHTML = '<div class="cominfo"' + (pasa ? ' style="border-left-color:var(--red)"' : '') + '>Cuenta por cobrar de <b>' + escHtml(clienteVenta.nombre) + '</b>' +
         (saldoCliente ? ' · ya debe ' + fmtUSD(saldoCliente) : '') +
@@ -1315,6 +1376,11 @@ function guardarVenta() {
   if (hayCredito && modoSocio) cliSel = {nombre:socioSel + ' (socio)', rif:'', tel:'', dir:'', credito:true};
   if (hayCredito && !modoSocio) {
     if (!clienteVenta.credito) { toast(clienteVenta.nombre + ' no esta autorizado para credito', 'err'); return; }
+    if (!saldoConocido) {
+      cargarSaldoCliente();
+      toast('No se pudo confirmar cuanto debe ' + clienteVenta.nombre + '. Espera unos segundos y registra otra vez.', 'err');
+      return;
+    }
     var lim = parseNum(clienteVenta.limite);
     if (lim > 0 && (saldoCliente + creditoUSD) > lim + 0.009) {
       var pin = prompt('Con esta venta ' + clienteVenta.nombre + ' quedaria en ' + fmtUSD(saldoCliente + creditoUSD) +
@@ -1376,6 +1442,16 @@ function guardarVenta() {
   postScript(payload)
     .then(function(d) {
       if (btn) { btn.disabled = false; btn.textContent = 'Registrar Venta'; }
+      if (d && d.sesion) {
+        // La sesion vencio: el servidor la rechazo ANTES de escribir nada. Se entra y se registra otra vez.
+        olvidarSesion(); mostrarLogin();
+        var e3 = new Error('tu sesion vencio. Entra con tu PIN y toca Registrar otra vez.'); e3.rechazo = true; throw e3;
+      }
+      if (d && d.ok === false && d.rechazada) {
+        // v14.9: el servidor revisó la venta ANTES de escribir y dijo que NO. Eso no es "no se sabe":
+        // es un no, con su motivo, y no quedo nada escrito.
+        var e2 = new Error(d.error); e2.rechazo = true; throw e2;
+      }
       if (!d || d.ok !== true) throw new Error(d && d.error ? d.error : 'Respuesta inesperada: ' + JSON.stringify(d).slice(0, 120));
       lastIdVenta = idVenta;
       lastPagos = pagoData.slice();
@@ -1388,11 +1464,18 @@ function guardarVenta() {
         (d.repetida ? 'Esta venta YA estaba registrada' + (d.numNota ? ' como nota ' + d.numNota : '') +
                       '. NO se duplico.\n\n' : '') +
         vendedor + ' - ' + fmtUSD(usd) + ' / ' + fmtBS(bs) +
-        (hayCredito ? '\nA credito: ' + fmtUSD(creditoUSD) + ' - ' + cliSel.nombre : '');
+        (hayCredito ? '\nA credito: ' + fmtUSD(creditoUSD) + ' - ' + cliSel.nombre : '') +
+        ((d.avisos && d.avisos.length) ? '\n\n\u26A0 Se vendio mas de lo disponible:\n' + d.avisos.map(function(a) {
+          return '- ' + a.producto + ': vendiste ' + a.vendido + ', disponible ' + a.disponible +
+                 (a.apartado ? ' (' + a.apartado + ' apartado)' : '');
+        }).join('\n') + '\nQuedo registrado. Revisa el conteo o el apartado.' : '');
+      cargarDisponible();
       document.getElementById('success').classList.add('open');
     })
     .catch(function(err) {
       if (btn) { btn.disabled = false; btn.textContent = 'Registrar Venta'; }
+      if (err && err.rechazo) { toast('La venta NO se registro: ' + err.message, 'err'); return; }
+      if (err && err.message === 'SESION') return;
       // v14.8 — ESTO DECIA "No se guardo la venta. Reintenta", y era mentira: cuando se pierde la
       // RESPUESTA, el servidor pudo haber guardado la venta igual. La pantalla no lo puede saber, y le
       // aseguraba a Reinaldo que no quedo — asi que el la registraba otra vez. Paso el 22 y el 23/09.
@@ -1494,7 +1577,7 @@ function resetAll() {
   cart = []; pagos = []; pid = 0;
   aliadoOn = false; aliadoSel = null; cliSel = null; lastCredito = null;
   olvidarIdVenta(); FACT = null;
-  clienteVenta = null; saldoCliente = 0; pintarClienteVenta();
+  clienteVenta = null; saldoCliente = 0; saldoConocido = false; pintarClienteVenta();
   FACTURAR = false;
   var ft = document.getElementById('factTog'); if (ft) ft.classList.remove('on');
   var fs = document.getElementById('factSub'); if (fs) fs.textContent = 'Apagado: nota de entrega, sin IVA';

@@ -1,5 +1,65 @@
 # CHANGELOG — Repuesto BoParts
 
+## Code.gs v27 + 11 pantallas — build 2026-09-24.1 — seguridad, disponible, anular venta, cuentas
+
+**Instalar, en este orden:**
+1. Apps Script: pegar el Code.gs completo > Guardar > Implementar > Administrar implementaciones >
+   lapiz > Version: **Nueva version** > Implementar. La URL /exec no cambia.
+2. GitHub: subir los 16 archivos (12 HTML, boparts_sesion.js, version.json, Code.gs, CHANGELOG.md).
+3. Despues de probar que la lista de precios muestra "↔ Equivalencia" al buscar un codigo de otra
+   marca: despublicar EQUIVALENCIAS (Archivo > Compartir > Publicar en la web > Detener publicacion).
+4. Una vez, desde el editor: `repararFechasInvertidas()` (174 fechas del historico con dia y mes al
+   reves; queda constancia en la hoja FECHAS_CORREGIDAS). Luego `conciliar()`.
+
+**Seguridad (auditoria #5, #6, #7, #8, #10, #11).**
+- El login falla CERRADO: solo un NO escrito a mano en CONFIG!B15 lo apaga. Antes, si CONFIG no se
+  leia, todo el mundo entraba como socio sin clave.
+- Una sesion por dispositivo (hoja SESIONES): entrar en el telefono ya no saca la computadora. Las
+  sesiones abiertas antes siguen valiendo hasta vencer: nadie tiene que volver a entrar el dia del cambio.
+- 5 PIN errados bloquean ese usuario 15 minutos. Un PIN nuevo en la hoja lo desbloquea y cierra sus
+  sesiones en todos los dispositivos.
+- El costo ya no llega al telefono del vendedor por `stock` ni por `nota`.
+- La venta se revisa en el servidor ANTES de escribir: sin productos, cantidad o precio invalido,
+  total negativo, credito mayor que el total o total fuera de 50%-125% de sus productos = rechazada, y la
+  pantalla dice "NO se registro" con el motivo (ya no "no se pudo confirmar"). El costo SIEMPRE sale de
+  la hoja; el apartado congela el de la hoja; la devolucion toma precio y costo de la nota original.
+- Solo se guardan fotos de Cloudinary; las pantallas pintan fotos pasando por `urlSegura()`.
+- El autor de abonos, apartados, pagos a proveedor, liquidaciones y tasa lo pone el servidor.
+
+**Inventario.** `stock` trae APARTADO y DISPONIBLE (stock - apartado). Reservan apartados abiertos o
+listos sin vencer, y contra pedido solo cuando ya llego. En Ventas cada linea avisa si se vende mas de
+lo disponible; la venta NO se bloquea y queda en SOBREVENTAS. Sin conteo no hay aviso: no se sabe
+cuanto hay. Inventario muestra apartado y disponible.
+
+**Dinero.**
+- La deuda de un cliente se agrupa por CEDULA: "TALLER DIESEL" y "Taller Diesel Luis" eran dos cuentas
+  y la venta a credito comparaba el limite contra la mitad. Las filas sin cedula de un nombre con una
+  sola cedula se unen a esa cuenta.
+- Ventas: "no se sabe cuanto debe" ya no cuenta como "debe cero": sin saldo confirmado no hay credito.
+- Anular venta completa (Devoluciones, solo socios): venta, detalle, deuda y comision juntos, con copia
+  en VENTAS_ANULADAS. No anula ventas con factura, con devoluciones ni entregas de apartado. Comision ya
+  pagada: queda una negativa que se descuenta en la proxima liquidacion.
+- Devolucion: baja la comision del aliado y no deja devolver en pago movil una nota a credito que el
+  cliente todavia debe. Liquidacion: la deuda del aliado se busca por cedula, un saldo a favor no se
+  toma como deuda negativa, y no se liquida si las comisiones suman cero o menos.
+- Gasto con candado y sin duplicar al reintentar. Costeo recuperable: COSTEADA al final, la deuda con el
+  proveedor no se duplica y el costo no se promedia dos veces (auditoria #4).
+
+**Flujo de caja: captura desde el 1/10.** Hoja CUENTAS (se edita en la hoja). En Gastos, pestana
+"Mover dinero" (solo socios): saldo inicial, traspaso y cambio de moneda (la tasa sale de los montos),
+ajuste al contar, retiro/aporte/reembolso de socio (va tambien a SOCIOS_MOV). Hoja MOV_CUENTAS.
+Compras de contado: de que cuenta salio, o que socio la pago (queda como prestamo). Liquidacion pide
+la cuenta. El reporte de flujo va en la primera semana de octubre, con datos reales.
+
+**Conciliacion.** Compara solo renglones originales (devoluciones y cambios aparte: la nota 81 deja de
+salir), cambios con diferencia sin cobrar, numero de nota en las tres hojas, fechas invertidas y fechas
+en el futuro.
+
+**Probado:** 53 casos de servidor (sesion, validacion, disponible, anulacion, devolucion, costeo,
+movimientos, fotos), los 12 logins en Chromium, 21 casos en las pantallas cambiadas con el servidor simulado, y
+`conciliar()` contra la copia de los datos: cero escrituras fuera de CONCILIACION. Revision independiente
+de otro agente: 3 fallos ALTA y 3 MEDIA encontrados y corregidos antes de entregar.
+
 ## Code.gs v26.1 + ventas v14.8 — build 2026-09-23.1 — segunda venta duplicada, y por que
 
 **Se duplico otra venta el 23/09** (unos aceites Xpeso). A Reinaldo le salio un error y registro otra vez.

@@ -1,7 +1,9 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_demanda.html
-  VERSION: v8.9 (2026-09-22) | build 2026-09-23.1 |
+  VERSION: v9.0 (2026-09-24) | build 2026-09-24.1 | requiere Apps Script v27
+  v9.0: auditoria #8, las fotos se pintan pasando por urlSegura().
+  VERSION anterior: v8.9 (2026-09-22) | build 2026-09-23.1 |
   v8.9: sesion, login y aviso de version salen del HTML y viven en boparts_sesion.js, un solo archivo
   para las 12 pantallas. Estaban copiados byte a byte doce veces; de ahi salio el leerJSON duplicado.
   REQUIERE subir boparts_sesion.js junto a este archivo.
@@ -328,12 +330,12 @@ select option{background:#1E1E1E;color:var(--ink)}
   </div>
 </div>
 
-<script src="boparts_sesion.js?v=2026-09-23.1"></script>
+<script src="boparts_sesion.js?v=2026-09-24.1"></script>
 <script>
 
 
 var SCRIPT_URL    = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
-var APP_VERSION = 'v8.9';
+var APP_VERSION = 'v9.0';
 var SCRIPT_URL_SESION = SCRIPT_URL;
 var VER_SCRIPT = '?';
 function sellarVersion(d) {
@@ -571,7 +573,7 @@ function subirFoto(input, slotIdx) {
 function renderSlot(i) {
   var slot = document.getElementById('slot' + i);
   if (fotos[i]) {
-    slot.innerHTML = '<img src="' + fotos[i] + '" alt="foto"><button class="foto-del" onclick="borrarFoto(' + i + ')">&#x2715;</button><input type="file" accept="image/*" capture="environment" onchange="subirFoto(this,' + i + ')">';
+    slot.innerHTML = '<img src="' + urlSegura(fotos[i]) + '" alt="foto"><button class="foto-del" onclick="borrarFoto(' + i + ')">&#x2715;</button><input type="file" accept="image/*" capture="environment" onchange="subirFoto(this,' + i + ')">';
   } else {
     slot.innerHTML = '<span class="ficon">📷</span><span class="flbl">Foto ' + (i+1) + '</span><input type="file" accept="image/*" capture="environment" onchange="subirFoto(this,' + i + ')">';
   }

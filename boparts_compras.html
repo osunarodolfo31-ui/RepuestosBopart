@@ -1,7 +1,11 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_compras.html
-  VERSION: v2.9 (2026-09-22) | build 2026-09-23.1 |
+  VERSION: v3.0 (2026-09-24) | build 2026-09-24.1 | requiere Apps Script v27
+  v3.0: al costear de contado se elige DE QUE CUENTA salio el dinero (Efectivo USD, Banesco, Zelle...) o si lo
+  pago un socio de su bolsillo (queda como prestamo del socio, igual que en Gastos). Es lo que el flujo de
+  caja necesita: la compra de contado era el egreso mas grande y no decia de donde salio.
+  VERSION anterior: v2.9 (2026-09-22) | build 2026-09-23.1 |
   v2.9: sesion, login y aviso de version salen del HTML y viven en boparts_sesion.js, un solo archivo
   para las 12 pantallas. Estaban copiados byte a byte doce veces; de ahi salio el leerJSON duplicado.
   REQUIERE subir boparts_sesion.js junto a este archivo.
@@ -375,7 +379,7 @@ select option{background:#1E1E1E;color:var(--ink)}
   </div>
 </div>
 
-<script src="boparts_sesion.js?v=2026-09-23.1"></script>
+<script src="boparts_sesion.js?v=2026-09-24.1"></script>
 <script>
 
 
@@ -390,7 +394,7 @@ function sellarVersion(d) {
 }
 function txt_(v) { return v == null ? '' : String(v); }
 var CLOUD = 'c7jufi9v', PRESET = 'boparts_productos';
-var APP_VERSION = 'v2.9';
+var APP_VERSION = 'v3.0';
 
 var PRODUCTS = [], PROVEEDORES = [], lineas = [], provSel = null, fotoUrl = '';
 var idCompraActual = '';   // se mantiene entre reintentos de la MISMA recepcion
@@ -420,8 +424,21 @@ function cargarProductos() {
     if (el) el.onclick = function() { el.onclick = null; el.className = 'toast'; cargarProductos(); };
   });
 }
-function alEntrar() { cargarProductos(); }
-revisarSesion(cargarProductos);
+function alEntrar() { cargarProductos(); cargarCuentas(); }
+// v3.0: las cuentas salen de la hoja CUENTAS (action=cuentas); si el script no responde, las de siempre.
+var CUENTAS = ['Efectivo USD', 'Efectivo Bs', 'Banesco', 'Bancamiga', 'Bancrecer', 'Bancrecer Empresarial', 'Zelle', 'Binance'];
+function cargarCuentas() {
+  fetch(SCRIPT_URL + '?action=cuentas&t=' + Date.now()).then(leerJSON).then(function(d) {
+    if (d && d.ok && d.cuentas && d.cuentas.length) CUENTAS = d.cuentas.map(function(c) { return c.cuenta; });
+  }).catch(function() {});
+}
+function metodoDeCuenta(c) {
+  var u = String(c || '').toUpperCase();
+  if (u.indexOf('EFECTIVO') === 0) return 'Efectivo';
+  if (u === 'ZELLE' || u === 'BINANCE') return c;
+  return 'Transferencia';
+}
+revisarSesion(alEntrar);
 
 // ---- proveedores (via Apps Script; la hoja no esta publicada) ----
 try { PROVEEDORES = JSON.parse(localStorage.getItem('boparts_proveedores') || '[]'); } catch (e) {}
@@ -678,10 +695,12 @@ function pintarCosteo2() {
     ex.innerHTML = '<div class="field"><label>Dias de credito *</label><input type="number" id="csDias" value="' + dias + '" step="1" onchange="guardarFCos()"></div>' +
       '<div class="cominfo">Se guardan como los dias de este proveedor y se proponen la proxima vez; se pueden cambiar cuando se acuerde otra cosa.</div>';
   } else {
-    var ms = ['', 'Efectivo USD', 'Pago Movil', 'Transferencia', 'Zelle', 'Binance', 'Otro'];
-    ex.innerHTML = '<div class="field"><label>Metodo de pago</label><select id="csMet" onchange="guardarFCos()">' +
-      ms.map(function(m) { return '<option value="' + m + '"' + (FCOS.met === m ? ' selected' : '') + '>' + (m || 'Seleccionar...') + '</option>'; }).join('') +
-      '</select></div>';
+    var ops = [['', 'Seleccionar...']].concat(CUENTAS.map(function(c) { return ['C:' + c, c]; }))
+      .concat([['S:RODOLFO', 'Lo pago Rodolfo de su bolsillo'], ['S:JAVIER', 'Lo pago Javier de su bolsillo']]);
+    ex.innerHTML = '<div class="field"><label>De que cuenta salio el pago *</label><select id="csMet" onchange="guardarFCos()">' +
+      ops.map(function(o) { return '<option value="' + o[0] + '"' + (FCOS.met === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') +
+      '</select></div>' +
+      '<div class="cominfo">Si lo pago un socio, la tienda se lo debe: queda como prestamo en su cuenta, igual que en Gastos.</div>';
   }
 }
 // Al poner el costo se propone el precio con el margen; si ya se escribio un precio a mano, no se toca.
@@ -723,11 +742,16 @@ function guardarCosteo() {
   var dias = cond === 'CREDITO' ? (parseInt(document.getElementById('csDias').value) || 0) : 0;
   if (cond === 'CREDITO' && dias <= 0) { toast('Indica los dias de credito', 'err'); return; }
   var metEl = document.getElementById('csMet');
-  var met = (cond === 'CONTADO' && metEl) ? metEl.value : '';
+  var sel = (cond === 'CONTADO' && metEl) ? metEl.value : '';
+  if (cond === 'CONTADO' && !sel) { toast('Indica de que cuenta salio el pago', 'err'); return; }
+  var met = '', banco = '', pagadoPor = '';
+  if (sel.indexOf('C:') === 0) { banco = sel.slice(2); met = metodoDeCuenta(banco); }
+  else if (sel.indexOf('S:') === 0) { pagadoPor = sel.slice(2); met = 'Socio'; }
+  else if (sel) { met = sel; }       // valor guardado de una version anterior
   var now = new Date();
   postScript({tipo:'costeo', id:c.id, fila:c.fila, proveedor:c.proveedor, factura:c.factura,
     fecha:now.toLocaleDateString('es-VE'), hora:now.toLocaleTimeString('es-VE', {hour:'2-digit', minute:'2-digit'}),
-    condicion:cond, dias:dias, metodo:met, banco:'', costeadoPor:quien,
+    condicion:cond, dias:dias, metodo:met, banco:banco, pagadoPor:pagadoPor, costeadoPor:quien,
     lineas:c.productos.map(function(l) { return {codigo:l.codigo, cantidad:l.cantidad, costo:parseNumC(l.costo), precio:parseNumC(l.precio)}; })})
     .then(function(d) {
       if (!d || !d.ok) throw new Error(d && d.error ? d.error : 'no se guardo');

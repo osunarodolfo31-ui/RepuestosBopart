@@ -1,7 +1,12 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_gastos.html
-  VERSION: v2.0 (2026-09-22) | build 2026-09-23.1 |
+  VERSION: v2.1 (2026-09-24) | build 2026-09-24.1 | requiere Apps Script v27
+  v2.1: (1) el gasto conserva su ID al reintentar y el servidor no lo duplica (antes, con mala senal,
+  quedaba dos veces). (2) Pestana "Mover dinero", solo socios: saldo inicial de cada cuenta, pasar de una
+  cuenta a otra (depositar efectivo, cambiar Bs a $), ajuste al contar la caja, y retiros/aportes/reembolsos
+  de socios. Es lo que el flujo de caja necesita para saber cuanto hay en cada cuenta.
+  VERSION anterior: v2.0 (2026-09-22) | build 2026-09-23.1 |
   v2.0: sesion, login y aviso de version salen del HTML y viven en boparts_sesion.js, un solo archivo
   para las 12 pantallas. Estaban copiados byte a byte doce veces; de ahi salio el leerJSON duplicado.
   REQUIERE subir boparts_sesion.js junto a este archivo.
@@ -50,6 +55,8 @@ input::placeholder,textarea::placeholder{color:var(--ink-muted)}
 select option{background:#1E1E1E;color:var(--ink)}
 .field{margin-bottom:12px}
 .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.tabm{padding:11px;border-radius:var(--radius-sm);border:1.5px solid var(--border);background:var(--card);color:var(--ink-soft);font-weight:700;font-family:inherit;font-size:14px;cursor:pointer}
+.tabm.on{border-color:var(--brand);color:var(--brand)}
 
 /* DROPDOWN */
 .wrap{position:relative}
@@ -190,6 +197,44 @@ select option{background:#1E1E1E;color:var(--ink)}
 </header>
 
 <div class="container">
+  <div class="row2" id="tabsMov" style="display:none;margin-bottom:12px">
+    <button class="tabm on" id="tabG" onclick="verModo('gasto')">Gasto</button>
+    <button class="tabm" id="tabM" onclick="verModo('mov')">Mover dinero</button>
+  </div>
+
+  <div id="modoMov" style="display:none">
+    <div class="section">
+      <div class="stitle">Movimiento de dinero</div>
+      <div class="field"><label>Que pasa *</label>
+        <select id="mvTipo" onchange="pintarMov()">
+          <option value="">Seleccionar...</option>
+          <option value="SALDO_INICIAL">Saldo inicial de una cuenta (arranque, 30/09)</option>
+          <option value="TRASPASO">Pasar de una cuenta a otra (deposito, cambio Bs/$)</option>
+          <option value="AJUSTE_ENTRA">Ajuste al contar: SOBRA dinero</option>
+          <option value="AJUSTE_SALE">Ajuste al contar: FALTA dinero</option>
+          <option value="RETIRO_SOCIO">Retiro de un socio (sale dinero)</option>
+          <option value="REEMBOLSO_SOCIO">Reembolso a un socio (se le devuelve lo que presto)</option>
+          <option value="APORTE_SOCIO">Aporte de un socio (entra dinero)</option>
+        </select>
+      </div>
+      <div class="field"><label>Fecha</label><input type="date" id="mvFecha"></div>
+      <div id="mvOrigen" class="row2" style="display:none">
+        <div class="field"><label>Sale de *</label><select id="mvCtaO" onchange="pintarMov()"></select></div>
+        <div class="field"><label id="mvLblO">Monto que sale *</label><input type="number" id="mvMontoO" step="0.01" placeholder="0.00" oninput="pintarMov()"></div>
+      </div>
+      <div id="mvDestino" class="row2" style="display:none">
+        <div class="field"><label>Entra a *</label><select id="mvCtaD" onchange="pintarMov()"></select></div>
+        <div class="field"><label id="mvLblD">Monto que entra *</label><input type="number" id="mvMontoD" step="0.01" placeholder="0.00" oninput="pintarMov()"></div>
+      </div>
+      <div id="mvSocio" class="field" style="display:none"><label>Socio *</label>
+        <select id="mvSoc"><option value="">Seleccionar...</option><option value="RODOLFO">Rodolfo</option><option value="JAVIER">Javier</option></select>
+      </div>
+      <div id="mvInfo" class="cominfo" style="display:none"></div>
+      <div class="field" style="margin-top:10px"><label>Notas</label><input type="text" id="mvNotas" placeholder="Opcional: referencia, a quien, por que"></div>
+    </div>
+  </div>
+
+  <div id="modoGasto">
   <div class="section">
     <div class="stitle">Gasto</div>
     <div class="row2">
@@ -233,13 +278,14 @@ select option{background:#1E1E1E;color:var(--ink)}
     <div class="fotobox" id="fotoBox">Tocar para fotografiar o elegir de galeria<input type="file" accept="image/*" onchange="subirFoto(this)"></div>
     <div class="field" style="margin-top:10px"><label>Notas</label><input type="text" id="inNotas" placeholder="Opcional"></div>
   </div>
+  </div>
 </div>
 
-<button class="subbtn" id="btnGuardar" onclick="guardar()">Registrar Gasto</button>
+<button class="subbtn" id="btnGuardar" onclick="MODO === 'mov' ? guardarMov() : guardar()">Registrar Gasto</button>
 
 <div class="success" id="success">
   <div class="sicon">💸</div>
-  <h2>Gasto Registrado</h2>
+  <h2 id="successTit">Gasto Registrado</h2>
   <p id="successMsg"></p>
   <button class="sbtn sbtn-y" onclick="nuevo()">Registrar otro</button>
 </div>
@@ -320,7 +366,7 @@ select option{background:#1E1E1E;color:var(--ink)}
   </div>
 </div>
 
-<script src="boparts_sesion.js?v=2026-09-23.1"></script>
+<script src="boparts_sesion.js?v=2026-09-24.1"></script>
 <script>
 
 
@@ -334,7 +380,7 @@ function sellarVersion(d) {
   return d;
 }
 var CLOUD = 'c7jufi9v', PRESET = 'boparts_productos';
-var APP_VERSION = 'v2.0';
+var APP_VERSION = 'v2.1';
 var TASA = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
 var comprobante = '';
 var METODOS = [
@@ -403,8 +449,11 @@ function guardar() {
   if (!f) { toast('Indica la fecha', 'err'); return; }
   ['selCat','selPago','selV','selMet','selMon'].forEach(function(id) { localStorage.setItem('boparts_gasto_' + id, document.getElementById(id).value); });
   var fp = f.split('-'), now = new Date();
+  // v2.1: el ID se crea UNA vez por gasto y se conserva si hay que reintentar; asi el servidor reconoce
+  // el reenvio y no lo registra dos veces. Se olvida al registrar con exito o al empezar otro.
+  if (!ID_GASTO) ID_GASTO = 'G' + now.getFullYear() + pad2(now.getMonth()+1) + pad2(now.getDate()) + '-' + pad2(now.getHours()) + pad2(now.getMinutes()) + pad2(now.getSeconds()) + '-' + Math.random().toString(36).slice(2, 6).toUpperCase();
   var payload = {
-    tipo:'gasto', idGasto:'G' + now.getFullYear() + pad2(now.getMonth()+1) + pad2(now.getDate()) + '-' + pad2(now.getHours()) + pad2(now.getMinutes()) + pad2(now.getSeconds()),
+    tipo:'gasto', idGasto:ID_GASTO,
     fecha:parseInt(fp[2]) + '/' + parseInt(fp[1]) + '/' + fp[0], hora:now.toLocaleTimeString('es-VE', {hour:'2-digit', minute:'2-digit'}),
     categoria:cat.split(' (')[0], descripcion:desc, monto:monto, moneda:mon, tasa:TASA,
     metodo:m ? m.metodo : '', banco:m ? m.banco : '', pagadoPor:pagadoPor, registradoPor:quien, comprobante:comprobante, notas:document.getElementById('inNotas').value.trim()
@@ -415,13 +464,18 @@ function guardar() {
     .then(function(d) {
       btn.disabled = false; btn.textContent = 'Registrar Gasto';
       if (!d || d.ok !== true) throw new Error(d && d.error ? d.error : 'Respuesta inesperada');
-      document.getElementById('successMsg').textContent = payload.categoria + ' - ' + desc + '\n' + (mon === 'BS' ? fmtBS(monto) : fmtUSD(monto)) + ' · ' + pagadoPor;
+      ID_GASTO = '';
+      document.getElementById('successTit').textContent = 'Gasto Registrado';
+      document.getElementById('successMsg').textContent = (d.repetido ? 'Ese gasto YA estaba registrado. NO se duplico.\n\n' : '') +
+        payload.categoria + ' - ' + desc + '\n' + (mon === 'BS' ? fmtBS(monto) : fmtUSD(monto)) + ' · ' + pagadoPor;
       document.getElementById('success').classList.add('open');
     })
-    .catch(function(e) { btn.disabled = false; btn.textContent = 'Registrar Gasto'; toast('No se guardo el gasto (' + (e && e.message ? e.message : 'sin conexion') + '). Reintenta.', 'err'); });
+    .catch(function(e) { btn.disabled = false; btn.textContent = 'Registrar Gasto'; toast('No se pudo confirmar el gasto (' + (e && e.message ? e.message : 'sin conexion') + '). Toca Registrar otra vez: si ya habia quedado, no se duplica.', 'err'); });
 }
 function nuevo() {
+  ID_GASTO = ''; ID_MOV = '';
   document.getElementById('success').classList.remove('open');
+  if (MODO === 'mov') { ['mvMontoO','mvMontoD','mvNotas'].forEach(function(id) { document.getElementById(id).value = ''; }); pintarMov(); return; }
   document.getElementById('inDesc').value = ''; document.getElementById('inMonto').value = ''; document.getElementById('inNotas').value = ''; comprobante = ''; preview();
   var box = document.getElementById('fotoBox'); box.className = 'fotobox'; box.innerHTML = 'Tocar para fotografiar o elegir de galeria<input type="file" accept="image/*" onchange="subirFoto(this)">';
 }
@@ -465,14 +519,103 @@ function sincronizarTasa(despues) {
 // Bloque D: esta era la UNICA de las 12 pantallas que no pedia sesion al abrir. Se colaba porque
 // igual aparecia el login en cuanto fallaba la primera peticion — pero despues de un viaje al
 // servidor, sin fijar el nombre de quien entro en los desplegables y sin recargar la tasa al entrar.
-function alEntrar() { sincronizarTasa(preview); }
-revisarSesion(function() { sincronizarTasa(preview); });
+function alEntrar() { sincronizarTasa(preview); prepararMov(); }
+
+// ===================== MOVER DINERO (v2.1, solo socios) =====================
+var ID_GASTO = '', ID_MOV = '', MODO = 'gasto';
+var CUENTAS = [{cuenta:'Efectivo USD', moneda:'USD'}, {cuenta:'Efectivo Bs', moneda:'BS'}, {cuenta:'Banesco', moneda:'BS'},
+               {cuenta:'Bancamiga', moneda:'BS'}, {cuenta:'Bancrecer', moneda:'BS'}, {cuenta:'Bancrecer Empresarial', moneda:'BS'},
+               {cuenta:'Zelle', moneda:'USD'}, {cuenta:'Binance', moneda:'USD'}];
+var FORMA_MOV = {SALDO_INICIAL:'D', TRASPASO:'OD', AJUSTE_ENTRA:'D', AJUSTE_SALE:'O', RETIRO_SOCIO:'O', REEMBOLSO_SOCIO:'O', APORTE_SOCIO:'D'};
+function prepararMov() {
+  if (!soySocio()) return;
+  document.getElementById('tabsMov').style.display = 'grid';
+  var d = new Date(); document.getElementById('mvFecha').value = d.getFullYear() + '-' + pad2(d.getMonth()+1) + '-' + pad2(d.getDate());
+  llenarCuentas();
+  fetch(SCRIPT_URL + '?action=cuentas&t=' + Date.now()).then(leerJSON).then(function(r) {
+    if (r && r.ok && r.cuentas && r.cuentas.length) { CUENTAS = r.cuentas; llenarCuentas(); }
+  }).catch(function() {});
+}
+function llenarCuentas() {
+  var h = '<option value="">Seleccionar...</option>' + CUENTAS.map(function(c, i) {
+    return '<option value="' + i + '">' + escHtml(c.cuenta) + ' (' + c.moneda + ')</option>'; }).join('');
+  ['mvCtaO', 'mvCtaD'].forEach(function(id) { var el = document.getElementById(id), v = el.value; el.innerHTML = h; el.value = v; });
+}
+function verModo(m) {
+  MODO = m;
+  document.getElementById('modoGasto').style.display = m === 'gasto' ? '' : 'none';
+  document.getElementById('modoMov').style.display = m === 'mov' ? '' : 'none';
+  document.getElementById('tabG').classList.toggle('on', m === 'gasto');
+  document.getElementById('tabM').classList.toggle('on', m === 'mov');
+  document.getElementById('btnGuardar').textContent = m === 'mov' ? 'Registrar movimiento' : 'Registrar Gasto';
+  if (m === 'mov') pintarMov();
+}
+function ctaSel(id) { var i = parseInt(document.getElementById(id).value); return isNaN(i) ? null : CUENTAS[i]; }
+function pintarMov() {
+  var t = document.getElementById('mvTipo').value, f = FORMA_MOV[t] || '';
+  document.getElementById('mvOrigen').style.display = f.indexOf('O') >= 0 ? 'grid' : 'none';
+  document.getElementById('mvDestino').style.display = f.indexOf('D') >= 0 ? 'grid' : 'none';
+  document.getElementById('mvSocio').style.display = t.indexOf('SOCIO') >= 0 ? 'block' : 'none';
+  var o = ctaSel('mvCtaO'), d = ctaSel('mvCtaD');
+  document.getElementById('mvLblO').textContent = 'Monto que sale' + (o ? ' (' + o.moneda + ')' : '') + ' *';
+  document.getElementById('mvLblD').textContent = (t === 'SALDO_INICIAL' ? 'Saldo que hay' : 'Monto que entra') + (d ? ' (' + d.moneda + ')' : '') + ' *';
+  var info = document.getElementById('mvInfo'), txt = '';
+  if (t === 'TRASPASO' && o && d && o.moneda !== d.moneda) {
+    var mo = parseFloat(document.getElementById('mvMontoO').value) || 0, md = parseFloat(document.getElementById('mvMontoD').value) || 0;
+    txt = 'Cambio de moneda.' + (mo && md ? ' Tasa a la que se cambio: <b>' + (o.moneda === 'BS' ? (mo / md) : (md / mo)).toFixed(2) + '</b>' : ' Escribe los dos montos: la tasa sale de ellos.');
+  } else if (t === 'SALDO_INICIAL') {
+    txt = 'Lo que hay HOY en esa cuenta, contado o segun el banco. Se carga una vez por cuenta, al arrancar.';
+  } else if (t === 'AJUSTE_ENTRA' || t === 'AJUSTE_SALE') {
+    txt = 'Usalo solo cuando al contar la caja o revisar el banco no cuadre con el sistema. Explica en notas que paso.';
+  } else if (t === 'REEMBOLSO_SOCIO') {
+    txt = 'Baja lo que la tienda le debe al socio por gastos o compras que pago de su bolsillo.';
+  }
+  info.style.display = txt ? 'block' : 'none'; info.innerHTML = txt;
+}
+function guardarMov() {
+  var t = document.getElementById('mvTipo').value, f = FORMA_MOV[t];
+  if (!f) { toast('Elige que pasa', 'err'); return; }
+  var o = ctaSel('mvCtaO'), d = ctaSel('mvCtaD');
+  var mo = parseFloat(document.getElementById('mvMontoO').value) || 0, md = parseFloat(document.getElementById('mvMontoD').value) || 0;
+  if (f.indexOf('O') >= 0 && (!o || !(mo > 0))) { toast('Indica de que cuenta sale y cuanto', 'err'); return; }
+  if (f.indexOf('D') >= 0 && (!d || !(md > 0))) { toast('Indica a que cuenta entra y cuanto', 'err'); return; }
+  if (o && d && o.cuenta === d.cuenta) { toast('El origen y el destino son la misma cuenta', 'err'); return; }
+  var socio = document.getElementById('mvSoc').value;
+  if (t.indexOf('SOCIO') >= 0 && !socio) { toast('Indica el socio', 'err'); return; }
+  var fe = document.getElementById('mvFecha').value.split('-'), now = new Date();
+  if (!ID_MOV) ID_MOV = 'M' + now.getFullYear() + pad2(now.getMonth()+1) + pad2(now.getDate()) + '-' + pad2(now.getHours()) + pad2(now.getMinutes()) + pad2(now.getSeconds()) + '-' + Math.random().toString(36).slice(2, 6).toUpperCase();
+  var payload = {tipo:'mov_cuenta', idMov:ID_MOV, tipoMov:t, fecha:parseInt(fe[2]) + '/' + parseInt(fe[1]) + '/' + fe[0],
+    hora:now.toLocaleTimeString('es-VE', {hour:'2-digit', minute:'2-digit'}),
+    origen:o ? o.cuenta : '', montoOrigen:mo, destino:d ? d.cuenta : '', montoDestino:md, socio:socio, tasa:TASA,
+    notas:document.getElementById('mvNotas').value.trim()};
+  var btn = document.getElementById('btnGuardar'); btn.disabled = true; btn.textContent = 'Guardando...';
+  fetch(SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body:JSON.stringify(payload)})
+    .then(leerJSON)
+    .then(function(r) {
+      btn.disabled = false; btn.textContent = 'Registrar movimiento';
+      if (!r || r.ok !== true) throw new Error(r && r.error ? r.error : 'Respuesta inesperada');
+      ID_MOV = '';
+      var tx = document.getElementById('mvTipo').selectedOptions[0].text;
+      document.getElementById('successMsg').textContent = (r.repetido ? 'Ese movimiento YA estaba registrado. NO se duplico.\n\n' : '') + tx +
+        (o ? '\nSale de ' + o.cuenta + ': ' + (o.moneda === 'BS' ? fmtBS(mo) : fmtUSD(mo)) : '') +
+        (d ? '\nEntra a ' + d.cuenta + ': ' + (d.moneda === 'BS' ? fmtBS(md) : fmtUSD(md)) : '');
+      document.getElementById('successTit').textContent = 'Movimiento registrado';
+      document.getElementById('success').classList.add('open');
+    })
+    .catch(function(e) {
+      btn.disabled = false; btn.textContent = 'Registrar movimiento';
+      if (e && e.message === 'SESION') return;
+      toast('No se pudo confirmar (' + (e && e.message ? e.message : 'sin conexion') + '). Toca Registrar otra vez: si ya habia quedado, no se duplica.', 'err');
+    });
+}
 
 // Lee la respuesta del script con cuidado: si Apps Script devuelve su pagina de error (HTML),
 // r.json() explota con "Unexpected token '<'". Asi se explica que pasa en vez de mostrar eso.
 // leerJSON vive ahora en el modulo de sesion: mismo nombre, y ademas manda al login cuando la sesion vence.
 
 
+// Se llama al FINAL del script: prepararMov usa variables que se definen mas arriba.
+revisarSesion(function() { sincronizarTasa(preview); prepararMov(); });
 </script>
 </body>
 </html>
