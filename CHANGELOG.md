@@ -1,5 +1,30 @@
 # CHANGELOG — Repuesto BoParts
 
+## Code.gs v27.2 + gerencia v3.3 — build 2026-10-19.1 — totales como fecha, cuentas por pagar por factura
+
+**"Particular" con $7.147.026.000.868.** La venta mandaba el total como texto ("6.03") y la hoja, en
+configuracion de Venezuela, lo guardaba como FECHA (6 de marzo) cuando los centavos iban de 01 a 12. Sumado,
+una fecha vale ~1.7 billones. Habia 4 ventas asi (filas con 6.03, 5.10, 13.10 y 5.10). Tambien inflaban los
+totales de esas ventas en Gerencia. Ahora el total se guarda como numero, toda lectura pasa por
+`usdCelda_()` (si es fecha, recupera el monto), `conciliar()` lo detecta y `repararTotalesComoFecha()` lo
+corrige de una vez. Las estadisticas de clientes se agrupan por cedula: TALLER DIESEL es un solo cliente.
+
+**Cuentas por pagar.** Un pago mayor que su factura quedaba entero en ella: la siguiente seguia saliendo
+completa aunque el saldo ya era menor (INROVEN: saldo $66.55, factura 1489 por $77.05). Ahora lo que sobra
+pasa a la siguiente que vence. Cada factura se abre con un toque (monto, pagado, pagos, productos, foto) y
+se paga completa o se abona parcial desde ahi, eligiendo la cuenta de donde sale. "Ver pagadas" y "Ver
+proveedores al dia" muestran el historial. El pago tiene candado e ID: un reintento no lo duplica.
+
+Instalar: Code.gs (Nueva version) + los 14 archivos del zip a GitHub. Una vez en el editor:
+`repararTotalesComoFecha()`.
+
+## Code.gs v27.1 — 14/10/2026 — filtro puesto en una hoja
+
+Una recepcion fallo con *"This operation is not supported on a range with a filtered out row"*. Una hoja
+con un filtro activo (filas ocultas) no deja que el script agregue filas. Ahora el error dice en espanol
+que hay que quitar el filtro (Datos > Quitar filtro). Y el producto NUEVO de una recepcion no se crea dos
+veces si el primer intento fallo despues de crearlo. Solo cambia Code.gs; las pantallas no.
+
 ## Code.gs v27 + 11 pantallas — build 2026-09-24.1 — seguridad, disponible, anular venta, cuentas
 
 **Instalar, en este orden:**

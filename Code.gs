@@ -1,6 +1,22 @@
 /**
  * Repuesto BoParts — Code.gs
- * VERSION: v27 (2026-09-24) | seguridad, disponible, anular venta, cuentas para el flujo de caja
+ * VERSION: v27.2 (2026-10-19) | totales convertidos en fecha, cuentas por pagar por factura
+ *
+ * v27.2 — (1) "Particular" salia con $7 billones: la venta mandaba el total como texto ("6.03") y la hoja
+ *   lo convertia en FECHA cuando los centavos iban de 01 a 12. Ahora se guarda como numero, toda lectura
+ *   pasa por usdCelda_() y repararTotalesComoFecha() recupera los que ya quedaron mal. Las estadisticas de
+ *   clientes se agrupan por cedula. (2) Cuentas por pagar: el pago se reparte entre facturas (lo que sobra
+ *   de una pasa a la siguiente), action=cxp trae TODAS las facturas con pagos, foto y productos, y el pago
+ *   tiene candado, ID para no duplicar y se puede dirigir a una factura.
+ *
+ * VERSION anterior: v27.1 (2026-10-14) | un filtro en una hoja ya no da un error en ingles
+ *
+ * v27.1 — Recepcion fallo con "This operation is not supported on a range with a filtered out row".
+ *   Causa: una hoja con un FILTRO puesto (y filas ocultas) no deja agregar filas por script. Ahora el
+ *   mensaje dice en espanol que hay que quitar el filtro (Datos > Quitar filtro). Y el producto nuevo de
+ *   una recepcion no se crea dos veces si el primer intento fallo despues de crearlo.
+ *
+ * VERSION anterior: v27 (2026-09-24) | seguridad, disponible, anular venta, cuentas para el flujo de caja
  *
  * v27 — lo que cambia, en el orden en que importa:
  *   SEGURIDAD (auditoria #5, #6, #7, #8, #10, #11)
@@ -582,6 +598,23 @@ function urlFotoOk_(u) {
 // dice "no se pudo confirmar" y el reintento es seguro porque el ID se conserva.
 function rechazo_(msg) { var e = new Error(msg); e.rechazo = true; return e; }
 
+// v27.2 — EL TOTAL QUE LA HOJA CONVIRTIO EN FECHA. La pantalla de venta mandaba el total como TEXTO
+// ("6.03"), y la hoja, con configuracion de Venezuela, lee "6.03" como el 6 de marzo cuando los centavos
+// van de 01 a 12. Queda guardado como fecha, y al sumarlo vale ~1.700.000.000.000 (milisegundos): de ahi
+// el cliente "Particular" con $7 billones. Esta funcion lee cualquier celda de dinero: si es fecha,
+// recupera el monto (dia.mes -> 6.03); si es texto, lo convierte; si es numero, lo deja.
+function usdCelda_(v) {
+  if (esFecha_(v)) {
+    var p = Utilities.formatDate(v, TZ_VE, 'dd-MM').split('-');
+    return round2_(Number(p[0]) + Number(p[1]) / 100);
+  }
+  if (typeof v === 'number') return v;
+  var t = String(v == null ? '' : v).trim();
+  if (!t) return 0;
+  if (t.indexOf(',') >= 0 && t.indexOf('.') < 0) t = t.replace(',', '.');
+  return Number(t) || 0;
+}
+
 function rolDe_(tabla, clave) {
   var r = tabla[clave];
   return r ? r : 'SOCIO';   // lo desconocido se trata como reservado a socios
@@ -606,7 +639,7 @@ function claveDePost_(data) {
 // OJO: esta constante es lo que ven las apps en el menu. Se habia quedado en v21.4 mientras el
 // encabezado ya decia v24, asi que el sello de version — que existe justamente para saber si lo
 // desplegado es lo que crees — estaba mintiendo. Cada version nueva se cambia AQUI tambien.
-var VERSION_SCRIPT = 'v27';
+var VERSION_SCRIPT = 'v27.2';
 
 function json_(obj) {
   // La version viaja en cada respuesta: es la forma rapida de saber si lo desplegado es lo que crees
@@ -627,6 +660,9 @@ function doGet(e) {
     if (m === 'SESION')  return json_({ok:false, sesion:true,  error:'Tu sesion vencio. Vuelve a entrar.'});
     if (m === 'PERMISO') return json_({ok:false, permiso:true, error:'Esa pantalla es solo para los socios.'});
     // Sin esto, cualquier error devuelve la pagina HTML de Google y las apps no pueden leerla
+    if (/filtered out row|fila filtrada/i.test(m)) {
+      return json_({ok:false, filtro:true, error:'Una hoja de Sheets tiene un FILTRO puesto. Menu Datos > Quitar filtro, y vuelve a intentar.'});
+    }
     return json_({ok:false, error:m});
   }
 }
@@ -938,8 +974,9 @@ function doPost(e) {
       finally { SpreadsheetApp.flush(); lockK.releaseLock(); }
     }
     if (data.tipo === 'cxp_abono') {
-      movCxp_(ss, data, 'ABONO');
-      return json_({ok:true, tipo:'cxp_abono'});
+      var lockXp = LockService.getScriptLock(); lockXp.waitLock(10000);
+      try { return json_(abonoCxp_(ss, data, quien)); }
+      finally { SpreadsheetApp.flush(); lockXp.releaseLock(); }
     }
 
     // ---- TAREAS (v25) ----
@@ -1161,6 +1198,12 @@ function doPost(e) {
     var mp = String(err && err.message ? err.message : err);
     if (mp === 'SESION')  return json_({ok:false, sesion:true,  error:'Tu sesion vencio. Vuelve a entrar.'});
     if (mp === 'PERMISO') return json_({ok:false, permiso:true, error:'Esa accion es solo para los socios.'});
+    // v27.1: un filtro dejado puesto en una hoja hace fallar cualquier escritura con un mensaje en ingles
+    // que nadie en la tienda entiende. Se traduce a lo que hay que hacer. No se escribio nada en esa hoja.
+    if (/filtered out row|fila filtrada/i.test(mp)) {
+      return json_({ok:false, filtro:true, error:'Una hoja de Sheets tiene un FILTRO puesto y no deja escribir. ' +
+        'Abre la hoja (normalmente LISTA DE PRODUCTOS, COMPRAS o VENTAS), menu Datos > Quitar filtro, y registra otra vez.'});
+    }
     return json_({ok:false, error:mp, rechazada:!!(err && err.rechazo)});
   }
 }
@@ -1223,7 +1266,7 @@ function guardarVenta_(ss, data) {
   const fechaV = fechaVE_(data.fecha);
   sheet.appendRow([
     fechaV, data.hora, data.vendedor, data.canal,
-    data.productos, data.totalUSD, data.totalBS,
+    data.productos, round2_(Number(data.totalUSD) || 0), Number(data.totalBS) || 0,   // v27.2: NUMERO, nunca texto
     data.pago1?.metodo||'', data.pago1?.banco||'', data.pago1?.monto||'',
     data.pago2?.metodo||'', data.pago2?.banco||'', data.pago2?.monto||'',
     data.pago3?.metodo||'', data.pago3?.banco||'', data.pago3?.monto||'',
@@ -1657,8 +1700,16 @@ function guardarCompra_(ss, d) {
   // Productos nuevos: se crean en LISTA DE PRODUCTOS sin costo ni precio
   var nuevos = 0;
   var shL = ss.getSheetByName('LISTA DE PRODUCTOS');
+  // v27.1: si un intento anterior fallo DESPUES de crear el producto, el reintento no lo crea otra vez.
+  var codsExist = {};
+  if (shL.getLastRow() >= 3) shL.getRange(3, 1, shL.getLastRow() - 2, 1).getValues().forEach(function(r) {
+    var k = String(r[0] || '').trim().toUpperCase(); if (k) codsExist[k] = true;
+  });
   lineas.forEach(function(l) {
     if (!l.nuevo) return;
+    var kNuevo = String(l.codigo || '').trim().toUpperCase();
+    if (kNuevo && codsExist[kNuevo]) return;
+    if (kNuevo) codsExist[kNuevo] = true;
     var last = shL.getLastRow();
     shL.appendRow([l.codigo||'', l.marca||'', l.producto||'', l.categoria||'', 0, '', '', '', '', '', 'NUEVO - SIN PRECIO', '', '', '']);
     var nr = shL.getLastRow();
@@ -1800,7 +1851,7 @@ function datosVentas_(ss, desde, hasta) {
       var f = iso_(r[0]); if (!f || f < d1 || f > d2) return;
       // 0 fecha, 1 vendedor, 2 canal, 3 totalUSD, 4 totalBS, 5 comisionBS, 6 netoBS, 7 aliado, 8 aliadoComisionBS,
       // 9 idVenta, 10 nota, 11 cliente, 12 creditoUSD, 13 metodos [[metodo, banco, monto, moneda] x3]
-      out.ventas.push([f, String(r[2]||''), String(r[3]||''), Number(r[5])||0, Number(r[6])||0, Number(r[16])||0, Number(r[17])||0,
+      out.ventas.push([f, String(r[2]||''), String(r[3]||''), usdCelda_(r[5]), Number(r[6])||0, Number(r[16])||0, Number(r[17])||0,
                        String(r[18]||''), Number(r[21])||0, String(r[23]||''), r[24]||'', String(r[25]||''), Number(r[30])||0,
                        [[String(r[7]||''), String(r[8]||''), Number(r[9])||0, String(r[27]||'')],
                         [String(r[10]||''), String(r[11]||''), Number(r[12])||0, String(r[28]||'')],
@@ -2439,16 +2490,28 @@ function statsClientes_(ss) {
   var out = {};
   var hoy = new Date(Utilities.formatDate(new Date(), TZ_VE, 'yyyy-MM-dd'));
 
+  // v27.2: un cliente es su CEDULA, no como se escribio su nombre en cada venta. "Taller Diesel Luis" y
+  // "TALLER DIESEL" (V-12345678) salian como dos clientes con la mitad de las compras cada uno. Si la cedula
+  // esta en CLIENTES, manda el nombre de la ficha; si no, el ultimo nombre usado.
+  var nombreFicha = {};
+  var shCl = ss.getSheetByName('CLIENTES');
+  if (shCl && shCl.getLastRow() >= 2) shCl.getRange(2, 1, shCl.getLastRow() - 1, 2).getValues().forEach(function(r) {
+    var dg = soloDigitos_(r[1]); if (dg.length >= 5 && !/^0+$/.test(dg) && String(r[0] || '').trim()) nombreFicha[dg] = String(r[0]).trim();
+  });
   var v = ss.getSheetByName(SH_VENTAS);
   var notaCliente = {};
   if (v && v.getLastRow() >= 2) {
     var ancho = Math.max(v.getLastColumn(), 31);
     v.getRange(2, 1, v.getLastRow() - 1, ancho).getValues().forEach(function(r) {
-      var cli = String(r[25] || '').trim();
-      if (!cli) return;
+      var nom = String(r[25] || '').trim();
+      if (!nom) return;
+      var dg = soloDigitos_(r[26]);
+      var conCedula = dg.length >= 5 && !/^0+$/.test(dg);
+      var cli = conCedula ? 'R' + dg : nom;
       var f = iso_(r[0]);
-      var o = out[cli] || (out[cli] = {cliente:cli, compras:0, totalUSD:0, utilidadUSD:0, primera:'', ultima:'', dias:null, credito:0, productos:{}});
-      o.compras++; o.totalUSD += Number(r[5]) || 0; o.credito += Number(r[30]) || 0;
+      var o = out[cli] || (out[cli] = {cliente:nom, compras:0, totalUSD:0, utilidadUSD:0, primera:'', ultima:'', dias:null, credito:0, productos:{}});
+      o.cliente = conCedula ? (nombreFicha[dg] || nom) : nom;
+      o.compras++; o.totalUSD += usdCelda_(r[5]); o.credito += Number(r[30]) || 0;
       if (f) {
         if (!o.primera || f < o.primera) o.primera = f;
         if (!o.ultima || f > o.ultima) o.ultima = f;
@@ -2888,56 +2951,120 @@ function movCxp_(ss, d, tipo) {
   formatoFecha_(sh, sh.getLastRow(), 1);
 }
 
-// Saldos por proveedor, con las facturas pendientes y su vencimiento
+// Saldos por proveedor, con TODAS sus facturas (pendientes y pagadas), sus pagos, foto y productos.
+// v27.2 — EL PAGO SE REPARTE BIEN. Antes, un abono quedaba entero en la factura que se le asigno aunque
+// fuera mayor que ella: esa factura salia "pagada de mas" y la siguiente seguia apareciendo completa
+// aunque el saldo del proveedor ya era menor (INROVEN: saldo $66.55, factura 1489 por $77.05). Ahora lo
+// que sobra de una factura pasa a la siguiente que vence primero.
 function estadoCxp_(ss) {
   var sh = ss.getSheetByName('CXP_MOV');
   if (!sh || sh.getLastRow() < 2) return {ok:true, proveedores:[]};
   var rows = sh.getRange(2, 1, sh.getLastRow() - 1, 14).getValues();
 
-  var vencimientos = {};
+  var compra = {};
   var c = ss.getSheetByName('COMPRAS');
   if (c && c.getLastRow() >= 2) {
     c.getRange(2, 1, c.getLastRow() - 1, 19).getValues().forEach(function(r) {
-      if (r[16]) vencimientos[String(r[0])] = iso_(r[16]);
+      compra[String(r[0])] = {vence:r[16] ? iso_(r[16]) : '', foto:urlFotoOk_(r[10]) ? String(r[10]) : '', productos:[]};
+    });
+  }
+  var cd = ss.getSheetByName('COMPRAS_DETALLE');
+  if (cd && cd.getLastRow() >= 2) {
+    cd.getRange(2, 1, cd.getLastRow() - 1, 8).getValues().forEach(function(r) {
+      var k = String(r[0]); if (!compra[k]) return;
+      compra[k].productos.push({codigo:String(r[3] || ''), producto:String(r[4] || ''), cantidad:Number(r[5]) || 0,
+                                costo:Number(r[6]) || 0, total:Number(r[7]) || 0});
     });
   }
   var hoy = Utilities.formatDate(new Date(), TZ_VE, 'yyyy-MM-dd');
   var porProv = {};
+  function prov(p) { return porProv[p] || (porProv[p] = {proveedor:p, cargos:0, abonos:0, facturas:{}, movs:[], libre:0}); }
+  // 1) facturas
   rows.forEach(function(r) {
-    var p = String(r[2]).trim(); if (!p) return;
-    var o = porProv[p] || (porProv[p] = {proveedor:p, cargos:0, abonos:0, facturas:{}, movs:[]});
-    var monto = Number(r[6]) || 0, tipo = String(r[3]).toUpperCase(), id = String(r[4] || '');
-    if (tipo === 'CARGO') {
-      o.cargos += monto;
-      o.facturas[id] = {id:id, factura:String(r[5] || ''), fecha:fmtFecha_(r[0]), montoUSD:monto, abonado:0,
-                        vence:vencimientos[id] || '', vencida:false};
-    } else if (tipo === 'ABONO') {
-      o.abonos += monto;
-      if (id && o.facturas[id]) o.facturas[id].abonado += monto;
-      else o.pendienteAplicar = (o.pendienteAplicar || 0) + monto;
+    var p = String(r[2]).trim(); if (!p || String(r[3]).toUpperCase() !== 'CARGO') return;
+    var o = prov(p), id = String(r[4] || ''), monto = Number(r[6]) || 0, ci = compra[id] || {};
+    o.cargos += monto;
+    o.facturas[id] = {id:id, factura:String(r[5] || ''), fecha:fmtFecha_(r[0]), montoUSD:monto, abonado:0,
+                      vence:ci.vence || '', foto:ci.foto || '', productos:ci.productos || [], pagos:[], vencida:false};
+  });
+  // 2) pagos: a su factura hasta cubrirla; lo que sobre, a la bolsa del proveedor
+  rows.forEach(function(r) {
+    var p = String(r[2]).trim(); if (!p || String(r[3]).toUpperCase() !== 'ABONO') return;
+    var o = prov(p), id = String(r[4] || ''), monto = Number(r[6]) || 0;
+    o.abonos += monto;
+    o.movs.push({fecha:fmtFecha_(r[0]), tipo:'ABONO', montoUSD:monto, metodo:String(r[10] || ''), banco:String(r[11] || ''), factura:String(r[5] || '')});
+    var f = id && o.facturas[id];
+    if (f) {
+      var ap = Math.min(monto, Math.max(0, f.montoUSD - f.abonado));
+      f.abonado += ap; o.libre += monto - ap;
+      f.pagos.push({fecha:fmtFecha_(r[0]), montoUSD:round2_(monto), metodo:String(r[10] || ''), banco:String(r[11] || '')});
+    } else {
+      o.libre += monto;
     }
-    o.movs.push({fecha:fmtFecha_(r[0]), tipo:tipo, montoUSD:monto, metodo:String(r[10] || ''), factura:String(r[5] || '')});
   });
 
   var out = Object.keys(porProv).map(function(k) {
     var o = porProv[k];
-    var libre = o.pendienteAplicar || 0;
     o.facturas = Object.keys(o.facturas).map(function(f) { return o.facturas[f]; })
       .sort(function(a, b) { return String(a.vence || '9999').localeCompare(String(b.vence || '9999')); });
-    o.facturas.forEach(function(f) {                       // abonos sin factura: a las mas viejas primero
+    var libre = o.libre;
+    o.facturas.forEach(function(f) {                       // lo que sobro: a la que vence primero
       var falta = f.montoUSD - f.abonado;
-      if (libre > 0 && falta > 0) { var ap = Math.min(libre, falta); f.abonado += ap; libre -= ap; }
+      if (libre > 0.0001 && falta > 0) { var ap = Math.min(libre, falta); f.abonado += ap; libre -= ap; f.recibioSobrante = round2_(ap); }
+      f.abonado = round2_(f.abonado);
       f.pendienteUSD = round2_(f.montoUSD - f.abonado);
       f.vencida = f.pendienteUSD > 0.009 && f.vence && f.vence < hoy;
       f.estado = f.pendienteUSD <= 0.009 ? 'PAGADA' : (f.abonado > 0 ? 'PARCIAL' : 'PENDIENTE');
     });
+    o.aFavor = round2_(Math.max(0, libre));                 // pagado de mas al proveedor
+    delete o.libre;
     o.saldoUSD = round2_(o.cargos - o.abonos);
     o.cargos = round2_(o.cargos); o.abonos = round2_(o.abonos);
     o.vencido = round2_(o.facturas.filter(function(f) { return f.vencida; }).reduce(function(a, f) { return a + f.pendienteUSD; }, 0));
     return o;
-  }).filter(function(o) { return o.saldoUSD > 0.009 || o.movs.length; });
+  }).filter(function(o) { return o.saldoUSD > 0.009 || o.movs.length || o.facturas.length; });
   out.sort(function(a, b) { return b.saldoUSD - a.saldoUSD; });
   return {ok:true, proveedores:out};
+}
+
+// v27.2 — PAGO A PROVEEDOR: con candado, sin duplicar y por factura.
+// d.id = la factura que se quiere pagar (opcional). El monto va primero a esa factura hasta cubrirla y lo
+// que sobre, a las demas pendientes del proveedor, la que vence primero antes. Se escribe UNA fila por
+// factura tocada, todas con el mismo ID_PAGO (columna O): un reintento con el mismo ID no escribe nada.
+function abonoCxp_(ss, d, quien) {
+  var monto = round2_(Number(d.montoUSD));
+  if (!(monto > 0) || !isFinite(monto)) throw rechazo_('Indica el monto del pago');
+  if (!d.proveedor) throw rechazo_('Falta el proveedor');
+  var idPago = String(d.idPago || '').trim();
+  var sh = hojaCxp_(ss);
+  if (!sh.getRange(1, 15).getValue()) sh.getRange(1, 15).setValue('ID_PAGO');
+  if (idPago && sh.getLastRow() >= 2) {
+    var ids = sh.getRange(2, 15, sh.getLastRow() - 1, 1).getValues();
+    for (var i = 0; i < ids.length; i++) if (String(ids[i][0]).trim() === idPago) return {ok:true, tipo:'cxp_abono', repetido:true};
+  }
+  var est = estadoCxp_(ss).proveedores.filter(function(p) { return p.proveedor === String(d.proveedor).trim(); })[0];
+  if (!est) throw rechazo_('No hay facturas de ' + d.proveedor);
+  if (monto > est.saldoUSD + 0.05) throw rechazo_('El pago ($' + monto + ') supera lo que se le debe ($' + est.saldoUSD + ')');
+  var pend = est.facturas.filter(function(f) { return f.pendienteUSD > 0.009; });
+  var elegida = pend.filter(function(f) { return f.id === String(d.id || ''); });
+  var orden = elegida.concat(pend.filter(function(f) { return f.id !== String(d.id || ''); }));
+  var resto = monto, filas = [], ahora = new Date();
+  orden.forEach(function(f) {
+    if (resto <= 0.0001) return;
+    var ap = round2_(Math.min(resto, f.pendienteUSD));
+    if (ap <= 0) return;
+    filas.push({f:f, monto:ap}); resto = round2_(resto - ap);
+  });
+  if (resto > 0.009 && filas.length) filas[filas.length - 1].monto = round2_(filas[filas.length - 1].monto + resto);   // centavos
+  var autor = (quien && quien.nombre) || d.registradoPor || '';
+  filas.forEach(function(x) {
+    sh.appendRow([fechaVE_(d.fecha), d.hora || Utilities.formatDate(ahora, TZ_VE, 'HH:mm'), est.proveedor, 'ABONO', x.f.id, x.f.factura,
+                  x.monto, d.moneda || 'USD', Number(d.montoPagado) || x.monto, Number(d.tasa) || 0, d.metodo || '', d.banco || '',
+                  autor, d.notas || '', idPago]);
+    formatoFecha_(sh, sh.getLastRow(), 1);
+  });
+  return {ok:true, tipo:'cxp_abono', repetido:false,
+          aplicado:filas.map(function(x) { return {factura:x.f.factura || x.f.id, montoUSD:x.monto}; })};
 }
 
 // ============================================================
@@ -3142,8 +3269,8 @@ function conciliar() {
   var firma = {};
   Object.keys(ventas).forEach(function(id) {
     var r = ventas[id][0][1];
-    if (n(r[5]) <= 0) return;
-    var k = [iso_(r[0]), s(r[25]).toUpperCase(), n(r[5]).toFixed(2), s(r[4]).toUpperCase()].join('|');
+    if (usdCelda_(r[5]) <= 0) return;
+    var k = [iso_(r[0]), s(r[25]).toUpperCase(), usdCelda_(r[5]).toFixed(2), s(r[4]).toUpperCase()].join('|');
     (firma[k] = firma[k] || []).push({fila:ventas[id][0][0], id:id, min:minutos(r[1]), nota:s(r[24]), hora:s(r[1])});
   });
   Object.keys(firma).forEach(function(k) {
@@ -3171,8 +3298,8 @@ function conciliar() {
       var idd = ids[j], Ld = huerf[idd];
       if (emparejadas[idd] || iso_(Ld[0][1][1]) !== iso_(rv[0])) continue;
       var prod = s(Ld[0][1][6]).toUpperCase().slice(0, 20);
-      if (Math.abs(sumDet(Ld) - n(rv[5])) <= 0.01 && prod && s(rv[4]).toUpperCase().indexOf(prod) >= 0) {
-        hallar('Venta partida en dos IDs', 'MEDIA', 'nota ' + s(rv[24]) + ' (' + usd(n(rv[5])) + ', ' + s(Ld[0][1][6]).slice(0, 30) +
+      if (Math.abs(sumDet(Ld) - usdCelda_(rv[5])) <= 0.01 && prod && s(rv[4]).toUpperCase().indexOf(prod) >= 0) {
+        hallar('Venta partida en dos IDs', 'MEDIA', 'nota ' + s(rv[24]) + ' (' + usd(usdCelda_(rv[5])) + ', ' + s(Ld[0][1][6]).slice(0, 30) +
           '): el resumen dice ' + iv + ' y sus renglones dicen ' + idd + '. Esta contada UNA vez pero desconectada: ' +
           'una devolucion por esa nota no encuentra los productos. NO borrar ninguna: en VENTAS_DETALLE fila ' + filasDe(Ld) +
           ' poner ID_VENTA=' + iv + ' y NOTA_NUM=' + s(rv[24]) + '.', 'VENTAS ' + fv + ' / DETALLE ' + filasDe(Ld));
@@ -3182,7 +3309,7 @@ function conciliar() {
   });
   Object.keys(sinDet).forEach(function(id) {
     var r = sinDet[id][1];
-    hallar('Venta sin detalle', 'ALTA', id + ' nota ' + s(r[24]) + ' del ' + iso_(r[0]) + ' (' + usd(n(r[5])) +
+    hallar('Venta sin detalle', 'ALTA', id + ' nota ' + s(r[24]) + ' del ' + iso_(r[0]) + ' (' + usd(usdCelda_(r[5])) +
       '): no tiene renglones. No descuenta stock ni tiene utilidad calculable.', sinDet[id][0]);
   });
   Object.keys(huerf).forEach(function(id) {
@@ -3206,7 +3333,7 @@ function conciliar() {
   // 5. Detalle que no cuadra con el total. Sin IVA ~100%; con IVA 16% ~86%. Fuera de 80-105% no lo explica el IVA.
   Object.keys(ventas).forEach(function(id) {
     if (!esApp(id) || !det[id]) return;
-    var r = ventas[id][0][1], tv = n(r[5]), td = sumDet(det[id]);
+    var r = ventas[id][0][1], tv = usdCelda_(r[5]), td = sumDet(det[id]);
     if (tv <= 0) return;
     var q = td / tv;
     if (q > 1.05 || q < 0.80) hallar('Detalle no cuadra con la venta', q >= 1.5 ? 'ALTA' : 'MEDIA', id + ' nota ' + s(r[24]) +
@@ -3346,6 +3473,12 @@ function conciliar() {
       (malC.length ? '; la deuda dice ' + malC.map(function(x) { return s(x[1][6]); }).join('/') + ' (filas CXC ' + filasDe(malC) + ')' : ''), ventas[id][0][0]);
   });
 
+  // 15. Total guardado como fecha (v27.2): "6.03" leido como 6 de marzo. Suma billones en Gerencia.
+  var totFecha = [];
+  V.forEach(function(x) { if (esFecha_(x[1][5])) totFecha.push(x[0]); });
+  if (totFecha.length) hallar('Total de venta guardado como fecha', 'ALTA', totFecha.length + ' venta(s) tienen el TOTAL_USD convertido en ' +
+    'fecha por la hoja (ej. $6.03 quedo como 6 de marzo). Se corrigen con repararTotalesComoFecha() desde el editor.', totFecha.join(', '));
+
   // 14. Fechas (v27): dia y mes invertidos en el historico importado, y fechas en el futuro.
   var FV = hoja(SH_VENTAS) || [];
   var inv = fechasInvertidas_(FV);
@@ -3447,6 +3580,41 @@ function repararFechasInvertidas() {
   } finally { lock.releaseLock(); }
   var msg = inv.length ? inv.length + ' fechas corregidas en VENTAS. El detalle de cada una esta en la hoja FECHAS_CORREGIDAS.'
                        : 'No hay fechas invertidas: nada que corregir.';
+  Logger.log(msg);
+  try { SpreadsheetApp.getUi().alert(msg); } catch (e) {}
+  return msg;
+}
+
+// v27.2 — Se ejecuta UNA VEZ desde el editor. Recupera los TOTAL_USD que la hoja convirtio en fecha
+// (dia.mes -> monto) y convierte a numero los que quedaron como texto ("25.00"), para que ninguno vuelva
+// a confundirse. Deja constancia en TOTALES_CORREGIDOS. Correrla otra vez no hace nada.
+function repararTotalesComoFecha() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var lock = LockService.getScriptLock(); lock.waitLock(30000);
+  var fechas = 0, textos = 0;
+  try {
+    var sh = ss.getSheetByName(SH_VENTAS);
+    var n = sh.getLastRow() - 1;
+    if (n < 1) return 'VENTAS vacia';
+    var rango = sh.getRange(2, 6, n, 1);
+    var vals = rango.getValues();
+    var reg = null, ahora = new Date();
+    for (var i = 0; i < vals.length; i++) {
+      var v = vals[i][0];
+      if (esFecha_(v)) {
+        var monto = usdCelda_(v);
+        reg = reg || hojaAp_(ss, 'TOTALES_CORREGIDOS', ['CORREGIDO','FILA','TENIA (fecha)','QUEDO (USD)']);
+        reg.appendRow([ahora, i + 2, Utilities.formatDate(v, TZ_VE, 'dd/MM/yyyy'), monto]);
+        vals[i][0] = monto; fechas++;
+      } else if (typeof v === 'string' && v.trim() && !isNaN(Number(v.trim().replace(',', '.')))) {
+        vals[i][0] = Number(v.trim().replace(',', '.')); textos++;
+      }
+    }
+    if (fechas || textos) { rango.setNumberFormat('0.00'); rango.setValues(vals); }
+    SpreadsheetApp.flush();
+  } finally { lock.releaseLock(); }
+  var msg = fechas + ' total(es) que estaban como fecha, recuperados; ' + textos + ' convertidos de texto a numero. ' +
+            (fechas ? 'El detalle esta en la hoja TOTALES_CORREGIDOS.' : '');
   Logger.log(msg);
   try { SpreadsheetApp.getUi().alert(msg); } catch (e) {}
   return msg;

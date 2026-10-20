@@ -1,7 +1,11 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_gerencia.html
-  VERSION: v3.2 (2026-09-24) | build 2026-09-24.1 | requiere Apps Script v27
+  VERSION: v3.3 (2026-10-19) | build 2026-10-19.1 | requiere Apps Script v27.2
+  v3.3: CUENTAS POR PAGAR POR FACTURA. Cada factura se abre con un toque: monto, pagado, pagos, productos y
+  foto; se paga completa o se abona parcial desde ahi, eligiendo la cuenta de donde sale. "Ver pagadas" y
+  "Ver proveedores al dia" muestran el historial. El pago lleva un ID y no se duplica al reintentar.
+  VERSION anterior: v3.2 (2026-09-24) | build 2026-09-24.1 | requiere Apps Script v27
   v3.2: al liquidar a un aliado se pide DE QUE CUENTA sale el pago (para el flujo de caja). La liquidacion
   ya no deja pagar si las comisiones suman cero o menos por devoluciones.
   VERSION anterior: v3.1 (2026-09-22) | build 2026-09-23.1 |
@@ -496,7 +500,7 @@ select option{background:#1E1E1E;color:var(--ink)}
   </div>
 </div>
 
-<script src="boparts_sesion.js?v=2026-09-24.1"></script>
+<script src="boparts_sesion.js?v=2026-10-19.1"></script>
 <script>
 
 
@@ -509,7 +513,7 @@ function sellarVersion(d) {
   if (t) t.textContent = 'app ' + APP_VERSION + ' \u00b7 script ' + VER_SCRIPT;
   return d;
 }
-var APP_VERSION = 'v3.2';
+var APP_VERSION = 'v3.3';
 var TASA = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
 var periodo = 'hoy', DATA = null;
 
@@ -722,80 +726,149 @@ function cargarApartados() {
     .catch(function() {});
 }
 
-// ---- CUENTAS POR PAGAR A PROVEEDORES ---------------------------------------
-var CXP = [];
+// ---- CUENTAS POR PAGAR A PROVEEDORES (v3.3: por factura) --------------------
+// Cada factura se toca para abrirla: monto, lo pagado, sus pagos, sus productos y la foto. Desde ahi se paga
+// completa o se abona parcial. Lo que sobre de un pago pasa a la siguiente factura que vence (lo hace el
+// servidor). "Ver pagadas" muestra el historial. La cuenta de donde sale el pago va al flujo de caja.
+var CXP = [], FACT_ABIERTA = '', VER_PAGADAS = {}, CUENTAS_PAGO = ['Efectivo USD', 'Efectivo Bs', 'Banesco', 'Bancamiga', 'Bancrecer', 'Bancrecer Empresarial', 'Zelle', 'Binance'];
+var PAGO_PEND = {};   // ID de cada pago en curso: se conserva si hay que reintentar, para no duplicar
 function cargarPagar() {
   Promise.all([
     fetch(SCRIPT_URL + '?action=cxp&t=' + Date.now()).then(leerJSON),
-    fetch(SCRIPT_URL + '?action=compras&estado=PENDIENTE%20COSTO&t=' + Date.now()).then(leerJSON)
+    fetch(SCRIPT_URL + '?action=compras&estado=PENDIENTE%20COSTO&t=' + Date.now()).then(leerJSON),
+    fetch(SCRIPT_URL + '?action=cuentas&t=' + Date.now()).then(leerJSON).catch(function() { return null; })
   ]).then(function(res) {
-    CXP = (res[0] && res[0].proveedores ? res[0].proveedores : []).filter(function(p) { return p.saldoUSD > 0.009; });
+    CXP = (res[0] && res[0].proveedores ? res[0].proveedores : []);
+    if (res[2] && res[2].cuentas && res[2].cuentas.length) CUENTAS_PAGO = res[2].cuentas.map(function(c) { return c.cuenta; });
     pintarPagar((res[1] && res[1].compras) ? res[1].compras.length : 0);
   }).catch(function() {});
 }
 
+function metodoDeCuentaPago(c) {
+  var u = String(c || '').toUpperCase();
+  if (u.indexOf('EFECTIVO') === 0) return 'Efectivo';
+  if (u === 'ZELLE' || u === 'BINANCE') return c;
+  return 'Transferencia';
+}
+function selCuentas(id) {
+  return '<select id="' + id + '">' + CUENTAS_PAGO.map(function(c) { return '<option>' + escHtml(c) + '</option>'; }).join('') + '</select>';
+}
+
+var SIN_COSTEAR = 0;
 function pintarPagar(sinCostear) {
+  if (sinCostear === undefined) sinCostear = SIN_COSTEAR; else SIN_COSTEAR = sinCostear;
   var el = document.getElementById('pagarBox');
   var h = '';
   if (sinCostear) {
     h += '<div class="section" style="border:1.5px solid var(--brand)"><div class="stitle" style="color:var(--brand)">' +
       sinCostear + ' recepcion(es) sin costear</div>' +
-      '<div class="aviso">Hasta que se costeen, esa mercancia no tiene costo real ni genera cuenta por pagar. ' +
+      '<div class="aviso">Hasta que se costeen, esa mercancia no tiene costo real ni genera cuenta por pagar: <b>no aparece aqui</b>. ' +
       'Se costean en Compras, pestana "Por costear".</div></div>';
   }
-  if (CXP.length) {
-    var total = 0, vencido = 0;
-    CXP.forEach(function(p) { total += num(p.saldoUSD); vencido += num(p.vencido); });
-    h += '<div class="section"><div class="stitle">Cuentas por pagar</div><div class="kpis">' +
-      kpi('Debemos', usd(total), CXP.length + ' proveedor' + (CXP.length === 1 ? '' : 'es'), 'big') +
-      kpi('Vencido', usd(vencido), vencido ? 'hay que pagar ya' : 'nada vencido', vencido ? 'neg' : 'pos') +
-      kpi('Por vencer', usd(total - vencido), 'dentro del plazo') +
-      '</div>';
-    CXP.forEach(function(p) {
-      h += '<div class="cli" style="margin-top:10px"><div class="h" style="cursor:default"><div>' +
-        '<div class="nm">' + escHtml(p.proveedor) + '</div>' +
-        '<div class="sb">' + p.facturas.filter(function(f) { return f.estado !== 'PAGADA'; }).length + ' factura(s) pendiente(s)' +
-        (p.vencido > 0.009 ? ' · <span style="color:var(--red)">vencido ' + usd(p.vencido) + '</span>' : '') + '</div></div>' +
-        '<div class="rt">' + usd(p.saldoUSD) + '</div></div><div class="det" style="display:block">';
-      p.facturas.filter(function(f) { return f.estado !== 'PAGADA'; }).forEach(function(f) {
-        h += '<div style="display:flex;justify-content:space-between;font-size:12px;padding:6px 0;border-bottom:1px solid var(--border)">' +
-          '<span>' + (f.factura ? escHtml(f.factura) : f.id) + ' · ' + f.fecha + (f.vence ? ' · vence ' + fechaES(f.vence) : '') + '</span>' +
-          '<b style="color:' + (f.vencida ? 'var(--red)' : 'inherit') + '">' + usd(f.pendienteUSD) + (f.estado === 'PARCIAL' ? ' (parcial)' : '') + '</b></div>';
-      });
-      h += '<div class="cfg" style="margin-top:10px"><div><label style="font-size:11px">Abono USD</label>' +
-        '<input type="number" step="0.01" id="pg-' + idSafe(p.proveedor) + '" placeholder="0"></div>' +
-        '<div><label style="font-size:11px">Metodo</label><select id="pm-' + idSafe(p.proveedor) + '">' +
-        '<option>Efectivo USD</option><option>Pago Movil</option><option>Transferencia</option><option>Zelle</option><option>Binance</option><option>Otro</option></select></div>' +
-        '<div><label style="font-size:11px">&nbsp;</label><button class="tab on" style="padding:9px 14px" onclick="pagarProveedor(\'' + escAttr(p.proveedor) + '\')">Pagar</button></div></div>' +
-        '</div></div>';
+  var conDeuda = CXP.filter(function(p) { return p.saldoUSD > 0.009; });
+  var total = 0, vencido = 0;
+  conDeuda.forEach(function(p) { total += num(p.saldoUSD); vencido += num(p.vencido); });
+  h += '<div class="section"><div class="stitle">Cuentas por pagar</div><div class="kpis">' +
+    kpi('Debemos', usd(total), conDeuda.length + ' proveedor' + (conDeuda.length === 1 ? '' : 'es'), 'big') +
+    kpi('Vencido', usd(vencido), vencido ? 'hay que pagar ya' : 'nada vencido', vencido ? 'neg' : 'pos') +
+    kpi('Por vencer', usd(total - vencido), 'dentro del plazo') + '</div>';
+  if (!conDeuda.length) h += '<div class="aviso">No se le debe nada a ningun proveedor.</div>';
+
+  CXP.forEach(function(p) {
+    var pid = idSafe(p.proveedor);
+    var pend = p.facturas.filter(function(f) { return f.estado !== 'PAGADA'; });
+    var pagadas = p.facturas.filter(function(f) { return f.estado === 'PAGADA'; });
+    if (p.saldoUSD <= 0.009 && !VER_PAGADAS['__todos']) return;   // proveedores al dia: solo con "ver todos"
+    h += '<div class="cli" style="margin-top:10px"><div class="h" style="cursor:default"><div>' +
+      '<div class="nm">' + escHtml(p.proveedor) + '</div>' +
+      '<div class="sb">' + pend.length + ' factura(s) pendiente(s)' +
+      (p.vencido > 0.009 ? ' · <span style="color:var(--red)">vencido ' + usd(p.vencido) + '</span>' : '') +
+      (p.aFavor > 0.009 ? ' · <span style="color:var(--green)">a favor ' + usd(p.aFavor) + '</span>' : '') + '</div></div>' +
+      '<div class="rt">' + usd(p.saldoUSD) + '</div></div><div class="det" style="display:block">';
+
+    var lista = VER_PAGADAS[pid] ? p.facturas : pend;
+    lista.forEach(function(f) {
+      var fid = idSafe(p.proveedor + '_' + f.id), abierta = FACT_ABIERTA === fid;
+      var color = f.estado === 'PAGADA' ? 'var(--green)' : (f.vencida ? 'var(--red)' : 'inherit');
+      h += '<div style="border-bottom:1px solid var(--border);padding:8px 0">' +
+        '<div onclick="abrirFactura(\'' + fid + '\')" style="display:flex;justify-content:space-between;gap:8px;font-size:13px;cursor:pointer">' +
+          '<span>' + (abierta ? '&#9662; ' : '&#9656; ') + '<b>' + (f.factura ? escHtml(f.factura) : 'sin numero') + '</b> · ' + f.fecha +
+          (f.vence ? ' · vence ' + fechaES(f.vence) : '') + '</span>' +
+          '<b style="color:' + color + ';white-space:nowrap">' +
+          (f.estado === 'PAGADA' ? 'PAGADA' : usd(f.pendienteUSD) + (f.estado === 'PARCIAL' ? ' <small style="font-weight:500">de ' + usd(f.montoUSD) + '</small>' : '')) + '</b></div>';
+      if (abierta) {
+        h += '<div style="margin-top:8px;font-size:12px;color:var(--ink-soft)">' +
+          '<div>Factura: <b>' + usd(f.montoUSD) + '</b> · pagado: <b>' + usd(f.abonado) + '</b> · falta: <b>' + usd(f.pendienteUSD) + '</b></div>' +
+          (f.pagos.length ? '<div style="margin-top:4px">Pagos: ' + f.pagos.map(function(x) { return x.fecha + ' ' + usd(x.montoUSD) + (x.metodo ? ' (' + escHtml(x.metodo) + (x.banco ? ' ' + escHtml(x.banco) : '') + ')' : ''); }).join(' · ') + '</div>' : '') +
+          (f.recibioSobrante ? '<div style="margin-top:4px">Incluye ' + usd(f.recibioSobrante) + ' que sobraron de otro pago a este proveedor.</div>' : '') +
+          (f.productos.length ? '<div style="margin-top:6px">' + f.productos.map(function(x) { return escHtml(x.producto) + ' x' + x.cantidad + (x.costo ? ' · ' + usd(x.costo) : ''); }).join('<br>') + '</div>' : '') +
+          (f.foto ? '<div style="margin-top:6px"><a href="' + escHtml(f.foto) + '" target="_blank" rel="noopener" style="color:var(--brand)">Ver foto de la factura</a></div>' : '') +
+          '</div>';
+        if (f.estado !== 'PAGADA') {
+          h += '<div class="cfg" style="margin-top:8px"><div><label style="font-size:11px">Pagar USD</label>' +
+            '<input type="number" step="0.01" id="fm-' + fid + '" value="' + f.pendienteUSD.toFixed(2) + '"></div>' +
+            '<div><label style="font-size:11px">Sale de</label>' + selCuentas('fc-' + fid) + '</div>' +
+            '<div><label style="font-size:11px">&nbsp;</label><button class="tab on" style="padding:9px 14px" onclick="pagarFactura(\'' +
+              escAttr(p.proveedor) + '\',\'' + escAttr(f.id) + '\',\'' + fid + '\')">Pagar</button></div></div>' +
+            '<div class="aviso" style="margin:6px 0 0">Con el monto completo queda pagada; con menos, queda como abono parcial.</div>';
+        }
+      }
+      h += '</div>';
     });
-    h += '</div>';
-  }
+    if (pagadas.length) h += '<div style="margin-top:8px"><a href="#" style="font-size:12px;color:var(--brand)" onclick="VER_PAGADAS[\'' + pid + '\']=!VER_PAGADAS[\'' + pid + '\'];pintarPagar();return false">' +
+      (VER_PAGADAS[pid] ? 'Ocultar pagadas' : 'Ver pagadas (' + pagadas.length + ')') + '</a></div>';
+    if (pend.length > 1) {
+      h += '<div class="cfg" style="margin-top:10px"><div><label style="font-size:11px">Abono general USD</label>' +
+        '<input type="number" step="0.01" id="pg-' + pid + '" placeholder="0"></div>' +
+        '<div><label style="font-size:11px">Sale de</label>' + selCuentas('pm-' + pid) + '</div>' +
+        '<div><label style="font-size:11px">&nbsp;</label><button class="tab" style="padding:9px 14px" onclick="pagarProveedor(\'' + escAttr(p.proveedor) + '\')">Abonar</button></div></div>' +
+        '<div class="aviso" style="margin:6px 0 0">El abono general va a la factura que vence primero; lo que sobre, a la siguiente.</div>';
+    }
+    h += '</div></div>';
+  });
+  var alDia = CXP.filter(function(p) { return p.saldoUSD <= 0.009; }).length;
+  if (alDia) h += '<div style="margin-top:10px"><a href="#" style="font-size:12px;color:var(--brand)" onclick="VER_PAGADAS.__todos=!VER_PAGADAS.__todos;pintarPagar();return false">' +
+    (VER_PAGADAS.__todos ? 'Ocultar proveedores al dia' : 'Ver proveedores al dia (' + alDia + ')') + '</a></div>';
+  h += '</div>';
   el.innerHTML = h;
 }
 
+function abrirFactura(fid) { FACT_ABIERTA = FACT_ABIERTA === fid ? '' : fid; pintarPagar(); }
+
+function pagarFactura(prov, idFact, fid) {
+  enviarPagoCxp(prov, idFact, num(document.getElementById('fm-' + fid).value), document.getElementById('fc-' + fid).value, fid);
+}
 function pagarProveedor(prov) {
   var id = idSafe(prov);
-  var monto = num(document.getElementById('pg-' + id).value);
-  var met = document.getElementById('pm-' + id).value;
-  if (!(monto > 0)) { toast('Indica el monto del abono', 'err'); return; }
+  enviarPagoCxp(prov, '', num(document.getElementById('pg-' + id).value), document.getElementById('pm-' + id).value, id);
+}
+function enviarPagoCxp(prov, idFact, monto, cuenta, clave) {
+  if (!(monto > 0)) { toast('Indica el monto', 'err'); return; }
   var p = CXP.filter(function(x) { return x.proveedor === prov; })[0];
-  if (p && monto > p.saldoUSD + 0.05) { toast('El abono supera lo que se le debe (' + usd(p.saldoUSD) + ')', 'err'); return; }
-  // Se aplica a la factura mas proxima a vencer
-  var pend = p ? p.facturas.filter(function(f) { return f.estado !== 'PAGADA'; })[0] : null;
+  if (p && monto > p.saldoUSD + 0.05) { toast('El pago supera lo que se le debe (' + usd(p.saldoUSD) + ')', 'err'); return; }
+  if (!confirm('Pagar ' + usd(monto) + ' a ' + prov + ' desde ' + cuenta + '?')) return;
+  var k = prov + '|' + idFact + '|' + monto.toFixed(2) + '|' + cuenta;
+  var pp = PAGO_PEND[clave];
+  if (!pp || pp.k !== k) pp = PAGO_PEND[clave] = {k:k, id:'P' + Date.now() + '-' + Math.random().toString(36).slice(2, 6).toUpperCase()};
   var now = new Date();
   fetch(SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'},
-    body:JSON.stringify({tipo:'cxp_abono', proveedor:prov, montoUSD:monto, metodo:met,
-      id:pend ? pend.id : '', factura:pend ? pend.factura : '',
-      fecha:now.toLocaleDateString('es-VE'), hora:now.toLocaleTimeString('es-VE', {hour:'2-digit', minute:'2-digit'}),
-      registradoPor:'Gerencia'})})
-    .then(function(r) { return r.text(); })
-    .then(function(t) { var d; try { d = JSON.parse(t); } catch (e) { throw new Error('respuesta rara'); }
-      if (!d || !d.ok) throw new Error('no se guardo');
-      toast('Pagado ' + usd(monto) + ' a ' + prov, 'ok');
+    body:JSON.stringify({tipo:'cxp_abono', idPago:pp.id, proveedor:prov, id:idFact, montoUSD:monto,
+      metodo:metodoDeCuentaPago(cuenta), banco:cuenta,
+      fecha:now.toLocaleDateString('es-VE'), hora:now.toLocaleTimeString('es-VE', {hour:'2-digit', minute:'2-digit'})})})
+    .then(leerJSON)
+    .then(function(d) {
+      if (!d || !d.ok) { var e = new Error(d && d.error ? d.error : 'no se guardo'); e.rechazo = !!(d && d.rechazada); throw e; }
+      delete PAGO_PEND[clave];
+      toast(d.repetido ? 'Ese pago YA estaba registrado. No se duplico.'
+                       : 'Pagado ' + usd(monto) + ' a ' + prov + (d.aplicado && d.aplicado.length > 1 ? ': ' + d.aplicado.map(function(a) { return a.factura + ' ' + usd(a.montoUSD); }).join(', ') : ''), 'ok');
+      FACT_ABIERTA = '';
       cargarPagar();
     })
-    .catch(function(e) { toast('No se registro el pago: ' + e.message, 'err'); });
+    .catch(function(e) {
+      if (e && e.message === 'SESION') return;
+      toast(e && e.rechazo ? 'No se registro: ' + e.message
+                           : 'No se pudo confirmar el pago (' + (e && e.message || 'sin conexion') + '). Toca Pagar otra vez: si ya habia quedado, no se duplica.', 'err');
+    });
 }
 
 // ---- DIFERENCIAS DE INVENTARIO -------------------------------------------
