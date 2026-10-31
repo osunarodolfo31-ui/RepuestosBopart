@@ -222,13 +222,54 @@ function escAtributo(s) {
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
+/* v27.3 — PAGINAS Y CATEGORIAS para listas largas (Inventario, Fotos).
+   Antes se mostraban los primeros 60-80 y el resto solo se encontraba con el buscador: con 852 productos
+   no habia forma de recorrer la lista. paginar() corta la lista; htmlPaginas() dibuja Anterior/Siguiente;
+   htmlCategorias() arma el filtro con cuantos productos hay en cada categoria. */
+var POR_PAGINA = 40;
+(function() {
+  var st = document.createElement('style');
+  st.textContent = '.pager{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:12px 0 4px}' +
+    '.pager button{flex:0 0 auto;padding:10px 14px;border-radius:10px;border:1.5px solid var(--border);background:var(--card);' +
+    'color:var(--ink);font-weight:700;font-size:13px;font-family:inherit;cursor:pointer}' +
+    '.pager button:disabled{opacity:.35;cursor:default}.pager span{font-size:12px;color:var(--ink-muted);text-align:center}' +
+    '.catsel{width:100%;padding:11px;border-radius:10px;border:1.5px solid var(--border);background:var(--card);color:var(--ink);' +
+    'font-size:14px;font-family:inherit;margin:8px 0}';
+  document.head.appendChild(st);
+})();
+function paginar(lista, pagina) {
+  var paginas = Math.max(1, Math.ceil(lista.length / POR_PAGINA));
+  var p = Math.min(Math.max(1, pagina || 1), paginas);
+  var desde = (p - 1) * POR_PAGINA;
+  return {items:lista.slice(desde, desde + POR_PAGINA), pagina:p, paginas:paginas,
+          desde:lista.length ? desde + 1 : 0, hasta:Math.min(desde + POR_PAGINA, lista.length), total:lista.length};
+}
+// fn = nombre de la funcion global que recibe el numero de pagina
+function htmlPaginas(pg, fn) {
+  if (pg.paginas <= 1) return '';
+  return '<div class="pager"><button ' + (pg.pagina <= 1 ? 'disabled ' : '') + 'onclick="' + fn + '(' + (pg.pagina - 1) + ')">&#8249; Anterior</button>' +
+    '<span>' + pg.desde + '-' + pg.hasta + ' de ' + pg.total + '<br>pagina ' + pg.pagina + ' de ' + pg.paginas + '</span>' +
+    '<button ' + (pg.pagina >= pg.paginas ? 'disabled ' : '') + 'onclick="' + fn + '(' + (pg.pagina + 1) + ')">Siguiente &#8250;</button></div>';
+}
+// lista = productos ya filtrados por pestana y buscador; fn = funcion global que recibe la categoria elegida
+function htmlCategorias(lista, actual, fn) {
+  var c = {};
+  lista.forEach(function(p) { var k = String(p.categoria || '').trim() || 'SIN CATEGORIA'; c[k] = (c[k] || 0) + 1; });
+  var ks = Object.keys(c).sort();
+  var esc = function(t) { return String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;'); };
+  return '<select class="catsel" onchange="' + fn + '(this.value)"><option value="">Todas las categorias (' + lista.length + ')</option>' +
+    ks.map(function(k) { return '<option value="' + esc(k) + '"' + (k === actual ? ' selected' : '') + '>' + esc(k) + ' (' + c[k] + ')</option>'; }).join('') +
+    (actual && !c[actual] ? '<option value="' + esc(actual) + '" selected>' + esc(actual) + ' (0)</option>' : '') + '</select>';
+}
+function enCategoria(p, cat) { return !cat || (String(p.categoria || '').trim() || 'SIN CATEGORIA') === cat; }
+
 /* ===================== ACTUALIZACION (2026-09-22) — identico en todas las pantallas =====================
    El telefono guarda la pantalla vieja y la sigue mostrando aunque ya haya una nueva en GitHub.
    Hasta hoy eso se arreglaba borrando la cache a mano. Ahora cada pantalla sabe con que build salio,
    version.json dice cual es la buena, y si no coinciden aparece una barra con un boton que borra la
    cache y recarga. Nadie tiene que saber que es "borrar cache".
    Ademas, todo enlace entre pantallas lleva ?v=BUILD: moverse por el menu ya no trae copias viejas. */
-var BUILD = '2026-10-19.1';
+var BUILD = '2026-10-30.1';
 (function() {
   var intentos = 0;
   function sellarEnlaces() {

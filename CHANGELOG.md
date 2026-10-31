@@ -1,5 +1,12 @@
 # CHANGELOG — Repuesto BoParts
 
+## inventario v2.4 + fotos v9.7 — build 2026-10-30.1 — paginas y categorias
+
+Inventario mostraba los primeros 80 productos y Fotos los primeros 60; el resto solo aparecia con el buscador.
+Ahora las dos listas tienen paginas de 40 (Anterior/Siguiente arriba y abajo) y un filtro por categoria que
+dice cuantos productos hay en cada una, dentro de la pestana elegida. Cambiar de pestana, categoria o busqueda
+vuelve a la pagina 1. Solo cambian las pantallas (no hay que tocar Apps Script); todas llevan el build nuevo.
+
 ## Code.gs v27.2 + gerencia v3.3 — build 2026-10-19.1 — totales como fecha, cuentas por pagar por factura
 
 **"Particular" con $7.147.026.000.868.** La venta mandaba el total como texto ("6.03") y la hoja, en

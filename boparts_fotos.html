@@ -1,7 +1,9 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_fotos.html
-  VERSION: v9.6 (2026-09-24) | build 2026-10-19.1 | requiere Apps Script v27
+  VERSION: v9.7 (2026-10-30) | build 2026-10-30.1 | requiere Apps Script v27
+  v9.7: la lista tiene PAGINAS (40 por pagina) y filtro por CATEGORIA. Antes mostraba 60 y decia "usa el buscador".
+  VERSION anterior: v9.6 (2026-09-24) | build 2026-09-24.1 | requiere Apps Script v27
   v9.6: auditoria #8, la vista previa de cada foto pasa por urlSegura() (y el servidor v27 solo guarda
   URL de Cloudinary).
   VERSION anterior: v9.5 (2026-09-22) | build 2026-09-23.1 |
@@ -172,6 +174,7 @@
     <button class="ftab" data-f="todos">Todos</button>
   </div>
   <div id="conteoFotos" class="fcount">Cargando...</div>
+  <div id="catFotos"></div>
   <div id="listaFotos"></div>
 
   <div class="selected-product" id="selectedProduct">
@@ -191,7 +194,7 @@
 
 <div class="toast" id="toast"></div>
 
-<script src="boparts_sesion.js?v=2026-10-19.1"></script>
+<script src="boparts_sesion.js?v=2026-10-30.1"></script>
 <script>
 
 
@@ -268,8 +271,12 @@ var filtroFoto = 'sin';
 document.getElementById('fTabs').addEventListener('click', function(e) {
   var b = e.target.closest('.ftab'); if (!b) return;
   [].forEach.call(document.querySelectorAll('#fTabs .ftab'), function(t) { t.classList.remove('on'); });
-  b.classList.add('on'); filtroFoto = b.dataset.f; pintarListaFotos();
+  b.classList.add('on'); filtroFoto = b.dataset.f; PAG_FOT = 1; pintarListaFotos();
 });
+// v9.7: paginas y filtro por categoria
+var PAG_FOT = 1, CAT_FOT = '';
+function irPaginaFot(n) { PAG_FOT = n; pintarListaFotos(); var l = document.getElementById('catFotos'); if (l) l.scrollIntoView({behavior:'smooth', block:'start'}); }
+function elegirCatFot(c) { CAT_FOT = c; PAG_FOT = 1; pintarListaFotos(); }
 
 function cuantasFotos(p) {
   return [p.imagen, p.imagen2, p.imagen3].filter(function(u) { return String(u || '').trim(); }).length;
@@ -292,13 +299,16 @@ function pintarListaFotos() {
     if (filtroFoto === 'con') return n > 0;
     return true;
   });
+  document.getElementById('catFotos').innerHTML = htmlCategorias(lista, CAT_FOT, 'elegirCatFot');
+  lista = lista.filter(function(p) { return enCategoria(p, CAT_FOT); });
+  var pg = paginar(lista, PAG_FOT); PAG_FOT = pg.pagina;
   var box = document.getElementById('listaFotos');
   if (!lista.length) {
     box.innerHTML = '<div class="fvacio">' +
       (filtroFoto === 'sin' ? 'No queda ningun producto sin foto.' : 'Sin resultados') + '</div>';
     return;
   }
-  var h = lista.slice(0, 60).map(function(p) {
+  var h = htmlPaginas(pg, 'irPaginaFot') + pg.items.map(function(p) {
     var n = cuantasFotos(p);
     var dots = '';
     for (var i = 0; i < 3; i++) dots += '<span class="fdot' + (i < n ? ' on' : '') + '"></span>';
@@ -308,7 +318,7 @@ function pintarListaFotos() {
       '<button class="fbtn" onclick="selectProduct(' + PRODUCTS.indexOf(p) + ')">' +
       (n === 0 ? 'Subir' : 'Agregar') + '</button></div>';
   }).join('');
-  if (lista.length > 60) h += '<div class="fvacio" style="padding:12px">y ' + (lista.length - 60) + ' mas. Usa el buscador de arriba.</div>';
+  h += htmlPaginas(pg, 'irPaginaFot');
   box.innerHTML = h;
 }
 
@@ -329,8 +339,8 @@ searchInput.addEventListener('input', () => {
   if (!results.length) { dropdown.classList.remove('show'); return; }
   dropdown.innerHTML = results.map((p,i) => `
     <div class="drop-item" onclick="selectProduct(${PRODUCTS.indexOf(p)})">
-      ${p.producto} <span class="cat">${p.categoria}</span>
-      ${p.codigo ? `<br><small style="color:var(--ink-muted)">#${p.codigo}</small>` : ''}
+      ${escapeHtml(p.producto)} <span class="cat">${escapeHtml(p.categoria)}</span>
+      ${p.codigo ? `<br><small style="color:var(--ink-muted)">#${escapeHtml(p.codigo)}</small>` : ''}
     </div>
   `).join('');
   dropdown.classList.add('show');
@@ -541,7 +551,7 @@ function showToast(msg, type='') {
 }
 
 // ── INIT ──────────────────────────────────────────────────────
-const APP_VERSION = 'v9.6';
+const APP_VERSION = 'v9.7';
 const hdrP = document.querySelector('.header-text p, header p');
 if (hdrP) hdrP.textContent = APP_VERSION + ' · ' + hdrP.textContent;
 [0,1,2].forEach(i => renderSlot(i));
