@@ -1,6 +1,13 @@
 /**
  * Repuesto BoParts — Code.gs
- * VERSION: v27.2 (2026-10-19) | totales convertidos en fecha, cuentas por pagar por factura
+ * VERSION: v27.3 (2026-10-31) | productos con codigo propio, conteos que perdian la fecha
+ *
+ * v27.3 — (1) Un producto NUEVO de una recepcion ya no se crea sin codigo, con "-" ni con el codigo de otro
+ *   producto: el servidor le asigna uno unico (N-AAMMDD-01) y la pantalla lo dice. (2) Si un conteo perdio su
+ *   FECHA_CONTEO en la hoja, la fecha se recupera de CONTEOS y el producto no vuelve a "sin conteo".
+ *   (3) conciliar() revisa codigos repetidos, productos sin codigo y conteos sin fecha.
+ *
+ * VERSION anterior: v27.2 (2026-10-19) | totales convertidos en fecha, cuentas por pagar por factura
  *
  * v27.2 — (1) "Particular" salia con $7 billones: la venta mandaba el total como texto ("6.03") y la hoja
  *   lo convertia en FECHA cuando los centavos iban de 01 a 12. Ahora se guarda como numero, toda lectura
@@ -639,7 +646,7 @@ function claveDePost_(data) {
 // OJO: esta constante es lo que ven las apps en el menu. Se habia quedado en v21.4 mientras el
 // encabezado ya decia v24, asi que el sello de version — que existe justamente para saber si lo
 // desplegado es lo que crees — estaba mintiendo. Cada version nueva se cambia AQUI tambien.
-var VERSION_SCRIPT = 'v27.2';
+var VERSION_SCRIPT = 'v27.3';
 
 function json_(obj) {
   // La version viaja en cada respuesta: es la forma rapida de saber si lo desplegado es lo que crees
@@ -1129,7 +1136,7 @@ function doPost(e) {
       lockP.waitLock(10000);
       try {
         var resC = guardarCompra_(ss, data);
-        return json_({ok:true,tipo:'compra',idCompra:data.idCompra||'',nuevos:resC.nuevos});
+        return json_({ok:true,tipo:'compra',idCompra:data.idCompra||'',nuevos:resC.nuevos,asignados:resC.asignados||[]});
       } finally {
         SpreadsheetApp.flush();   // v26.1: vaciar ANTES de soltar el candado
         lockP.releaseLock();
@@ -1701,15 +1708,39 @@ function guardarCompra_(ss, d) {
   var nuevos = 0;
   var shL = ss.getSheetByName('LISTA DE PRODUCTOS');
   // v27.1: si un intento anterior fallo DESPUES de crear el producto, el reintento no lo crea otra vez.
-  var codsExist = {};
-  if (shL.getLastRow() >= 3) shL.getRange(3, 1, shL.getLastRow() - 2, 1).getValues().forEach(function(r) {
-    var k = String(r[0] || '').trim().toUpperCase(); if (k) codsExist[k] = true;
+  // v27.3: y un producto NUEVO nunca se crea sin codigo propio. El 26/10 entraron 17 productos de BENF con
+  // el codigo "-": para el sistema eran uno solo (contar cualquiera guardaba el conteo en el primero, el stock
+  // sumaba las compras de los 17 y el costeo caia siempre en la misma linea). Ahora, si el codigo viene vacio,
+  // es un guion o ya lo usa OTRO producto, el servidor le pone uno unico (N-AAMMDD-01...) y lo dice.
+  var codsExist = {}, nombreAsignado = {};
+  function nomNorm(t) { return String(t || '').trim().toUpperCase().replace(/\s+/g, ' '); }
+  if (shL.getLastRow() >= 3) shL.getRange(3, 1, shL.getLastRow() - 2, 3).getValues().forEach(function(r) {
+    var k = String(r[0] || '').trim().toUpperCase(); if (k && !codsExist[k]) codsExist[k] = nomNorm(r[2]);
+    if (/^N-\d{6}-\d+$/.test(k)) nombreAsignado[nomNorm(r[2])] = k;
   });
+  var asignados = [], hoyCod = Utilities.formatDate(new Date(), TZ_VE, 'yyMMdd'), seqCod = 0;
+  function codigoNuevo() {
+    var c;
+    do { seqCod++; c = 'N-' + hoyCod + '-' + ('0' + seqCod).slice(-2); } while (codsExist[c]);
+    return c;
+  }
   lineas.forEach(function(l) {
     if (!l.nuevo) return;
     var kNuevo = String(l.codigo || '').trim().toUpperCase();
-    if (kNuevo && codsExist[kNuevo]) return;
-    if (kNuevo) codsExist[kNuevo] = true;
+    var invalido = !kNuevo || kNuevo.length < 2 || /^[\s\-_.\/]*$/.test(kNuevo);
+    if (!invalido && codsExist[kNuevo] !== undefined) {
+      if (codsExist[kNuevo] === nomNorm(l.producto)) return;       // ya existe ese mismo producto (reintento)
+      invalido = true;                                             // el codigo es de OTRO producto
+    }
+    if (invalido && nombreAsignado[nomNorm(l.producto)]) {             // reintento: ya se le asigno codigo
+      l.codigo = nombreAsignado[nomNorm(l.producto)]; return;
+    }
+    if (invalido) {
+      var c = codigoNuevo();
+      asignados.push({producto:l.producto || '', antes:String(l.codigo || ''), codigo:c});
+      l.codigo = c; kNuevo = c; nombreAsignado[nomNorm(l.producto)] = c;
+    }
+    codsExist[kNuevo] = nomNorm(l.producto);
     var last = shL.getLastRow();
     shL.appendRow([l.codigo||'', l.marca||'', l.producto||'', l.categoria||'', 0, '', '', '', '', '', 'NUEVO - SIN PRECIO', '', '', '']);
     var nr = shL.getLastRow();
@@ -1730,7 +1761,7 @@ function guardarCompra_(ss, d) {
   shC.appendRow([d.idCompra||'', fecha, d.hora||'', d.proveedor, d.factura||'', d.recibidoPor||'', lineas.length, unidades,
                  'PENDIENTE COSTO', '', d.fotoUrl||'', d.notas||'', '', '']);
   formatoFecha_(shC, shC.getLastRow(), 2);
-  return {nuevos:nuevos};
+  return {nuevos:nuevos, asignados:asignados};
 }
 
 // ============================================================
@@ -2639,6 +2670,21 @@ function apartadoPorCodigo_(ss, excluirNum) {
   return out;
 }
 
+// v27.3 — fecha y hora del ULTIMO conteo de cada codigo, segun la hoja CONTEOS.
+function fechasDeConteos_(ss) {
+  var out = {}, ct = ss.getSheetByName('CONTEOS');
+  if (!ct || ct.getLastRow() < 2) return out;
+  ct.getRange(2, 1, ct.getLastRow() - 1, 3).getValues().forEach(function(r) {
+    var k = String(r[2] || '').trim().toUpperCase(); if (!k) return;
+    var iso = iso_(r[0]); if (!iso) return;
+    var h = esFecha_(r[1]) ? horaTexto_(r[1]) : String(r[1] || ''), m = /(\d{1,2}):(\d{2})\s*([ap])?/i.exec(String(h || '').toLowerCase()), hh = 0, mi = 0;
+    if (m) { hh = Number(m[1]); mi = Number(m[2]); if (m[3] === 'p' && hh !== 12) hh += 12; if (m[3] === 'a' && hh === 12) hh = 0; }
+    var d = Utilities.parseDate(iso + ' ' + pad2_(hh) + ':' + pad2_(mi), TZ_VE, 'yyyy-MM-dd HH:mm');
+    if (!out[k] || d.getTime() >= out[k].getTime()) out[k] = d;
+  });
+  return out;
+}
+
 // codigo: un codigo, una lista de codigos, o vacio para todos.
 function calcularStock_(ss, codigo, excluirApartado) {
   var sh = ss.getSheetByName('LISTA DE PRODUCTOS');
@@ -2651,6 +2697,20 @@ function calcularStock_(ss, codigo, excluirApartado) {
     if (k) { filtros[k] = true; hayFiltro = true; }
   });
   var apartado = apartadoPorCodigo_(ss, excluirApartado);
+
+  // v27.3 — CONTEO SIN FECHA. En 10 productos la celda FECHA_CONTEO (P) quedo vacia aunque el conteo (O)
+  // seguia ahi: alguien borro esa celda en la hoja. Sin fecha el producto salia "sin conteo" y Reinaldo lo
+  // volvia a contar. Si pasa, la fecha se toma del ultimo registro de ese producto en CONTEOS.
+  var faltaFecha = vals.some(function(r) {
+    return String(r[0] || '').trim() && r[COL_STK - 1] !== '' && r[COL_STK - 1] !== null && !r[COL_STK_FECHA - 1];
+  });
+  if (faltaFecha) {
+    var fc = fechasDeConteos_(ss);
+    vals.forEach(function(r) {
+      var k = String(r[0] || '').trim().toUpperCase();
+      if (k && r[COL_STK - 1] !== '' && r[COL_STK - 1] !== null && !r[COL_STK_FECHA - 1] && fc[k]) r[COL_STK_FECHA - 1] = fc[k];
+    });
+  }
 
   var desde = {};
   vals.forEach(function(r) {
@@ -3472,6 +3532,24 @@ function conciliar() {
       (malD.length ? '; el detalle dice ' + malD.map(function(x) { return s(x[1][15]); }).filter(function(v, i, a) { return a.indexOf(v) === i; }).join('/') + ' (filas ' + filasDe(malD) + ')' : '') +
       (malC.length ? '; la deuda dice ' + malC.map(function(x) { return s(x[1][6]); }).join('/') + ' (filas CXC ' + filasDe(malC) + ')' : ''), ventas[id][0][0]);
   });
+
+  // 16. Productos (v27.3): codigo repetido, sin codigo, y conteo que perdio su fecha.
+  var LP = hoja('LISTA DE PRODUCTOS') || [], porCod = {}, sinCod = [], sinFecha = [];
+  for (var li = 2; li < LP.length; li++) {
+    var rp = LP[li], cp = s(rp[0]).toUpperCase(), np = s(rp[2]);
+    if (!np) continue;
+    if (!cp || /^[\s\-_.\/]*$/.test(cp)) { sinCod.push(li + 1); continue; }
+    (porCod[cp] = porCod[cp] || []).push(li + 1);
+    if (rp[COL_STK - 1] !== '' && rp[COL_STK - 1] !== null && !rp[COL_STK_FECHA - 1]) sinFecha.push(li + 1);
+  }
+  Object.keys(porCod).forEach(function(k) {
+    if (porCod[k].length > 1) hallar('Codigo repetido en LISTA DE PRODUCTOS', 'ALTA', k + ' esta en ' + porCod[k].length +
+      ' filas. Solo la primera recibe conteos y costos; la otra sale siempre "sin conteo" y comparte ventas y compras.', porCod[k].join(', '));
+  });
+  if (sinCod.length) hallar('Producto sin codigo', 'ALTA', sinCod.length + ' producto(s) sin codigo o con "-": no se pueden contar ni costear ' +
+    'por separado. Ponles un codigo propio.', sinCod.join(', '));
+  if (sinFecha.length) hallar('Conteo sin fecha en LISTA DE PRODUCTOS', 'ALTA', sinFecha.length + ' producto(s) tienen el conteo pero se borro ' +
+    'la FECHA_CONTEO (columna P). La app la recupera de CONTEOS, pero alguien esta editando esa columna a mano.', sinFecha.join(', '));
 
   // 15. Total guardado como fecha (v27.2): "6.03" leido como 6 de marzo. Suma billones en Gerencia.
   var totFecha = [];

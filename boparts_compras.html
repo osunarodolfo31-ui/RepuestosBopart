@@ -1,7 +1,10 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_compras.html
-  VERSION: v3.0 (2026-09-24) | build 2026-10-30.1 | requiere Apps Script v27
+  VERSION: v3.1 (2026-10-31) | build 2026-10-31.1 | requiere Apps Script v27.3
+  v3.1: si un producto nuevo llega sin codigo, con "-" o con el codigo de otro producto, el servidor le pone uno
+  propio (N-AAMMDD-01) y el mensaje de la recepcion lo muestra.
+  VERSION anterior: v3.0 (2026-09-24) | build 2026-09-24.1 | requiere Apps Script v27
   v3.0: al costear de contado se elige DE QUE CUENTA salio el dinero (Efectivo USD, Banesco, Zelle...) o si lo
   pago un socio de su bolsillo (queda como prestamo del socio, igual que en Gastos). Es lo que el flujo de
   caja necesita: la compra de contado era el egreso mas grande y no decia de donde salio.
@@ -379,7 +382,7 @@ select option{background:#1E1E1E;color:var(--ink)}
   </div>
 </div>
 
-<script src="boparts_sesion.js?v=2026-10-30.1"></script>
+<script src="boparts_sesion.js?v=2026-10-31.1"></script>
 <script>
 
 
@@ -394,7 +397,7 @@ function sellarVersion(d) {
 }
 function txt_(v) { return v == null ? '' : String(v); }
 var CLOUD = 'c7jufi9v', PRESET = 'boparts_productos';
-var APP_VERSION = 'v3.0';
+var APP_VERSION = 'v3.1';
 
 var PRODUCTS = [], PROVEEDORES = [], lineas = [], provSel = null, fotoUrl = '';
 var idCompraActual = '';   // se mantiene entre reintentos de la MISMA recepcion
@@ -804,7 +807,10 @@ function guardarCompra() {
     var u = lineas.reduce(function(a, l) { return a + l.cantidad; }, 0);
     document.getElementById('successMsg').textContent = d.repetida
       ? provSel.nombre + ' - esta recepcion ya estaba guardada.\nNo se duplico nada.'
-      : provSel.nombre + ' - ' + lineas.length + ' productos, ' + u + ' unidades' + (d.nuevos ? '\n' + d.nuevos + ' producto(s) nuevo(s) creados sin precio' : '') + '\nEstado: PENDIENTE COSTO';
+      : provSel.nombre + ' - ' + lineas.length + ' productos, ' + u + ' unidades' + (d.nuevos ? '\n' + d.nuevos + ' producto(s) nuevo(s) creados sin precio' : '') +
+        ((d.asignados && d.asignados.length) ? '\n\nEstos productos no tenian codigo propio y el sistema les puso uno:\n' +
+          d.asignados.map(function(a) { return '- ' + a.producto + ': ' + a.codigo + (a.antes ? ' (venia "' + a.antes + '")' : ''); }).join('\n') : '') +
+        '\nEstado: PENDIENTE COSTO';
     document.getElementById('success').classList.add('open');
   }).catch(function(e) {
     btn.disabled = false; btn.textContent = 'Registrar Recepcion';

@@ -1,5 +1,17 @@
 # CHANGELOG — Repuesto BoParts
 
+## Apps Script v27.3 + compras v3.1 — build 2026-10-31.1 — codigo propio y conteos que perdian la fecha
+
+Causa de los "conteos que desaparecen": NO era la compra. En 10 productos alguien borro a mano la celda FECHA_CONTEO
+(columna P) de LISTA DE PRODUCTOS; sin fecha el producto salia "sin conteo". Ademas, 17 productos de BENF entraron el
+26/10 con codigo "-": para el sistema eran uno solo.
+- guardarCompra_: un producto nuevo sin codigo, con "-" o con el codigo de OTRO producto recibe uno unico
+  (N-AAMMDD-01...). Un reintento no lo vuelve a crear. La pantalla de compras avisa que codigos se asignaron.
+- calcularStock_: si el conteo (O) esta pero la fecha (P) no, la fecha sale del ultimo registro en CONTEOS.
+- conciliar: nuevo control 16 (codigo repetido, producto sin codigo, conteo sin fecha).
+- Reparacion3.gs (una sola vez): devuelve las fechas, pone codigo a los productos "-"/vacios y a sus lineas de
+  compras/ventas/conteos, da codigo nuevo al segundo "339" y borra las filas repetidas sin conteo.
+
 ## inventario v2.4 + fotos v9.7 — build 2026-10-30.1 — paginas y categorias
 
 Inventario mostraba los primeros 80 productos y Fotos los primeros 60; el resto solo aparecia con el buscador.

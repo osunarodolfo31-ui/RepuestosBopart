@@ -269,7 +269,7 @@ function enCategoria(p, cat) { return !cat || (String(p.categoria || '').trim() 
    version.json dice cual es la buena, y si no coinciden aparece una barra con un boton que borra la
    cache y recarga. Nadie tiene que saber que es "borrar cache".
    Ademas, todo enlace entre pantallas lleva ?v=BUILD: moverse por el menu ya no trae copias viejas. */
-var BUILD = '2026-10-30.1';
+var BUILD = '2026-10-31.1';
 (function() {
   var intentos = 0;
   function sellarEnlaces() {
