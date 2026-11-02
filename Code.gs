@@ -1,6 +1,20 @@
 /**
  * Repuesto BoParts — Code.gs
- * VERSION: v28.1 (2026-11-02) | cuentas que son de OB International (Banesco)
+ * VERSION: v28.3 (2026-11-02) | comision minima por canal y "sale por" en mover dinero
+ *
+ * v28.3 — (1) CANALES columna H MINIMO: comision = FIJO + monto x PCT, nunca menos que MINIMO. Bancamiga cobra
+ *   0,3% por Pago Movil saliente con minimo Bs 14 (0,3% de Bs 4.667 = Bs 14). (2) Mover dinero, cambio con OB,
+ *   retiros y reembolsos guardan POR DONDE sale el dinero (METODO) y la comision que cobro el banco en ese momento
+ *   (COMISION, en la moneda de la cuenta de origen), columnas O y P de MOV_CUENTAS. La comision sale de la cuenta
+ *   de origen ademas del monto. Queda guardada: si despues cambia la tabla, lo ya registrado no cambia.
+ *
+ * VERSION anterior: v28.2 (2026-11-02) | saldo inicial en cero o negativo
+ *
+ * v28.2 — El SALDO_INICIAL acepta cero y negativo. Una cuenta puede arrancar en 0 (la gaveta vacia) y la cuenta
+ *   con OB arranca en negativo cuando la tienda le debe a OB (el 02/11: -640,33). Antes exigia mayor que cero y
+ *   obligaba a poner 0,01.
+ *
+ * VERSION anterior: v28.1 (2026-11-02) | cuentas que son de OB International (Banesco)
  *
  * v28.1 — Banesco es una cuenta de Rodolfo que forma parte de OB International. Hoja CUENTAS, columna D "DE":
  *   una cuenta con DE = OB International no tiene saldo propio para la tienda. Todo lo que entra o sale por ella
@@ -672,7 +686,7 @@ function claveDePost_(data) {
 // OJO: esta constante es lo que ven las apps en el menu. Se habia quedado en v21.4 mientras el
 // encabezado ya decia v24, asi que el sello de version — que existe justamente para saber si lo
 // desplegado es lo que crees — estaba mintiendo. Cada version nueva se cambia AQUI tambien.
-var VERSION_SCRIPT = 'v28.1';
+var VERSION_SCRIPT = 'v28.3';
 
 function json_(obj) {
   // La version viaja en cada respuesta: es la forma rapida de saber si lo desplegado es lo que crees
@@ -4126,8 +4140,11 @@ function listaCuentas_(ss, conInactivas) {
   return out;
 }
 function hojaMovCuentas_(ss) {
-  return hojaAp_(ss, 'MOV_CUENTAS', ['ID','FECHA','HORA','TIPO','CUENTA_ORIGEN','MONTO_ORIGEN','MONEDA_ORIGEN',
-    'CUENTA_DESTINO','MONTO_DESTINO','MONEDA_DESTINO','TASA','SOCIO','REGISTRADO_POR','NOTAS']);
+  var sh = hojaAp_(ss, 'MOV_CUENTAS', ['ID','FECHA','HORA','TIPO','CUENTA_ORIGEN','MONTO_ORIGEN','MONEDA_ORIGEN',
+    'CUENTA_DESTINO','MONTO_DESTINO','MONEDA_DESTINO','TASA','SOCIO','REGISTRADO_POR','NOTAS','METODO_SALIDA','COMISION_ORIGEN']);
+  // v28.3: la hoja ya existia con 14 columnas
+  try { if (!String(sh.getRange(1, 15).getValue() || '').trim()) sh.getRange(1, 15, 1, 2).setValues([['METODO_SALIDA','COMISION_ORIGEN']]); } catch (e) {}
+  return sh;
 }
 var TIPOS_MOV_CUENTA = {SALDO_INICIAL:'D', TRASPASO:'OD', AJUSTE_ENTRA:'D', AJUSTE_SALE:'O',
                         RETIRO_SOCIO:'O', REEMBOLSO_SOCIO:'O', APORTE_SOCIO:'D', CAMBIO_OB:'OD'};
@@ -4177,7 +4194,26 @@ function movCuenta_(ss, d, quien) {
     d.tasa = tasaT;
   } else {
     if (o) mo = monto(d.montoOrigen, 'que sale');
-    if (dd) md = monto(d.montoDestino, 'que entra');
+    if (dd && tipo === 'SALDO_INICIAL') {
+      // v28.2 — un saldo inicial puede ser 0 (cuenta vacia) o negativo (la tienda le debe a OB).
+      var si = Number(d.montoDestino);
+      if (d.montoDestino === '' || d.montoDestino === null || d.montoDestino === undefined || !isFinite(si)) throw new Error('Saldo inicial invalido');
+      md = round2_(si);
+    } else if (dd) md = monto(d.montoDestino, 'que entra');
+  }
+  // v28.3 — POR DONDE sale el dinero de la cuenta de origen, y lo que cobra el banco por eso (se guarda ya).
+  var metSal = '', comO = 0;
+  if (o && tipo !== 'AJUSTE_SALE') {
+    var vistos = {};   // si alguien repite una fila en CANALES, vale la primera
+    var salidas = listaCanales_(ss).filter(function(c) {
+      if (c.cuenta !== o.cuenta || !canalSirve_(c, 'SALE') || vistos[c.metodo.toUpperCase()]) return false;
+      return (vistos[c.metodo.toUpperCase()] = true);
+    });
+    var pedido = String(d.metodo || '').trim().toUpperCase();
+    var canalS = pedido ? salidas.filter(function(c) { return c.metodo.toUpperCase() === pedido; })[0] : (salidas.length === 1 ? salidas[0] : null);
+    if (pedido && !canalS) throw new Error(o.cuenta + ' no tiene habilitado "' + d.metodo + '" para sacar dinero (hoja CANALES).');
+    if (!canalS && salidas.length > 1) throw new Error('Indica por donde sale el dinero de ' + o.cuenta + ': ' + salidas.map(function(c) { return c.metodo; }).join(', '));
+    if (canalS) { metSal = canalS.metodo; comO = comisionCanal_(canalS, mo); }
   }
   var socio = '';
   if (tipo.indexOf('SOCIO') >= 0) {
@@ -4198,7 +4234,7 @@ function movCuenta_(ss, d, quien) {
   var ahora = new Date();
   sh.appendRow([id, fechaVE_(d.fecha), d.hora || Utilities.formatDate(ahora, TZ_VE, 'HH:mm'), tipo,
                 o ? o.cuenta : '', o ? mo : '', o ? o.moneda : '', dd ? dd.cuenta : '', dd ? md : '', dd ? dd.moneda : '',
-                tasa, socio, (quien && quien.nombre) || d.registradoPor || '', String(d.notas || '').slice(0, 300)]);
+                tasa, socio, (quien && quien.nombre) || d.registradoPor || '', String(d.notas || '').slice(0, 300), metSal, comO]);
   formatoFecha_(sh, sh.getLastRow(), 2);
 
   // Los movimientos con socio tambien van a su cuenta corriente, que es donde se ve cuanto se le debe.
@@ -4209,7 +4245,7 @@ function movCuenta_(ss, d, quien) {
                    origen:id, descripcion:(o ? 'Sale de ' + o.cuenta : 'Entra a ' + dd.cuenta) + (d.notas ? ' - ' + d.notas : ''),
                    registradoPor:(quien && quien.nombre) || ''});
   }
-  return {ok:true, tipo:'mov_cuenta', id:id, repetido:false, montoOrigen:mo, montoDestino:md, tasa:tasa};
+  return {ok:true, tipo:'mov_cuenta', id:id, repetido:false, montoOrigen:mo, montoDestino:md, tasa:tasa, metodo:metSal, comision:comO};
 }
 
 // ============================================================
@@ -4788,23 +4824,33 @@ function prepararTareas() {
 // ============================================================
 // CANALES Y FLUJO DE CAJA (v28)
 // ============================================================
-// CANALES: A CUENTA, B METODO, C SENTIDO (ENTRA | SALE | AMBOS), D ETIQUETA, E FIJO, F PCT, G ACTIVO
+// CANALES: A CUENTA, B METODO, C SENTIDO (ENTRA | SALE | AMBOS), D ETIQUETA, E FIJO, F PCT, G ACTIVO, H MINIMO
+//   (v28.3) comision = FIJO + monto x PCT / 100, nunca menos que MINIMO. Todo en la moneda de la cuenta.
 //   - CUENTA tiene que existir y estar activa en CUENTAS: de ahi sale la MONEDA. Nadie la escribe al registrar.
 //   - FIJO es la comision fija por operacion y PCT la porcentual (1,5 = 1,5%), en la moneda de la cuenta.
 //   - ETIQUETA es lo que se ve en las pantallas. El orden de las filas es el orden en pantalla.
 // Agregar un banco, un metodo o cambiar una comision es editar la hoja: no hace falta tocar codigo.
 var CANALES_CAB = ['CUENTA', 'METODO', 'SENTIDO', 'ETIQUETA', 'FIJO', 'PCT', 'ACTIVO'];
 var CANALES_DEFECTO = [
-  ['Efectivo USD',          'Efectivo',       'AMBOS', 'Efectivo USD',          0, 0, 'SI'],
-  ['Efectivo Bs',           'Efectivo',       'AMBOS', 'Efectivo Bs',           0, 0, 'SI'],
-  ['Banesco',               'Pago Movil',     'AMBOS', 'Pago Movil Banesco',    0, 0, 'SI'],
-  ['Banesco',               'Transferencia',  'SALE',  'Transferencia Banesco', 0, 0, 'SI'],
-  ['Bancrecer',             'Pago Movil',     'AMBOS', 'Pago Movil Bancrecer',  0, 0, 'SI'],
-  ['Bancamiga',             'Punto de Venta', 'ENTRA', 'Punto Bancamiga',       0, 1.5, 'SI'],
-  ['Bancrecer Empresarial', 'Punto de Venta', 'ENTRA', 'Punto Bancrecer Emp.',  0, 0, 'SI'],
-  ['Bancrecer Empresarial', 'Cashea',         'ENTRA', 'Cashea Bancrecer',      0, 0, 'SI'],
+  // Pago Movil: recibir no cuesta; enviar cuesta 0,3% con minimo Bs 14, en cualquier banco.
+  ['Efectivo USD',          'Efectivo',       'AMBOS', 'Efectivo USD',          0, 0,   'SI', 0],
+  ['Efectivo Bs',           'Efectivo',       'AMBOS', 'Efectivo Bs',           0, 0,   'SI', 0],
+  ['Banesco',               'Pago Movil',     'ENTRA', 'Pago Movil Banesco',    0, 0,   'SI', 0],
+  ['Banesco',               'Pago Movil',     'SALE',  'Pago Movil Banesco',    0, 0.3, 'SI', 14],
+  ['Banesco',               'Transferencia',  'SALE',  'Transferencia Banesco', 0, 0,   'SI', 0],
+  ['Bancrecer',             'Pago Movil',     'ENTRA', 'Pago Movil Bancrecer',  0, 0,   'SI', 0],
+  ['Bancrecer',             'Pago Movil',     'SALE',  'Pago Movil Bancrecer',  0, 0.3, 'SI', 14],
+  ['Bancamiga',             'Pago Movil',     'SALE',  'Pago Movil Bancamiga',  0, 0.3, 'SI', 14],
+  // Punto Bancamiga (debito): 0,75% al liquidar + 1,5% de lo liquidado, cobrado aparte = 2,23875% de lo pasado.
+  ['Bancamiga',             'Punto de Venta', 'ENTRA', 'Punto Bancamiga',       0, 2.23875, 'SI', 0],
+  ['Bancrecer Empresarial', 'Punto de Venta', 'ENTRA', 'Punto Bancrecer Emp.',  0, 0,   'NO', 0],   // hoy no tiene punto
+  ['Bancrecer Empresarial', 'Cashea',         'ENTRA', 'Cashea Bancrecer',      0, 0,   'SI', 0],
+  // Cargos del banco que no son por una operacion (mantenimiento, SMS, estado de cuenta): se registran como gasto.
+  ['Bancamiga',             'Cargo del banco', 'SALE', 'Cargo del banco Bancamiga',      0, 0, 'SI', 0],
+  ['Bancrecer',             'Cargo del banco', 'SALE', 'Cargo del banco Bancrecer',      0, 0, 'SI', 0],
+  ['Bancrecer Empresarial', 'Cargo del banco', 'SALE', 'Cargo del banco Bancrecer Emp.', 0, 0, 'SI', 0],
   // OB es UNA sola via: por donde mueve OB el dinero (Zelle, Binance, efectivo) lo maneja OB por dentro.
-  ['OB International',      'OB',             'AMBOS', 'OB International',      0, 0, 'SI']
+  ['OB International',      'OB',             'AMBOS', 'OB International',      0, 0,   'SI', 0]
 ];
 
 // La primera vez, las comisiones se copian de METODOS_PAGO (lo que hoy cobra cada metodo), por etiqueta.
@@ -4854,7 +4900,8 @@ function listaCanales_(ss) {
   var cuentas = {};
   listaCuentas_(ss).forEach(function(c) { cuentas[c.cuenta.toUpperCase()] = c; });
   var out = [];
-  sh.getRange(2, 1, sh.getLastRow() - 1, 7).getValues().forEach(function(r) {
+  try { if (!String(sh.getRange(1, 8).getValue() || '').trim()) sh.getRange(1, 8).setValue('MINIMO'); } catch (eH) {}
+  sh.getRange(2, 1, sh.getLastRow() - 1, 8).getValues().forEach(function(r) {
     var c = cuentas[String(r[0] || '').trim().toUpperCase()];
     var metodo = String(r[1] || '').trim();
     var sentido = String(r[2] || '').trim().toUpperCase();
@@ -4863,9 +4910,16 @@ function listaCanales_(ss) {
     if (!siNo_(r[6], true)) return;
     var etq = String(r[3] || '').trim() || (metodo + ' ' + c.cuenta);
     out.push({cuenta:c.cuenta, moneda:c.moneda, ob:c.ob, metodo:metodo, sentido:sentido, etiqueta:etq.slice(0, 60),
-              fijo:Number(r[4]) || 0, pct:Number(r[5]) || 0});
+              fijo:Number(r[4]) || 0, pct:Number(r[5]) || 0, minimo:Number(r[7]) || 0});
   });
   return out;
+}
+// v28.3 — comision de un canal sobre un monto (en la moneda de su cuenta)
+function comisionCanal_(c, monto) {
+  if (!c) return 0;
+  var v = (Number(c.fijo) || 0) + (Number(monto) || 0) * (Number(c.pct) || 0) / 100;
+  if (c.minimo && v < c.minimo) v = c.minimo;
+  return v > 0 ? round2_(v) : 0;
 }
 function canalSirve_(c, sentido) {
   var s = String(sentido || 'ENTRA').toUpperCase();
@@ -4879,8 +4933,8 @@ function metodosDesdeCanales_(ss, sentido) {
   var lista;
   try { lista = listaCanales_(ss); } catch (e) { return null; }
   return lista.filter(function(c) { return canalSirve_(c, s); }).map(function(c) {
-    return {label:c.etiqueta, metodo:c.metodo, banco:c.cuenta, moneda:c.moneda, fijo:c.fijo, pct:c.pct, credito:false,
-            cuenta:c.cuenta, ob:c.ob};
+    return {label:c.etiqueta, metodo:c.metodo, banco:c.cuenta, moneda:c.moneda, fijo:c.fijo, pct:c.pct, minimo:c.minimo || 0,
+            credito:false, cuenta:c.cuenta, ob:c.ob};
   });
 }
 
@@ -4960,8 +5014,7 @@ function estadoDinero_(ss, desde, hasta) {
   function comisionDe(cta, metodo, sentido, monto) {
     var m = String(metodo || '').trim().toUpperCase();
     var c = canales.filter(function(k) { return k.cuenta === cta.cuenta && k.metodo.toUpperCase() === m && canalSirve_(k, sentido); })[0];
-    if (!c || (!c.fijo && !c.pct)) return 0;
-    return round2_(c.fijo + monto * c.pct / 100);
+    return comisionCanal_(c, monto);
   }
   // Convierte un monto a la moneda de la cuenta. tasa = la de la operacion si existe; si no, la de hoy.
   function aMoneda(monto, deMon, cta, tasa) {
@@ -5139,7 +5192,7 @@ function estadoDinero_(ss, desde, hasta) {
   // 9) MOV_CUENTAS: saldo inicial, traspasos, cambios con OB, ajustes y socios
   var iniciales = {};   // CUENTA -> {fecha, monto}
   var opsOB = [];
-  filas('MOV_CUENTAS', 14).forEach(function(r) {
+  filas('MOV_CUENTAS', 16).forEach(function(r) {
     var f = iso_(r[1]); if (!f) return;
     var tipo = String(r[3] || '').toUpperCase();
     var o = porNombre[String(r[4] || '').trim().toUpperCase()], dd = porNombre[String(r[7] || '').trim().toUpperCase()];
@@ -5154,8 +5207,9 @@ function estadoDinero_(ss, desde, hasta) {
     var etq = {TRASPASO:'Traspaso', CAMBIO_OB:'Cambio con OB', AJUSTE_ENTRA:'Ajuste: sobra', AJUSTE_SALE:'Ajuste: falta',
                RETIRO_SOCIO:'Retiro de socio', REEMBOLSO_SOCIO:'Reembolso a socio', APORTE_SOCIO:'Aporte de socio'}[tipo] || tipo;
     var desc = etq + (r[11] ? ' ' + r[11] : '') + (r[13] ? ' - ' + r[13] : '');
-    if (o)  agregar({fecha:f, origen:'MOVIMIENTO', ref:String(r[0] || ''), desc:desc + (dd ? ' (a ' + dd.cuenta + ')' : ''), metodo:etq,
-                     signo:-1, cuenta:o, monto:mo, tasa:tasa, sinComision:true, tipoMov:tipo});
+    if (o)  agregar({fecha:f, origen:'MOVIMIENTO', ref:String(r[0] || ''), desc:desc + (dd ? ' (a ' + dd.cuenta + ')' : ''),
+                     metodo:etq + (r[14] ? ' · ' + r[14] : ''), signo:-1, cuenta:o, monto:mo, tasa:tasa, sinComision:true,
+                     comisionFija:n_(r[15]), tipoMov:tipo});
     if (dd) agregar({fecha:f, origen:'MOVIMIENTO', ref:String(r[0] || ''), desc:desc + (o ? ' (de ' + o.cuenta + ')' : ''), metodo:etq,
                      signo:1, cuenta:dd, monto:md, tasa:tasa, sinComision:true, tipoMov:tipo});
     if ((o && o.ob) || (dd && dd.ob)) {

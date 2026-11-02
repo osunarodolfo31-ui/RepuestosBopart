@@ -1,5 +1,35 @@
 # CHANGELOG — Repuesto BoParts
 
+## boparts_sesion.js — build 2026-11-02.4 — menu agrupado (no requiere Apps Script nuevo)
+
+El menu de 13 tarjetas no cabia en el telefono: Lista de precios y Registrar venta quedaban arriba, fuera de la
+pantalla, y el panel no se podia desplazar. Ahora el menu lo arma boparts_sesion.js, uno solo para todas:
+- Arriba, fijos: Lista de precios, Registrar venta, Mi dia.
+- Grupos que se abren con un toque: Clientes (Cobros, Apartados, Devoluciones), Mercancia (Compras, Inventario,
+  Fotos, Demanda), Dinero y gerencia (Gastos, Dinero, Gerencia). El grupo de la pantalla actual viene abierto.
+- Al vendedor no se le muestran Devoluciones, Dinero ni Gerencia (el servidor igual se los niega).
+- El panel se desplaza si no cabe. Para cambiar un modulo de grupo se edita MENU_GRUPOS en boparts_sesion.js.
+- Tablas por defecto de CANALES en Code.gs al dia con la hoja (Pago Movil 0,3% min. Bs 14 al enviar, punto
+  Bancamiga 2,23875%, "Cargo del banco", punto Bancrecer Emp. apagado). Solo sirven si la hoja se vuelve a crear:
+  NO hace falta desplegar Apps Script.
+
+## Apps Script v28.3 + dinero v1.3 — build 2026-11-02.3 — comision minima y "sale por" al mover dinero
+
+- CANALES columna H MINIMO: comision = FIJO + monto x PCT, nunca menos que MINIMO.
+- Fila nueva en CANALES: Bancamiga / Pago Movil / SALE / 0,3% / minimo Bs 14 (el banco cobra 0,3%, y por debajo
+  de Bs 4.667 cobra Bs 14 fijos: 0,3% de 4.667 = 14, o sea un minimo).
+- Mover dinero (cambio con OB, traspaso, retiro, reembolso) pide POR DONDE sale el dinero de la cuenta de origen y
+  muestra la comision. MOV_CUENTAS guarda METODO_SALIDA (O) y COMISION_ORIGEN (P). La comision se descuenta de la
+  cuenta de origen ademas del monto y queda fija aunque despues cambie la tabla.
+
+## Apps Script v28.2 + dinero v1.2 — build 2026-11-02.2 — saldo inicial en cero o negativo
+
+- SALDO_INICIAL acepta 0 y negativo (servidor y pantalla). Antes exigia mayor que cero.
+- Correccion manual en MOV_CUENTAS (02/11): Efectivo USD de 0,01 a 0. OB International: -640,33, saldo al
+  CIERRE del 31/10 (la tienda le debe a OB). Se fecho 01/11: el saldo inicial cuenta todo lo de su fecha en
+  adelante, y con fecha 31/10 se habrian sumado otra vez los movimientos de ese dia. El pago de Datanet del 02/11
+  por Banesco ($22,24) se descuenta despues: OB queda en -662,57.
+
 ## Apps Script v28.1 + dinero v1.1 — build 2026-11-02.1 — Banesco es parte de OB International
 
 Banesco es una cuenta de Rodolfo que forma parte de OB International. Decision (opcion A): todo lo que entra o sale

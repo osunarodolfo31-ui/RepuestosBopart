@@ -146,6 +146,7 @@ function hacerLogin() {
       document.getElementById('loginBox').classList.remove('open');
       btn.disabled = false; btn.textContent = 'Entrar';
       if (typeof alEntrar === 'function') alEntrar();
+      try { montarMenu(); } catch (eM) {}
       fijarPersonaDeSesion();
       setTimeout(fijarPersonaDeSesion, 800);   // por si la pantalla dibuja sus desplegables despues
     })
@@ -298,13 +299,104 @@ function amarrarMoneda(idMetodo, idMoneda, fnLista) {
   aplicar();
 }
 
+/* ===================== v28.4 — MENU AGRUPADO, UNO SOLO PARA LAS 13 PANTALLAS =====================
+   Antes cada pantalla traia su propio menu de 13 tarjetas: no cabia en el telefono y lo primero que se
+   perdia era lo mas usado (Lista de precios y Registrar venta, arriba, fuera de la pantalla).
+   Ahora: tres accesos fijos arriba (Precios, Venta, Mi dia) y el resto en grupos que se abren con un toque.
+   El grupo de la pantalla actual viene abierto. Lo que es solo de socios no se le muestra a un vendedor
+   (el servidor igual se lo niega). Para mover un modulo de grupo, se cambia SOLO este arreglo. */
+var MENU_FIJO = [
+  {href:'index.html',              icono:'📋', nombre:'Lista de precios'},
+  {href:'boparts_ventas.html',     icono:'💰', nombre:'Registrar venta'},
+  {href:'boparts_tareas.html',     icono:'✅', nombre:'Mi día'}
+];
+var MENU_GRUPOS = [
+  {id:'clientes', icono:'🧾', nombre:'Clientes', desc:'Cobros, apartados, devoluciones', items:[
+    {href:'boparts_cobros.html',       icono:'🧾', nombre:'Cobros',       desc:'Cuentas por cobrar'},
+    {href:'boparts_apartados.html',    icono:'🔖', nombre:'Apartados',    desc:'Y contra pedido'},
+    {href:'boparts_devoluciones.html', icono:'↩️', nombre:'Devoluciones', desc:'Y cambios', socio:true}
+  ]},
+  {id:'mercancia', icono:'📦', nombre:'Mercancía', desc:'Compras, inventario, fotos, demanda', items:[
+    {href:'boparts_compras.html',    icono:'📦', nombre:'Compras',      desc:'Recibir mercancía'},
+    {href:'boparts_inventario.html', icono:'🧮', nombre:'Inventario',   desc:'Conteo de stock'},
+    {href:'boparts_fotos.html',      icono:'📷', nombre:'Cargar fotos', desc:'Catálogo de imágenes'},
+    {href:'boparts_demanda.html',    icono:'📝', nombre:'Demanda',      desc:'No atendida'}
+  ]},
+  {id:'dinero', icono:'🏦', nombre:'Dinero y gerencia', desc:'Gastos, bancos, resultados', items:[
+    {href:'boparts_gastos.html',   icono:'💸', nombre:'Gastos',   desc:'Registrar gasto'},
+    {href:'boparts_dinero.html',   icono:'🏦', nombre:'Dinero',   desc:'Bancos y flujo de caja', socio:true},
+    {href:'boparts_gerencia.html', icono:'📊', nombre:'Gerencia', desc:'Resultados', socio:true}
+  ]}
+];
+(function() {
+  var st = document.createElement('style');
+  st.textContent =
+    '#navPan,#navPanel{max-height:88vh;overflow-y:auto;-webkit-overflow-scrolling:touch}' +
+    '.bm-fijo{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}' +
+    '.bm-fijo a{display:flex;flex-direction:column;align-items:center;gap:6px;padding:14px 6px;border-radius:14px;text-decoration:none;' +
+      'background:var(--brand,#F5A800);color:#111;font-weight:700;font-size:12px;text-align:center;-webkit-tap-highlight-color:transparent}' +
+    '.bm-fijo a.cur{outline:2px solid #fff;outline-offset:-2px}' +
+    '.bm-fijo .ic{font-size:26px;line-height:1}' +
+    '.bm-g{background:var(--card,#1E1E1E);border:1px solid var(--border,#2E2E2E);border-radius:14px;margin-bottom:8px;overflow:hidden}' +
+    '.bm-gh{display:flex;align-items:center;gap:12px;padding:13px 14px;cursor:pointer;-webkit-tap-highlight-color:transparent}' +
+    '.bm-gh .ic{font-size:24px;line-height:1}' +
+    '.bm-gh .tx{flex:1;min-width:0}.bm-gh .nm{font-size:14px;font-weight:700;color:var(--ink,#F0F0F0)}' +
+    '.bm-gh .ds{font-size:11px;color:var(--ink-muted,#888);margin-top:2px}' +
+    '.bm-gh .fl{color:var(--ink-muted,#888);font-size:14px;transition:transform .2s}' +
+    '.bm-g.open .bm-gh .fl{transform:rotate(90deg)}' +
+    '.bm-items{display:none;grid-template-columns:1fr 1fr;gap:8px;padding:0 10px 10px}' +
+    '.bm-g.open .bm-items{display:grid}' +
+    '.bm-items a{display:flex;align-items:center;gap:10px;padding:11px 10px;border-radius:10px;text-decoration:none;' +
+      'background:var(--card2,#252525);border:1px solid var(--border,#2E2E2E);-webkit-tap-highlight-color:transparent}' +
+    '.bm-items a.cur{border-color:var(--brand,#F5A800);background:rgba(245,168,0,.15)}' +
+    '.bm-items .ic{font-size:22px;line-height:1}.bm-items .nm{font-size:13px;font-weight:700;color:var(--ink,#F0F0F0)}' +
+    '.bm-items .ds{font-size:10px;color:var(--ink-muted,#888);margin-top:1px}';
+  document.head.appendChild(st);
+})();
+function montarMenu() {
+  var panel = document.getElementById('navPan') || document.getElementById('navPanel');
+  if (!panel) return;
+  var viejo = panel.querySelector('.nav-g, .nav-grid, .bmenu');
+  if (!viejo) return;
+  var aqui = (location.pathname.split('/').pop() || 'index.html').toLowerCase();
+  var s = sesionActual(), vendedor = !!(s && s.rol !== 'SOCIO');
+  var v = (typeof BUILD !== 'undefined') ? 'v=' + BUILD : '';
+  function url(h) { return h + (v ? '?' + v : ''); }
+  function esc(t) { return String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+  var h = '<div class="bm-fijo">' + MENU_FIJO.map(function(m) {
+    return '<a href="' + url(m.href) + '"' + (m.href === aqui ? ' class="cur"' : '') + '><span class="ic">' + m.icono + '</span>' + esc(m.nombre) + '</a>';
+  }).join('') + '</div>';
+  MENU_GRUPOS.forEach(function(g) {
+    var items = g.items.filter(function(it) { return !(it.socio && vendedor); });
+    if (!items.length) return;
+    var abierto = items.some(function(it) { return it.href === aqui; });
+    h += '<div class="bm-g' + (abierto ? ' open' : '') + '" id="bmg-' + g.id + '">' +
+      '<div class="bm-gh" onclick="abrirGrupoMenu(\'' + g.id + '\')"><span class="ic">' + g.icono + '</span>' +
+      '<div class="tx"><div class="nm">' + esc(g.nombre) + '</div><div class="ds">' + esc(g.desc) + '</div></div><span class="fl">&#9654;</span></div>' +
+      '<div class="bm-items">' + items.map(function(it) {
+        return '<a href="' + url(it.href) + '"' + (it.href === aqui ? ' class="cur"' : '') + '><span class="ic">' + it.icono + '</span>' +
+               '<div><div class="nm">' + esc(it.nombre) + '</div><div class="ds">' + esc(it.desc) + '</div></div></a>';
+      }).join('') + '</div></div>';
+  });
+  var nuevo = document.createElement('div');
+  nuevo.className = 'bmenu';
+  nuevo.innerHTML = h;
+  viejo.parentNode.replaceChild(nuevo, viejo);
+}
+function abrirGrupoMenu(id) {
+  var el = document.getElementById('bmg-' + id);
+  if (el) el.classList.toggle('open');
+}
+// Se arma despues de cargar todo: asi BUILD ya existe y el menu viejo de la pantalla ya esta en el DOM.
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', montarMenu); else setTimeout(montarMenu, 0);
+
 /* ===================== ACTUALIZACION (2026-09-22) — identico en todas las pantallas =====================
    El telefono guarda la pantalla vieja y la sigue mostrando aunque ya haya una nueva en GitHub.
    Hasta hoy eso se arreglaba borrando la cache a mano. Ahora cada pantalla sabe con que build salio,
    version.json dice cual es la buena, y si no coinciden aparece una barra con un boton que borra la
    cache y recarga. Nadie tiene que saber que es "borrar cache".
    Ademas, todo enlace entre pantallas lleva ?v=BUILD: moverse por el menu ya no trae copias viejas. */
-var BUILD = '2026-11-02.1';
+var BUILD = '2026-11-02.4';
 (function() {
   var intentos = 0;
   function sellarEnlaces() {

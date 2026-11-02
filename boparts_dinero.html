@@ -1,7 +1,14 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_dinero.html
-  VERSION: v1.1 (2026-11-02) | build 2026-11-02.1 | requiere Apps Script v28.1
+  VERSION: v1.3 (2026-11-02) | build 2026-11-02.4 | requiere Apps Script v28.3
+  v1.3: Mover dinero pregunta POR DONDE sale el dinero de la cuenta de origen (Pago Movil, Transferencia...) y
+  muestra la comision que cobra el banco (tabla CANALES, con minimo). La comision sale de la cuenta ademas del
+  monto y queda guardada en el movimiento.
+  VERSION anterior: v1.2 (2026-11-02) | build 2026-11-02.2 | requiere Apps Script v28.2
+  v1.2: el saldo inicial acepta 0 y negativo (la tienda le debe a OB). En OB el saldo negativo se lee "La tienda
+  le debe a OB".
+  VERSION anterior: v1.1 (2026-11-02) | build 2026-11-02.1 | requiere Apps Script v28.1
   v1.1: Banesco es parte de OB International: no sale como cuenta propia; su dinero suma a OB en dolares a la
   tasa de cada operacion. La tarjeta de OB dice que cuentas incluye. "Cambio con OB" arranca desde Efectivo Bs.
   VERSION anterior: v1.0 (2026-11-01) | build 2026-11-01.1 | requiere Apps Script v28
@@ -348,6 +355,7 @@ select option{background:#1E1E1E;color:var(--ink)}
       <div class="field"><label>Entra a *</label><select id="mvCtaD" onchange="pintarMov()"></select></div>
       <div class="field"><label id="mvLblD">Monto que entra *</label><input type="number" id="mvMontoD" step="0.01" placeholder="0.00" oninput="pintarMov()"></div>
     </div>
+    <div id="mvSalida" class="field" style="display:none"><label>Sale por *</label><select id="mvMet" onchange="pintarMov()"></select></div>
     <div id="mvSocio" class="field" style="display:none"><label>Socio *</label>
       <select id="mvSoc"><option value="">Seleccionar...</option><option value="RODOLFO">Rodolfo</option><option value="JAVIER">Javier</option></select>
     </div>
@@ -453,11 +461,11 @@ select option{background:#1E1E1E;color:var(--ink)}
 </div>
 
 
-<script src="boparts_sesion.js?v=2026-11-02.1"></script>
+<script src="boparts_sesion.js?v=2026-11-02.4"></script>
 <script>
 var SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
 var SCRIPT_URL_SESION = SCRIPT_URL;
-var APP_VERSION = 'v1.1';
+var APP_VERSION = 'v1.3';
 var VER_SCRIPT = '?';
 var periodo = 'mes', DIN = null, CXP = [], LIQ = [], liqTasa = 0, SALIDAS = [], CUENTAS = [];
 var VER_PAGADAS = {}, FACT_ABIERTA = '', PAGO_PEND = {}, ID_MOV = '', ARQ = null, FILTRO_CTA = '';
@@ -560,7 +568,7 @@ function cargarDinero() {
     });
 }
 function cargarSalidas() {
-  cargarCanales('sale', function(lista) { SALIDAS = lista.filter(function(m) { return !m.credito; }); if (CXP.length) pintarPagar(); if (LIQ.length) pintarLiquidacion(); });
+  cargarCanales('sale', function(lista) { SALIDAS = lista.filter(function(m) { return !m.credito; }); if (CXP.length) pintarPagar(); if (LIQ.length) pintarLiquidacion(); pintarMov(); });
 }
 
 function pintarTodo() {
@@ -745,7 +753,7 @@ function abrirInicial(n) {
   document.getElementById('arqTit').textContent = 'Saldo inicial · ' + c.cuenta;
   document.getElementById('arqSub').innerHTML = 'Lo que hay HOY en esta cuenta, antes de cualquier movimiento de hoy. Desde esta fecha el sistema calcula el saldo.' +
     (c.saldo !== null && c.saldo !== undefined ? ' <b>Reemplaza</b> el saldo inicial anterior (' + fechaES(c.fechaInicial) + ').' : '');
-  document.getElementById('arqLbl').textContent = 'Saldo (' + c.moneda + ') *';
+  document.getElementById('arqLbl').textContent = 'Saldo (' + c.moneda + ') *' + (c.ob ? ' — negativo si la tienda le debe a OB' : ' — 0 si esta vacia');
   document.getElementById('arqReal').value = ''; document.getElementById('arqNotas').value = '';
   document.getElementById('arqBtn').textContent = 'Guardar saldo inicial';
   pintarArqueo();
@@ -765,11 +773,10 @@ function pintarArqueo() {
 function guardarArqueo() {
   if (!ARQ) return;
   var v = document.getElementById('arqReal').value;
-  if (v === '' || num(v) < 0) { toast('Escribe el saldo', 'err'); return; }
+  if (v === '' || !isFinite(parseFloat(String(v).replace(',', '.')))) { toast('Escribe el saldo', 'err'); return; }
   var real = num(v), c = ARQ.c, notas = document.getElementById('arqNotas').value.trim();
   var payload = {tipo:'mov_cuenta', idMov:nuevoId('M'), fecha:hoyDMY(), hora:horaAhora(), notas:notas};
   if (ARQ.modo === 'inicial') {
-    if (!(real > 0)) { toast('El saldo inicial tiene que ser mayor que cero. Si esta en cero, no hace falta cargarlo: escribe 0,01 y ajusta despues.', 'err'); return; }
     payload.tipoMov = 'SALDO_INICIAL'; payload.destino = c.cuenta; payload.montoDestino = real;
   } else {
     var dif = Math.round((real - num(c.saldo)) * 100) / 100;
@@ -797,6 +804,27 @@ function llenarCuentasMov() {
   pintarMov();
 }
 function ctaSel(id) { var i = parseInt(document.getElementById(id).value); return isNaN(i) ? null : CUENTAS[i]; }
+// v1.3 — por donde sale el dinero de la cuenta de origen, con la comision del banco (FIJO + %, con MINIMO)
+function salidasDe(c) { return c ? SALIDAS.filter(function(m) { return m.cuenta === c.cuenta; }) : []; }
+function comisionDe(m, monto) {
+  if (!m) return 0;
+  var v = (num(m.fijo) || 0) + (num(monto) || 0) * (num(m.pct) || 0) / 100;
+  if (m.minimo && v < m.minimo) v = num(m.minimo);
+  return v > 0 ? Math.round(v * 100) / 100 : 0;
+}
+function llenarSalidaMov(o) {
+  var el = document.getElementById('mvMet'), antes = el.value, lista = salidasDe(o);
+  var clave = (o ? o.cuenta : '') + '|' + lista.length;
+  if (el.__clave !== clave) {
+    el.innerHTML = (lista.length > 1 ? '<option value="">Seleccionar...</option>' : '') +
+      lista.map(function(m) { return '<option value="' + escHtml(m.metodo) + '">' + escHtml(m.metodo) +
+        (m.pct || m.fijo || m.minimo ? ' (comision ' + (m.pct ? m.pct + '%' : '') + (m.fijo ? (m.pct ? ' + ' : '') + enMon(m.fijo, m.moneda) : '') +
+         (m.minimo ? ', minimo ' + enMon(m.minimo, m.moneda) : '') + ')' : '') + '</option>'; }).join('');
+    el.__clave = clave;
+    if (antes && lista.some(function(m) { return m.metodo === antes; })) el.value = antes;
+  }
+  return lista;
+}
 function prepararCambioOB() {
   document.getElementById('mvTipo').value = 'CAMBIO_OB';
   var iOB = -1, iBan = -1;
@@ -812,6 +840,9 @@ function pintarMov() {
   document.getElementById('mvDestino').style.display = f.indexOf('D') >= 0 ? 'grid' : 'none';
   document.getElementById('mvSocio').style.display = t.indexOf('SOCIO') >= 0 ? 'block' : 'none';
   var o = ctaSel('mvCtaO'), d = ctaSel('mvCtaD'), tasa = DIN ? num(DIN.tasa) : 0;
+  var conSalida = f.indexOf('O') >= 0 && t !== 'AJUSTE_SALE' && o;
+  var listaSal = conSalida ? llenarSalidaMov(o) : [];
+  document.getElementById('mvSalida').style.display = conSalida && listaSal.length ? 'block' : 'none';
   var inO = document.getElementById('mvMontoO'), inD = document.getElementById('mvMontoD');
   document.getElementById('mvLblO').textContent = 'Monto que sale' + (o ? ' (' + o.moneda + ')' : '') + ' *';
   document.getElementById('mvLblD').textContent = (t === 'SALDO_INICIAL' ? 'Saldo que hay' : 'Monto que entra') + (d ? ' (' + d.moneda + ')' : '') + ' *';
@@ -837,6 +868,12 @@ function pintarMov() {
   } else if (t === 'REEMBOLSO_SOCIO') {
     txt = 'Baja lo que la tienda le debe al socio por gastos o compras que pago de su bolsillo.';
   }
+  if (conSalida && listaSal.length) {
+    var ms = listaSal.filter(function(m) { return m.metodo === document.getElementById('mvMet').value; })[0];
+    var com = ms ? comisionDe(ms, num(inO.value)) : 0;
+    if (com) txt += (txt ? '<br>' : '') + 'El banco cobra <b>' + enMon(com, o.moneda) + '</b> por esta salida: de ' + escHtml(o.cuenta) +
+                    ' sale en total <b>' + enMon(num(inO.value) + com, o.moneda) + '</b>.';
+  }
   info.style.display = txt ? 'block' : 'none'; info.innerHTML = txt;
 }
 function guardarMov() {
@@ -846,18 +883,23 @@ function guardarMov() {
   var conOB = o && d && (o.ob || d.ob) && o.moneda !== d.moneda;
   var mo = num(document.getElementById('mvMontoO').value), md = num(document.getElementById('mvMontoD').value);
   if (f.indexOf('O') >= 0 && (!o || (!(mo > 0) && !(conOB && o.ob)))) { toast('Indica de que cuenta sale y cuanto', 'err'); return; }
-  if (f.indexOf('D') >= 0 && (!d || (!(md > 0) && !(conOB && d.ob)))) { toast('Indica a que cuenta entra y cuanto', 'err'); return; }
+  var mdTxt = document.getElementById('mvMontoD').value;
+  if (t === 'SALDO_INICIAL') { if (!d || mdTxt === '') { toast('Indica la cuenta y su saldo (puede ser 0 o negativo)', 'err'); return; } md = parseFloat(String(mdTxt).replace(',', '.')); }
+  else if (f.indexOf('D') >= 0 && (!d || (!(md > 0) && !(conOB && d.ob)))) { toast('Indica a que cuenta entra y cuanto', 'err'); return; }
   if (o && d && o.cuenta === d.cuenta) { toast('El origen y el destino son la misma cuenta', 'err'); return; }
   if (t === 'CAMBIO_OB' && !conOB) { toast('Un cambio con OB va entre OB y una cuenta en Bs', 'err'); return; }
   var socio = document.getElementById('mvSoc').value;
   if (t.indexOf('SOCIO') >= 0 && !socio) { toast('Indica el socio', 'err'); return; }
+  var metSal = document.getElementById('mvSalida').style.display !== 'none' ? document.getElementById('mvMet').value : '';
+  if (document.getElementById('mvSalida').style.display !== 'none' && !metSal) { toast('Indica por donde sale el dinero', 'err'); return; }
   var fe = document.getElementById('mvFecha').value.split('-');
   if (!ID_MOV) ID_MOV = nuevoId('M');
   var payload = {tipo:'mov_cuenta', idMov:ID_MOV, tipoMov:t, fecha:parseInt(fe[2]) + '/' + parseInt(fe[1]) + '/' + fe[0], hora:horaAhora(),
-    origen:o ? o.cuenta : '', montoOrigen:mo, destino:d ? d.cuenta : '', montoDestino:md, socio:socio, tasa:DIN ? DIN.tasa : 0,
+    origen:o ? o.cuenta : '', montoOrigen:mo, destino:d ? d.cuenta : '', montoDestino:md, socio:socio, tasa:DIN ? DIN.tasa : 0, metodo:metSal,
     notas:document.getElementById('mvNotas').value.trim()};
   var resumen = document.getElementById('mvTipo').selectedOptions[0].text +
-    (o ? '\nSale de ' + o.cuenta + ': ' + (mo ? enMon(mo, o.moneda) : '(lo calcula el sistema)') : '') +
+    (o ? '\nSale de ' + o.cuenta + (metSal ? ' por ' + metSal : '') + ': ' + (mo ? enMon(mo, o.moneda) : '(lo calcula el sistema)') : '') +
+    (o && metSal && mo ? (function() { var c = comisionDe(salidasDe(o).filter(function(m) { return m.metodo === metSal; })[0], mo); return c ? '\nComision del banco: ' + enMon(c, o.moneda) : ''; })() : '') +
     (d ? '\nEntra a ' + d.cuenta + ': ' + (md ? enMon(md, d.moneda) : '(lo calcula el sistema)') : '') + '\n\nConfirmas?';
   if (!confirm(resumen)) return;
   var btn = document.getElementById('btnMov'); btn.disabled = true; btn.textContent = 'Guardando...';
@@ -866,7 +908,8 @@ function guardarMov() {
     if (!r || r.ok !== true) throw new Error(r && r.error ? r.error : 'Respuesta inesperada');
     ID_MOV = '';
     toast(r.repetido ? 'Ese movimiento YA estaba registrado. No se duplico.' :
-          'Registrado' + (r.tasa ? ' a tasa ' + r.tasa : '') + (o && d ? ': ' + enMon(r.montoOrigen, o.moneda) + ' → ' + enMon(r.montoDestino, d.moneda) : ''), 'ok');
+          'Registrado' + (r.tasa ? ' a tasa ' + r.tasa : '') + (o && d ? ': ' + enMon(r.montoOrigen, o.moneda) + ' → ' + enMon(r.montoDestino, d.moneda) : '') +
+          (r.comision ? ' · comision ' + enMon(r.comision, o.moneda) : ''), 'ok');
     ['mvMontoO', 'mvMontoD', 'mvNotas'].forEach(function(id) { document.getElementById(id).value = ''; });
     cargarDinero();
   }).catch(function(e) {
