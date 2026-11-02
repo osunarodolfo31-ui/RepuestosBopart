@@ -1,5 +1,24 @@
 # CHANGELOG — Repuesto BoParts
 
+## Apps Script v28.4 — LISTA DE PRODUCTOS limpia (02/11)
+
+Hecho directo en la hoja (respaldo completo antes de tocar: hoja RESPALDO_LISTA_2026-11-02):
+- Costo Final (H) roto en 190 productos (filas 797-989): la formula tomaba el costo de OTRO producto (ej. ROLINERA
+  6006 BENF costo $0,94 marcaba $16,37; el thinner $2,56 marcaba $1,14; 2 filas daban #REF!). Reescrita a
+  =F*(1-G) de su propia fila. No se tocaron 4 filas con costo escrito a mano a proposito (796, 856, 937, 938).
+- Producto invisible: ATF RON III PAILA (TEAMLUB, $65 / $95) estaba en la fila 2, sin codigo; el sistema lee
+  desde la 3. Movido a la fila 1006 con codigo N-261102-01. La fila 2 queda vacia.
+- 3 productos al fondo de la hoja (filas 2987-2989: REP986, W51040, PL30) subidos a 1007-1009 con su conteo y
+  fotos. Se borraron las formulas sueltas de las filas vacias 1010-2989: un producto nuevo ya no cae en la 2990.
+- Columnas del sistema anterior: E "Cant" (stock viejo, nadie lo lee) y J "EN BS" (precio x tasa 1.000 escrita a
+  mano) vaciadas y OCULTAS. K "REF" (EN BS / BCV 804,81 escrita a mano): formulas quitadas, se llama ESTADO y solo
+  guarda "NUEVO - SIN PRECIO". R3:S4 (TASA y bcv a mano) borradas. Ninguna columna se borro: el sistema ubica
+  cada dato por su posicion.
+- VENTAS_DETALLE tenia 971 filas y 898 usadas; COMPRAS_DETALLE 999. Se agregaron 3.000 y 2.000 filas.
+Codigo: asegurarFilas_() antes de cada escritura en bloque (detalle de venta, compra, apartado, devolucion,
+conciliacion): si no caben, agrega filas. El producto nuevo escribe su propia formula de H y no escribe E ni J; leerTasa_ lee CONFIG.
+Pendiente: las ventas ya registradas de esos 190 productos conservan el costo equivocado con que se congelaron.
+
 ## boparts_sesion.js — build 2026-11-02.4 — menu agrupado (no requiere Apps Script nuevo)
 
 El menu de 13 tarjetas no cabia en el telefono: Lista de precios y Registrar venta quedaban arriba, fuera de la

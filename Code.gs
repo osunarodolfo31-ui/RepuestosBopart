@@ -1,6 +1,17 @@
 /**
  * Repuesto BoParts — Code.gs
- * VERSION: v28.3 (2026-11-02) | comision minima por canal y "sale por" en mover dinero
+ * VERSION: v28.4 (2026-11-02) | LISTA DE PRODUCTOS limpia
+ *
+ * v28.4 — (0) asegurarFilas_(): antes de escribir un bloque de filas (detalle de venta, de compra, de apartado,
+ *   de devolucion, conciliacion), si la hoja no tiene filas suficientes se agregan. VENTAS_DETALLE tenia 971 filas
+ *   y 898 usadas: la venta se habria registrado sin detalle. Asi tambien se explica una recepcion que se cae a
+ *   la mitad con la hoja llena. (1) Producto nuevo de una recepcion: la formula de Costo Final (H) se escribe para SU fila
+ *   (=F*(1-G)). Antes se copiaba de la ultima fila: si esa estaba rota, el producto nuevo nacia roto. Ya no se
+ *   escribe Cant (E) ni EN BS (J): son columnas del sistema anterior, vacias y ocultas. La marca
+ *   "NUEVO - SIN PRECIO" sigue en K, que ahora se llama ESTADO. (2) leerTasa_ lee la tasa de CONFIG (B4). Leia
+ *   LISTA DE PRODUCTOS!E1, que desde que se borro la fila de la tasa es el encabezado de una columna.
+ *
+ * VERSION anterior: v28.3 (2026-11-02) | comision minima por canal y "sale por" en mover dinero
  *
  * v28.3 — (1) CANALES columna H MINIMO: comision = FIJO + monto x PCT, nunca menos que MINIMO. Bancamiga cobra
  *   0,3% por Pago Movil saliente con minimo Bs 14 (0,3% de Bs 4.667 = Bs 14). (2) Mover dinero, cambio con OB,
@@ -686,7 +697,7 @@ function claveDePost_(data) {
 // OJO: esta constante es lo que ven las apps en el menu. Se habia quedado en v21.4 mientras el
 // encabezado ya decia v24, asi que el sello de version — que existe justamente para saber si lo
 // desplegado es lo que crees — estaba mintiendo. Cada version nueva se cambia AQUI tambien.
-var VERSION_SCRIPT = 'v28.3';
+var VERSION_SCRIPT = 'v28.4';
 
 function json_(obj) {
   // La version viaja en cada respuesta: es la forma rapida de saber si lo desplegado es lo que crees
@@ -907,7 +918,8 @@ function rutearGet_(e) {
 }
 
 function leerTasa_(ss) {
-  try { return Number(ss.getSheetByName('LISTA DE PRODUCTOS').getRange('E1').getValue()) || 0; } catch (err) { return 0; }
+  // v28.4: la tasa vive en CONFIG (B4). LISTA DE PRODUCTOS!E1 ya no es la tasa: es un encabezado.
+  try { return Number(ss.getSheetByName('CONFIG').getRange('B4').getValue()) || 0; } catch (err) { return 0; }
 }
 
 // ============================================================
@@ -1424,6 +1436,7 @@ function guardarVenta_(ss, data) {
             cant, pre, cos, sub, cost, sub - cost, tasa, Math.round(sub * tasa), numNota];
   });
   var r0 = det.getLastRow() + 1;
+  asegurarFilas_(det, r0 + rows.length - 1);     // v28.4: sin esto, la hoja llena rompe la venta a la mitad
   det.getRange(r0, 1, rows.length, rows[0].length).setValues(rows);
   det.getRange(r0, 2, rows.length, 1).setNumberFormat('dd/MM/yyyy');
   if (data.__avisos && data.__avisos.length) {
@@ -1786,10 +1799,10 @@ function guardarCompra_(ss, d) {
     }
     codsExist[kNuevo] = nomNorm(l.producto);
     var last = shL.getLastRow();
-    shL.appendRow([l.codigo||'', l.marca||'', l.producto||'', l.categoria||'', 0, '', '', '', '', '', 'NUEVO - SIN PRECIO', '', '', '']);
+    shL.appendRow([l.codigo||'', l.marca||'', l.producto||'', l.categoria||'', '', '', '', '', '', '', 'NUEVO - SIN PRECIO', '', '', '']);
     var nr = shL.getLastRow();
-    // Copiar las formulas de Costo Final (H) y EN BS (J) de la fila anterior, si son formulas
-    try { if (last >= 3) { shL.getRange(last, 8).copyTo(shL.getRange(nr, 8)); shL.getRange(last, 10).copyTo(shL.getRange(nr, 10)); } } catch (err) {}
+    // v28.4: Costo Final con la formula de SU fila. Copiarla de la fila anterior arrastraba cualquier error.
+    try { shL.getRange(nr, 8).setFormula('=F' + nr + '*(1-G' + nr + ')'); } catch (err) {}
     nuevos++;
   });
 
@@ -1799,6 +1812,7 @@ function guardarCompra_(ss, d) {
     return [d.idCompra||'', fecha, d.proveedor, l.codigo||'', l.producto||'', cant, '', '', l.nuevo ? 'SI' : '', 'PENDIENTE COSTO'];
   });
   var r0 = shD.getLastRow() + 1;
+  asegurarFilas_(shD, r0 + rows.length - 1);     // v28.4
   shD.getRange(r0, 1, rows.length, rows[0].length).setValues(rows);
   shD.getRange(r0, 2, rows.length, 1).setNumberFormat('dd/MM/yyyy');
 
@@ -1993,10 +2007,7 @@ function leerConfig_(ss) {
     control = Number(cfg.getRange('B13').getValue()) || 0;
     controlHasta = Number(cfg.getRange('B14').getValue()) || 0;
   }
-  // Respaldo: la celda E1 de la lista, que se venia usando antes
-  if (!tasa) {
-    try { tasa = Number(ss.getSheetByName('LISTA DE PRODUCTOS').getRange('E1').getValue()) || 0; } catch (err) {}
-  }
+  // (v28.4: ya no hay respaldo en LISTA DE PRODUCTOS!E1: esa celda es un encabezado.)
   return {ok:true, tasa:tasa, fecha:fecha, quien:quien, bcv:bcv, bcvFecha:bcvFecha,
           factura:factura, control:control, controlHasta:controlHasta,
           controlRestantes:(controlHasta && control) ? (controlHasta - control) : 0};
@@ -2011,6 +2022,14 @@ function leerConfig_(ss) {
 // APARTADOS_MOV: A NUM, B FECHA, C HORA, D TIPO, E MONTO_USD, F MONEDA, G MONTO_PAGADO, H TASA, I METODO,
 //                J BANCO, K COMISION_BS, L REGISTRADO_POR, M NOTAS
 // Estados: ABIERTO -> LISTO (llego la mercancia) -> ENTREGADO | DEVUELTO | CREDITO_A_FAVOR | VENCIDO
+// v28.4 — UNA HOJA NO SE PUEDE QUEDAR SIN FILAS. appendRow agrega filas solo, pero escribir un bloque con
+// getRange().setValues() mas alla de la ultima fila de la hoja falla ("fuera de las dimensiones de la hoja").
+// VENTAS_DETALLE tenia 971 filas y 898 usadas: en unos dias una venta se habria guardado sin su detalle.
+// Antes de escribir un bloque, si no cabe, se agregan las filas que falten mas 1.000 de margen.
+function asegurarFilas_(sh, ultimaFilaNecesaria) {
+  var max = sh.getMaxRows();
+  if (ultimaFilaNecesaria > max) sh.insertRowsAfter(max, ultimaFilaNecesaria - max + 1000);
+}
 function hojaAp_(ss, nombre, encabezados) {
   var sh = ss.getSheetByName(nombre);
   if (!sh) { sh = ss.insertSheet(nombre); sh.appendRow(encabezados); sh.setFrozenRows(1); }
@@ -2054,6 +2073,7 @@ function crearApartado_(ss, d) {
     return [num, l.codigo || '', l.producto || '', cant, pre, cos, Math.round(cant * pre * 100) / 100];
   });
   var det = shApartadosDet_(ss);
+  asegurarFilas_(det, det.getLastRow() + filas.length);     // v28.4
   det.getRange(det.getLastRow() + 1, 1, filas.length, 7).setValues(filas);
 
   total = Math.round(total * 100) / 100;
@@ -2337,6 +2357,7 @@ function registrarDevolucion_(ss, d) {
   });
   if (det && filasDet.length) {
     var r0 = det.getLastRow() + 1;
+    asegurarFilas_(det, r0 + filasDet.length - 1);     // v28.4
     det.getRange(r0, 1, filasDet.length, 16).setValues(filasDet);
     det.getRange(r0, 2, filasDet.length, 1).setNumberFormat('dd/MM/yyyy');
   }
@@ -2353,6 +2374,7 @@ function registrarDevolucion_(ss, d) {
   var dd = hojaAp_(ss, 'DEVOLUCIONES_DET', ['NUM_DEV','NOTA','MOVIMIENTO','CODIGO','CANTIDAD','PRECIO_USD']);
   var fd = devueltas.map(function(l) { return [num, d.nota || '', 'DEVUELTO', l.codigo || '', Number(l.cantidad) || 0, Number(l.precio) || 0]; })
     .concat(nuevas.map(function(l) { return [num, d.nota || '', 'ENTREGADO', l.codigo || '', Number(l.cantidad) || 0, Number(l.precio) || 0]; }));
+  asegurarFilas_(dd, dd.getLastRow() + fd.length);     // v28.4
   dd.getRange(dd.getLastRow() + 1, 1, fd.length, 6).setValues(fd);
 
   // v27 — LA COMISION DEL ALIADO SIGUE A LA DEVOLUCION. Si la venta tenia aliado y se devolvio mercancia
@@ -3643,7 +3665,7 @@ function conciliar() {
      ' ventas con ID revisadas · ' + D.length + ' renglones · ' + CX.length + ' movimientos CXC · ' + CO.length + ' comisiones'],
     ['El historico importado (H-VTA-###) queda fuera por diseno.']]);
   sh.getRange(5, 1, 1, 4).setValues([['GRAVEDAD', 'CONTROL', 'DETALLE', 'FILAS']]).setFontWeight('bold');
-  if (H.length) sh.getRange(6, 1, H.length, 4).setValues(H);
+  if (H.length) { asegurarFilas_(sh, 5 + H.length); sh.getRange(6, 1, H.length, 4).setValues(H); }
   sh.getRange(1, 1).setFontWeight('bold');
   sh.setColumnWidth(1, 80); sh.setColumnWidth(2, 260); sh.setColumnWidth(3, 720); sh.setColumnWidth(4, 160);
   sh.getRange(6, 3, Math.max(H.length, 1), 1).setWrap(true);
