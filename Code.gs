@@ -1,6 +1,15 @@
 /**
  * Repuesto BoParts — Code.gs
- * VERSION: v28 (2026-11-01) | bancos con moneda y canales, cuenta con OB International, flujo de caja
+ * VERSION: v28.1 (2026-11-02) | cuentas que son de OB International (Banesco)
+ *
+ * v28.1 — Banesco es una cuenta de Rodolfo que forma parte de OB International. Hoja CUENTAS, columna D "DE":
+ *   una cuenta con DE = OB International no tiene saldo propio para la tienda. Todo lo que entra o sale por ella
+ *   se acredita o debita a OB EN DOLARES, a la tasa de cada operacion (o la de trabajo si no la tiene). El
+ *   riesgo del bolivar mientras esta en esa cuenta es de OB, no de la tienda. Las pantallas siguen mostrando
+ *   "Pago Movil Banesco" (el cliente necesita saber a donde paga) y la moneda sigue siendo Bs. La OB es UNA sola
+ *   via en CANALES (metodo OB). Mover dinero no ofrece las cuentas que son de OB.
+ *
+ * VERSION anterior: v28 (2026-11-01) | bancos con moneda y canales, cuenta con OB International, flujo de caja
  *
  * v28 — DINERO. (1) Hoja CANALES: cada cuenta tiene sus metodos habilitados para ENTRAR, SALIR o AMBOS, con
  *   su comision (fija y %). La moneda la pone la cuenta (hoja CUENTAS), no quien registra. action=metodos
@@ -663,7 +672,7 @@ function claveDePost_(data) {
 // OJO: esta constante es lo que ven las apps en el menu. Se habia quedado en v21.4 mientras el
 // encabezado ya decia v24, asi que el sello de version — que existe justamente para saber si lo
 // desplegado es lo que crees — estaba mintiendo. Cada version nueva se cambia AQUI tambien.
-var VERSION_SCRIPT = 'v28';
+var VERSION_SCRIPT = 'v28.1';
 
 function json_(obj) {
   // La version viaja en cada respuesta: es la forma rapida de saber si lo desplegado es lo que crees
@@ -4101,14 +4110,18 @@ function asegurarCuentaOB_(ss, sh) {
 function listaCuentas_(ss, conInactivas) {
   var sh = hojaSemilla_(ss, 'CUENTAS', ['CUENTA', 'MONEDA', 'ACTIVA'], CUENTAS_DEFECTO);
   try { asegurarCuentaOB_(ss, sh); } catch (eOb) {}
+  try { if (sh && !String(sh.getRange(1, 4).getValue() || '').trim()) sh.getRange(1, 4).setValue('DE'); } catch (eDe) {}
   var out = [];
-  var filas = (sh && sh.getLastRow() >= 2) ? sh.getRange(2, 1, sh.getLastRow() - 1, 3).getValues() : CUENTAS_DEFECTO;
+  var filas = (sh && sh.getLastRow() >= 2) ? sh.getRange(2, 1, sh.getLastRow() - 1, 4).getValues() : CUENTAS_DEFECTO;
   filas.forEach(function(r) {
     var n = String(r[0] || '').trim(), m = String(r[1] || '').trim().toUpperCase();
     if (!n || (m !== 'USD' && m !== 'BS')) return;
     var activa = siNo_(r[2], true);
     if (!activa && !conInactivas) return;
-    out.push({cuenta:n, moneda:m, activa:activa, ob:n.toUpperCase() === CUENTA_OB.toUpperCase()});
+    // v28.1 — DE: la cuenta es de otra (hoy, Banesco es de OB International). Sin saldo propio para la tienda.
+    var de = String(r[3] == null ? '' : r[3]).trim();
+    if (de.toUpperCase() === n.toUpperCase()) de = '';
+    out.push({cuenta:n, moneda:m, activa:activa, ob:n.toUpperCase() === CUENTA_OB.toUpperCase(), de:de});
   });
   return out;
 }
@@ -4145,6 +4158,11 @@ function movCuenta_(ss, d, quien) {
   if (forma.indexOf('O') >= 0) o = cuenta(d.origen, 'de origen');
   if (forma.indexOf('D') >= 0) dd = cuenta(d.destino, 'de destino');
   if (o && dd && o.cuenta === dd.cuenta) throw new Error('El origen y el destino son la misma cuenta');
+  // v28.1 — una cuenta que es DE otra (Banesco es de OB) no se mueve a mano: su dinero ya es de OB.
+  [o, dd].forEach(function(c) {
+    if (c && c.de) throw new Error(c.cuenta + ' es parte de ' + c.de + ': lo que hay ahi ya cuenta como ' + c.de +
+                                   '. Usa ' + c.de + ' en este movimiento.');
+  });
   // v28 — Toda operacion con OB International entre monedas distintas va A LA TASA DE TRABAJO. OB no cobra
   // comision: su ganancia es la tasa, y la tasa es la del sistema. El monto del lado de OB lo calcula el
   // servidor; nadie lo escribe, asi no puede quedar distinto.
@@ -4785,9 +4803,8 @@ var CANALES_DEFECTO = [
   ['Bancamiga',             'Punto de Venta', 'ENTRA', 'Punto Bancamiga',       0, 1.5, 'SI'],
   ['Bancrecer Empresarial', 'Punto de Venta', 'ENTRA', 'Punto Bancrecer Emp.',  0, 0, 'SI'],
   ['Bancrecer Empresarial', 'Cashea',         'ENTRA', 'Cashea Bancrecer',      0, 0, 'SI'],
-  ['OB International',      'Zelle',          'AMBOS', 'Zelle (OB)',            0, 0, 'SI'],
-  ['OB International',      'Binance',        'AMBOS', 'Binance (OB)',          0, 0, 'SI'],
-  ['OB International',      'Efectivo',       'SALE',  'Dolares de OB en efectivo', 0, 0, 'SI']
+  // OB es UNA sola via: por donde mueve OB el dinero (Zelle, Binance, efectivo) lo maneja OB por dentro.
+  ['OB International',      'OB',             'AMBOS', 'OB International',      0, 0, 'SI']
 ];
 
 // La primera vez, las comisiones se copian de METODOS_PAGO (lo que hoy cobra cada metodo), por etiqueta.
@@ -4957,9 +4974,22 @@ function estadoDinero_(ss, desde, hasta) {
   function agregar(o) {
     if (!o.cuenta) { sinCuenta.push(o); return; }
     if (!(o.monto > 0)) return;
+    // v28.1 — cuenta que es DE otra (Banesco de OB): la comision se calcula con el canal real y todo pasa a la
+    // cuenta madre en SU moneda, a la tasa de la operacion. El metodo conserva de donde vino.
+    var madre = o.cuenta.de ? porNombre[String(o.cuenta.de).toUpperCase()] : null;
+    if (madre && madre !== o.cuenta) {
+      var com0 = o.sinComision ? 0 : comisionDe(o.cuenta, o.metodo, o.signo > 0 ? 'ENTRA' : 'SALE', o.monto);
+      var tM = n_(o.tasa) || tasaHoy;
+      var conv = aMoneda(o.monto, o.cuenta.moneda, madre, tM);
+      var convC = com0 ? aMoneda(com0, o.cuenta.moneda, madre, tM).monto : 0;
+      o.metodo = (o.metodo ? o.metodo + ' ' : '') + o.cuenta.cuenta;
+      o.cuenta = madre; o.monto = conv.monto; o.estimado = o.estimado || !n_(o.tasa);
+      if (!(o.monto > 0)) { o.motivo = 'Sin tasa para pasar a ' + madre.cuenta; o.cuenta = null; sinCuenta.push(o); return; }
+      o.sinComision = true; o.comisionFija = convC;
+    }
     var t = n_(o.tasa) || tasaHoy;
     o.usd = o.cuenta.moneda === 'USD' ? o.monto : (t ? round2_(o.monto / t) : 0);
-    o.comision = o.sinComision ? 0 : comisionDe(o.cuenta, o.metodo, o.signo > 0 ? 'ENTRA' : 'SALE', o.monto);
+    o.comision = o.comisionFija || (o.sinComision ? 0 : comisionDe(o.cuenta, o.metodo, o.signo > 0 ? 'ENTRA' : 'SALE', o.monto));
     o.comisionUSD = o.comision ? (o.cuenta.moneda === 'USD' ? o.comision : (t ? round2_(o.comision / t) : 0)) : 0;
     movs.push(o);
   }
@@ -5139,7 +5169,7 @@ function estadoDinero_(ss, desde, hasta) {
   var resumen = {};
   cuentas.forEach(function(c) {
     var ini = iniciales[c.cuenta.toUpperCase()];
-    resumen[c.cuenta] = {cuenta:c.cuenta, moneda:c.moneda, activa:c.activa, ob:c.ob,
+    resumen[c.cuenta] = {cuenta:c.cuenta, moneda:c.moneda, activa:c.activa, ob:c.ob, partes:cuentas.filter(function(k) { return k.de && k.activa && k.de.toUpperCase() === c.cuenta.toUpperCase(); }).map(function(k) { return k.cuenta; }),
                          saldoInicial:ini ? ini.monto : null, fechaInicial:ini ? ini.fecha : '',
                          saldo:ini ? ini.monto : null, entra:0, sale:0, comision:0, n:0, sinMovSaldo:0};
   });
@@ -5155,7 +5185,7 @@ function estadoDinero_(ss, desde, hasta) {
     var r = resumen[c.cuenta];
     r.saldoUSD = r.saldo === null ? null : (c.moneda === 'USD' ? r.saldo : (tasaHoy ? round2_(r.saldo / tasaHoy) : null));
     return r;
-  }).filter(function(r) { return r.activa || r.n || r.saldo !== null; });
+  }).filter(function(r) { var c = porNombre[r.cuenta.toUpperCase()]; return !(c && c.de) && (r.activa || r.n || r.saldo !== null); });
 
   // ---- Flujo del periodo ----
   var enPer = movs.filter(function(m) { return m.fecha >= d1 && m.fecha <= d2; });

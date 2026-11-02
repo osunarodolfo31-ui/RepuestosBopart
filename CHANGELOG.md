@@ -1,5 +1,23 @@
 # CHANGELOG — Repuesto BoParts
 
+## Apps Script v28.1 + dinero v1.1 — build 2026-11-02.1 — Banesco es parte de OB International
+
+Banesco es una cuenta de Rodolfo que forma parte de OB International. Decision (opcion A): todo lo que entra o sale
+por Banesco se acredita o debita a OB EN DOLARES, a la tasa de cada operacion. El riesgo del bolivar mientras esta
+en Banesco es de OB, no de la tienda.
+- Hoja CUENTAS, columna D "DE": Banesco (y Zelle/Binance, inactivas) = OB International. Para agregar otra cuenta
+  de OB basta con escribir OB International en su columna DE. Sin codigo.
+- Las pantallas siguen ofreciendo "Pago Movil Banesco" en Bs (el cliente necesita saber a donde paga) y la
+  validacion de moneda sigue igual.
+- Dinero: Banesco no sale como cuenta; la tarjeta de OB dice "incluye Banesco". Mover dinero rechaza una cuenta
+  que es DE otra ("usa OB International").
+- CANALES: OB es una sola via (metodo OB). Zelle (OB), Binance (OB) y Dolares de OB en efectivo: ACTIVO = NO.
+- Correccion manual en la hoja (02/11): gasto G20261102-093134-ZTW3 "Datanet Mes Noviembre" entro como USD
+  22.239,36; quedo BS, MONTO_USD 22,24, MONTO_BS 22.239.
+
+Ojo: con esta regla, la tasa de trabajo decide cuantos dolares le quedan a la tienda de cada venta por Banesco.
+Hay que actualizarla cuando se mueva el mercado.
+
 ## Apps Script v28 + dinero v1.0 — build 2026-11-01.1 — bancos con moneda, cuenta con OB y flujo de caja
 
 **Lo que estaba roto.** La hoja MOV_CUENTAS nunca existio: no habia saldo inicial ni traspasos, asi que ninguna

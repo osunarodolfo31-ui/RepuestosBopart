@@ -1,7 +1,10 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_dinero.html
-  VERSION: v1.0 (2026-11-01) | build 2026-11-01.1 | requiere Apps Script v28
+  VERSION: v1.1 (2026-11-02) | build 2026-11-02.1 | requiere Apps Script v28.1
+  v1.1: Banesco es parte de OB International: no sale como cuenta propia; su dinero suma a OB en dolares a la
+  tasa de cada operacion. La tarjeta de OB dice que cuentas incluye. "Cambio con OB" arranca desde Efectivo Bs.
+  VERSION anterior: v1.0 (2026-11-01) | build 2026-11-01.1 | requiere Apps Script v28
   v1.0: pantalla nueva, solo socios. Flujo de caja: saldo por cuenta (desde su saldo inicial), entradas, salidas
   y comisiones por cuenta y metodo, movimientos, lo que no tiene cuenta, la cuenta con OB International y sus
   cambios con la tasa de cada uno, y la cuenta de los socios. Aqui viven ahora: cuentas por pagar y liquidacion
@@ -450,11 +453,11 @@ select option{background:#1E1E1E;color:var(--ink)}
 </div>
 
 
-<script src="boparts_sesion.js?v=2026-11-01.1"></script>
+<script src="boparts_sesion.js?v=2026-11-02.1"></script>
 <script>
 var SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
 var SCRIPT_URL_SESION = SCRIPT_URL;
-var APP_VERSION = 'v1.0';
+var APP_VERSION = 'v1.1';
 var VER_SCRIPT = '?';
 var periodo = 'mes', DIN = null, CXP = [], LIQ = [], liqTasa = 0, SALIDAS = [], CUENTAS = [];
 var VER_PAGADAS = {}, FACT_ABIERTA = '', PAGO_PEND = {}, ID_MOV = '', ARQ = null, FILTRO_CTA = '';
@@ -598,7 +601,8 @@ function pintarTodo() {
     var tieneSaldo = c.saldo !== null && c.saldo !== undefined;
     h += '<div class="cli"><div class="h" style="cursor:default"><div><div class="nm">' + escHtml(c.cuenta) + (c.ob ? ' <span class="chip cr">casa de cambio</span>' : '') +
       (!c.activa ? ' <span class="chip no">desactivada</span>' : '') + '</div>' +
-      '<div class="sb">' + (c.moneda === 'BS' ? 'Bolivares' : 'Dolares') + (tieneSaldo ? ' · desde ' + fechaES(c.fechaInicial) : ' · sin saldo inicial') + '</div></div>' +
+      '<div class="sb">' + (c.moneda === 'BS' ? 'Bolivares' : 'Dolares') + (c.partes && c.partes.length ? ' · incluye ' + escHtml(c.partes.join(', ')) : '') +
+        (tieneSaldo ? ' · desde ' + fechaES(c.fechaInicial) : ' · sin saldo inicial') + '</div></div>' +
       '<div class="rt">' + (tieneSaldo ? enMon(c.saldo, c.moneda) + (c.moneda === 'BS' && c.saldoUSD !== null ? '<small>' + usd(c.saldoUSD) + '</small>' : '') : '<small>sin saldo</small>') + '</div></div>' +
       '<div class="det" style="display:block"><div class="gr" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">' +
       '<div style="font-size:11px;color:var(--ink-muted)">Entro<b style="display:block;font-size:13px;color:var(--green)">' + enMon(c.entra, c.moneda) + '</b></div>' +
@@ -621,6 +625,7 @@ function pintarTodo() {
   pintarSocios();
 }
 
+function ctaOBpartes() { var c = (DIN.cuentas || []).filter(function(x) { return x.ob; })[0]; return c && c.partes ? c.partes.join(', ') : ''; }
 function pintarOB() {
   var ob = DIN.ob || {};
   var h = '<div class="section"><div class="stitle">Cuenta con OB International</div><div class="kpis">' +
@@ -643,14 +648,15 @@ function pintarOB() {
   }
   var otros = (ob.movimientos || []).filter(function(m) { return m.origen !== 'MOVIMIENTO'; });
   if (otros.length) {
-    h += '<div class="aviso" style="margin-top:10px"><b>Cobros y pagos por Zelle o Binance (cuentas de OB):</b></div>';
+    h += '<div class="aviso" style="margin-top:10px"><b>Lo que entro y salio por OB' + (ctaOBpartes() ? ' (incluye ' + escHtml(ctaOBpartes()) + ', en dolares a la tasa de cada operacion)' : '') + ':</b></div>';
     otros.slice(0, 30).forEach(function(m) {
       h += '<div class="grow"><div class="gizq"><div class="gdesc">' + escHtml(m.desc) + '</div><div class="gmeta">' + fechaES(m.fecha) + ' · ' +
            escHtml(m.origen) + ' · ' + escHtml(m.metodo) + '</div></div><div class="gder ' + (m.signo > 0 ? 'pos' : 'neg') + '">' +
            (m.signo > 0 ? '+' : '-') + usd(m.monto) + '</div></div>';
     });
   }
-  h += '<div class="aviso">Toda operacion entre Bs y OB va a la tasa de trabajo; la tasa queda guardada en cada una y ambos socios la ven aqui.</div>' +
+  h += '<div class="aviso">Lo que entra o sale por ' + (ctaOBpartes() || 'las cuentas de OB') + ' se acredita o debita a OB en dolares a la tasa de esa operacion: el riesgo del bolivar es de OB. ' +
+       'Toda operacion entre Bs y OB va a la tasa de trabajo; la tasa queda guardada y ambos socios la ven aqui.</div>' +
        '<button class="tab on" style="width:100%;margin-top:8px;padding:10px" onclick="prepararCambioOB()">Registrar cambio con OB</button></div>';
   document.getElementById('obBox').innerHTML = h;
 }
@@ -794,7 +800,7 @@ function ctaSel(id) { var i = parseInt(document.getElementById(id).value); retur
 function prepararCambioOB() {
   document.getElementById('mvTipo').value = 'CAMBIO_OB';
   var iOB = -1, iBan = -1;
-  CUENTAS.forEach(function(c, i) { if (c.ob) iOB = i; if (c.cuenta === 'Banesco') iBan = i; });
+  CUENTAS.forEach(function(c, i) { if (c.ob) iOB = i; if (iBan < 0 && c.moneda === 'BS' && !c.ob) iBan = i; });
   if (iBan >= 0) document.getElementById('mvCtaO').value = String(iBan);
   if (iOB >= 0) document.getElementById('mvCtaD').value = String(iOB);
   pintarMov();
