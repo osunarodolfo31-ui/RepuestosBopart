@@ -1,7 +1,11 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_devoluciones.html
-  VERSION: v1.8 (2026-09-24) | build 2026-10-31.1 | requiere Apps Script v27
+  VERSION: v1.9 (2026-11-01) | build 2026-11-01.1 | requiere Apps Script v28
+  v1.9: si se le devuelve dinero al cliente, se elige POR DONDE sale (metodos habilitados para SALIR en la hoja
+  CANALES). Antes "pago movil" no decia de que banco, y el flujo de caja no podia ponerlo en ninguna cuenta.
+  El cobro de una diferencia usa los metodos habilitados para ENTRAR.
+  VERSION anterior: v1.8 (2026-09-24) | build 2026-10-31.1 | requiere Apps Script v27
   v1.8: boton "Anular la venta completa" (prueba, duplicada, venta que no ocurrio). Quita venta, detalle,
   deuda y comision juntos y deja copia en VENTAS_ANULADAS; reemplaza el borrar filas a mano. El precio y
   el costo de lo devuelto ahora los pone el servidor desde la nota original.
@@ -279,6 +283,11 @@ select option{background:#1E1E1E;color:var(--ink)}
       <span class="nlbl">Gerencia</span>
       <span class="ndesc">Solo socios</span>
     </a>
+    <a class="ncard" href="boparts_dinero.html">
+      <span class="nicon">🏦</span>
+      <span class="nlbl">Dinero</span>
+      <span class="ndesc">Bancos y flujo de caja</span>
+    </a>
     <a class="ncard" href="boparts_apartados.html">
       <span class="nicon">🔖</span>
       <span class="nlbl">Apartados</span>
@@ -302,7 +311,7 @@ select option{background:#1E1E1E;color:var(--ink)}
   </div>
 </div>
 
-<script src="boparts_sesion.js?v=2026-10-31.1"></script>
+<script src="boparts_sesion.js?v=2026-11-01.1"></script>
 <script>
 
 
@@ -316,17 +325,19 @@ function sellarVersion(d) {
   return d;
 }
 function txt_(v) { return v == null ? '' : String(v); }
-var APP_VERSION = 'v1.8';
+var APP_VERSION = 'v1.9';
+var SALIDAS = [];
 var PIN_HASH_SOCIOS = 911136;      // mismo PIN de Gerencia
 var PLAZO_DIAS = 5;                // maximo acordado para aceptar un cambio
 var TASA = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
 var NOTA = null, PRODUCTS = [], sel = {}, nuevas = [];
 // El formulario se guarda aparte del HTML: render() reconstruye la pantalla y antes borraba lo escrito.
-var FORM = {res:'PAGO_MOVIL', met:'', aut:'', cli:'', motivo:''};
+var FORM = {res:'PAGO_MOVIL', met:'', sal:'', aut:'', cli:'', motivo:''};
 function guardarForm() {
   var g = function(id) { var e = document.getElementById(id); return e ? e.value : undefined; };
   var r = g('selRes'); if (r !== undefined) FORM.res = r;
   var m = g('selMet'); if (m !== undefined) FORM.met = m;
+  var sl = g('selSal'); if (sl !== undefined) FORM.sal = sl;
   var a = g('selAut'); if (a !== undefined) FORM.aut = a;
   var c = g('inCli'); if (c !== undefined) FORM.cli = c;
   var mo = g('inMotivo'); if (mo !== undefined) FORM.motivo = mo;
@@ -350,8 +361,13 @@ function cargarProductos() {
     });
   }).catch(function() {});
 }
-function alEntrar() { cargarProductos(); }
-revisarSesion(cargarProductos);
+// v1.9 — metodos de la hoja CANALES: para cobrar una diferencia (ENTRAR) y para devolver dinero (SALIR)
+function cargarMetodosDev() {
+  cargarCanales('entra', function(lista) { METODOS = lista.filter(function(m) { return !m.credito; }); if (NOTA) render(); });
+  cargarCanales('sale', function(lista) { SALIDAS = lista.filter(function(m) { return !m.credito; }); if (NOTA) render(); });
+}
+function alEntrar() { cargarProductos(); cargarMetodosDev(); }
+revisarSesion(function() { cargarProductos(); cargarMetodosDev(); });
 
 function hashPin(t) { var h = 5381; for (var i = 0; i < t.length; i++) h = ((h * 33) ^ t.charCodeAt(i)) >>> 0; return h % 1000000; }
 function pedirPin() {
@@ -428,8 +444,9 @@ function render() {
   } else if (dif < -0.009) {
     h += '<div class="field" style="margin-top:10px"><label>Como se resuelve *</label>' +
       '<select id="selRes" onchange="guardarForm()">' +
-      '<option value="PAGO_MOVIL"' + (FORM.res === 'PAGO_MOVIL' ? ' selected' : '') + '>Devolver por pago movil</option>' +
-      '<option value="CREDITO_A_FAVOR"' + (FORM.res === 'CREDITO_A_FAVOR' ? ' selected' : '') + '>Dejar como saldo a favor del cliente</option></select></div>';
+      '<option value="PAGO_MOVIL"' + (FORM.res === 'PAGO_MOVIL' ? ' selected' : '') + '>Devolverle el dinero</option>' +
+      '<option value="CREDITO_A_FAVOR"' + (FORM.res === 'CREDITO_A_FAVOR' ? ' selected' : '') + '>Dejar como saldo a favor del cliente</option></select></div>' +
+      '<div class="field"><label>Si se le devuelve dinero, sale por *</label><select id="selSal" onchange="guardarForm()">' + opcionesSalida() + '</select></div>';
   }
   h += '<div class="row2"><div class="field"><label>Autoriza *</label><select id="selAut" onchange="guardarForm()"><option value="">Seleccionar...</option>' +
     '<option' + (FORM.aut === 'Rodolfo Osuna' ? ' selected' : '') + '>Rodolfo Osuna</option>' +
@@ -475,6 +492,11 @@ function anularVenta() {
     .catch(function(e) { toast('No se anulo: ' + e.message, 'err'); });
 }
 
+function opcionesSalida() {
+  var h = '<option value="">Seleccionar...</option>';
+  for (var i = 0; i < SALIDAS.length; i++) h += '<option value="' + i + '"' + (String(i) === FORM.sal ? ' selected' : '') + '>' + escHtml(SALIDAS[i].label) + '</option>';
+  return h;
+}
 function opcionesMetodos() {
   var h = '<option value="">Seleccionar...</option>';
   for (var i = 0; i < METODOS.length; i++) if (!METODOS[i].credito) h += '<option value="' + i + '">' + escHtml(METODOS[i].label) + '</option>';
@@ -538,6 +560,11 @@ function guardar() {
     res = 'COBRO';
   } else if (dif < -0.009) {
     res = document.getElementById('selRes').value;
+    if (res === 'PAGO_MOVIL') {
+      var si = parseInt(document.getElementById('selSal').value);
+      met = isNaN(si) ? null : SALIDAS[si];
+      if (!met) { toast('Indica por donde sale el dinero que se le devuelve', 'err'); return; }
+    }
   } else res = 'SIN_DIFERENCIA';
 
   if (!pedirPin()) return;

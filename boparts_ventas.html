@@ -1,7 +1,11 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_ventas.html
-  VERSION: v14.9 (2026-09-24) | build 2026-10-31.1 | REQUIERE Apps Script v27
+  VERSION: v15.0 (2026-11-01) | build 2026-11-01.1 | requiere Apps Script v28
+  v15.0: al elegir el metodo de pago, la moneda queda FIJA en la de su cuenta (hoja CANALES via action=metodos).
+  Antes se podia elegir Pago Movil y cambiar la moneda a USD a mano. Aparecen Zelle y Binance (cuentas de OB).
+  El efectivo queda guardado con su caja (Efectivo USD o Efectivo Bs) en BANCO.
+  VERSION anterior: v14.9 (2026-09-24) | build 2026-10-31.1 | REQUIERE Apps Script v27
   v14.9: (1) DISPONIBLE = stock - apartado. Cada linea del carrito avisa si se vende mas de lo disponible
   (aviso, no bloqueo; el servidor lo deja en SOBREVENTAS). Un producto sin conteo no avisa: no se sabe
   cuanto hay. (2) Auditoria #9: "no se sabe cuanto debe" ya no cuenta como "debe cero": sin saldo
@@ -482,6 +486,11 @@ select option{background:#1E1E1E;color:var(--ink)}
       <span class="nlbl">Gerencia</span>
       <span class="ndesc">Solo socios</span>
     </a>
+    <a class="ncard" href="boparts_dinero.html">
+      <span class="nicon">🏦</span>
+      <span class="nlbl">Dinero</span>
+      <span class="ndesc">Bancos y flujo de caja</span>
+    </a>
     <a class="ncard" href="boparts_apartados.html">
       <span class="nicon">🔖</span>
       <span class="nlbl">Apartados</span>
@@ -505,7 +514,7 @@ select option{background:#1E1E1E;color:var(--ink)}
   </div>
 </div>
 
-<script src="boparts_sesion.js?v=2026-10-31.1"></script>
+<script src="boparts_sesion.js?v=2026-11-01.1"></script>
 <script>
 
 
@@ -521,7 +530,7 @@ function sellarVersion(d) {
   if (t) t.textContent = 'app ' + APP_VERSION + ' \u00b7 script ' + VER_SCRIPT;
   return d;
 }
-var APP_VERSION = 'v14.9';
+var APP_VERSION = 'v15.0';
 var TASA        = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
 var TASA_ORIGEN = TASA ? 'guardada' : 'ninguna';
 
@@ -966,6 +975,8 @@ function renderPagos() {
       opts += '<option value="' + j + '"' + (mi === String(j) ? ' selected' : '') + '>' + escHtml(METODOS[j].label) + '</option>';
     }
     var mon = p.moneda || 'BS';
+    var mFijo = (mi !== '' && METODOS[parseInt(mi)]) ? METODOS[parseInt(mi)] : null;   // v15: la moneda la pone la cuenta
+    if (mFijo && (mFijo.moneda === 'USD' || mFijo.moneda === 'BS')) mon = mFijo.moneda;
     h += '<div class="pblock" id="pb_' + p.id + '">' + delBtn +
       '<div class="field"><label>Metodo de pago</label>' +
         '<select id="met_' + p.id + '" onchange="onMet(' + p.id + ')">' + opts + '</select>' +
@@ -975,7 +986,7 @@ function renderPagos() {
           '<input type="number" id="monto_' + p.id + '" placeholder="0.00" step="0.01" value="' + escHtml(p.monto || '') + '" oninput="syncPagosDesdeDOM();updateTotals()">' +
         '</div>' +
         '<div class="field"><label>Moneda</label>' +
-          '<select id="mon_' + p.id + '" onchange="syncPagosDesdeDOM();updateTotals()">' +
+          '<select id="mon_' + p.id + '" onchange="syncPagosDesdeDOM();updateTotals()"' + (mFijo ? ' disabled style="opacity:.75" title="La moneda la define la cuenta"' : '') + '>' +
             '<option value="BS"' + (mon === 'BS' ? ' selected' : '') + '>Bs</option><option value="USD"' + (mon === 'USD' ? ' selected' : '') + '>USD</option>' +
           '</select>' +
         '</div>' +
@@ -999,10 +1010,12 @@ function onMet(id) {
   var pago = null;
   for (var i = 0; i < pagos.length; i++) { if (pagos[i].id === id) { pago = pagos[i]; break; } }
   if (!pago) return;
-  if (isNaN(idx) || idx < 0) { pago.metodoData = null; return; }
+  var monSel = document.getElementById('mon_' + id);
+  if (isNaN(idx) || idx < 0) { pago.metodoData = null; if (monSel) { monSel.disabled = false; monSel.style.opacity = ''; } return; }
   var m = METODOS[idx];
   pago.metodoData = m;
-  document.getElementById('mon_' + id).value = m.moneda;
+  monSel.value = m.moneda;
+  monSel.disabled = true; monSel.style.opacity = '.75';   // v15: la moneda la define la cuenta del metodo
   renderCredito(id, !!m.credito);
   var inf = document.getElementById('cominf_' + id);
   inf.innerHTML = '';

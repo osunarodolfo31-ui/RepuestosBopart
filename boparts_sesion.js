@@ -263,13 +263,48 @@ function htmlCategorias(lista, actual, fn) {
 }
 function enCategoria(p, cat) { return !cat || (String(p.categoria || '').trim() || 'SIN CATEGORIA') === cat; }
 
+/* ===================== v28 — CANALES: metodos por cuenta, la moneda la pone la cuenta =====================
+   cargarCanales('entra'|'sale', fn): pide al script los metodos habilitados en ese sentido (hoja CANALES) y
+   se los entrega a fn. Si el script no responde, no se llama a fn: la pantalla sigue con lo que tenia.
+   amarrarMoneda(idMetodo, idMoneda, fnLista): al elegir un metodo, la moneda queda fija en la de su cuenta y
+   no se puede cambiar. Asi no vuelve a entrar un Pago Movil en dolares ni un efectivo en dolares como Bs. */
+function cargarCanales(sentido, alLlegar) {
+  fetch(SCRIPT_URL_SESION + '?action=metodos&sentido=' + encodeURIComponent(sentido || 'entra') + '&t=' + Date.now())
+    .then(leerJSON)
+    .then(function(d) { if (d && d.ok && d.metodos && d.metodos.length && typeof alLlegar === 'function') alLlegar(d.metodos, d); })
+    .catch(function() {});
+}
+function opcionesDeMetodos(lista, conCredito) {
+  var h = '<option value="">Seleccionar...</option>';
+  for (var i = 0; i < lista.length; i++) {
+    if (lista[i].credito && !conCredito) continue;
+    h += '<option value="' + i + '">' + String(lista[i].label || '').replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</option>';
+  }
+  return h;
+}
+function amarrarMoneda(idMetodo, idMoneda, fnLista) {
+  var sm = document.getElementById(idMetodo), sn = document.getElementById(idMoneda);
+  if (!sm || !sn) return;
+  function aplicar() {
+    var i = parseInt(sm.value), lista = fnLista() || [], m = isNaN(i) ? null : lista[i];
+    if (m && (m.moneda === 'USD' || m.moneda === 'BS')) {
+      if (sn.value !== m.moneda) { sn.value = m.moneda; if (typeof sn.onchange === 'function') sn.onchange(); }
+      sn.disabled = true; sn.style.opacity = '0.75'; sn.title = 'La moneda la define la cuenta';
+    } else {
+      sn.disabled = false; sn.style.opacity = ''; sn.title = '';
+    }
+  }
+  if (!sm.__amarrado) { sm.addEventListener('change', aplicar); sm.__amarrado = true; }
+  aplicar();
+}
+
 /* ===================== ACTUALIZACION (2026-09-22) — identico en todas las pantallas =====================
    El telefono guarda la pantalla vieja y la sigue mostrando aunque ya haya una nueva en GitHub.
    Hasta hoy eso se arreglaba borrando la cache a mano. Ahora cada pantalla sabe con que build salio,
    version.json dice cual es la buena, y si no coinciden aparece una barra con un boton que borra la
    cache y recarga. Nadie tiene que saber que es "borrar cache".
    Ademas, todo enlace entre pantallas lleva ?v=BUILD: moverse por el menu ya no trae copias viejas. */
-var BUILD = '2026-10-31.1';
+var BUILD = '2026-11-01.1';
 (function() {
   var intentos = 0;
   function sellarEnlaces() {

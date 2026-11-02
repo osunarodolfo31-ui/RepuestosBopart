@@ -1,7 +1,10 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_cobros.html
-  VERSION: v3.2 (2026-09-22) | build 2026-10-31.1 | REQUIERE Apps Script v26
+  VERSION: v3.3 (2026-11-01) | build 2026-11-01.1 | requiere Apps Script v28
+  v3.3: los metodos salen de la hoja CANALES (habilitados para ENTRAR) y la moneda del abono queda fija en la de
+  la cuenta del metodo. El efectivo queda amarrado a su caja (Efectivo USD o Efectivo Bs).
+  VERSION anterior: v3.2 (2026-09-22) | build 2026-10-31.1 | REQUIERE Apps Script v26
   v3.2: el ID del abono se conserva entre reintentos (por cliente + monto, caduca a los 15 min).
   Antes se armaba con la hora en CADA envio, asi que al reintentar salia otro ID y el servidor no
   podia saber que era el mismo pago: quedaban dos abonos y el saldo bajaba el doble.
@@ -316,6 +319,11 @@ select option{background:#1E1E1E;color:var(--ink)}
       <span class="nlbl">Gerencia</span>
       <span class="ndesc">Solo socios</span>
     </a>
+    <a class="ncard" href="boparts_dinero.html">
+      <span class="nicon">🏦</span>
+      <span class="nlbl">Dinero</span>
+      <span class="ndesc">Bancos y flujo de caja</span>
+    </a>
     <a class="ncard" href="boparts_apartados.html">
       <span class="nicon">🔖</span>
       <span class="nlbl">Apartados</span>
@@ -339,7 +347,7 @@ select option{background:#1E1E1E;color:var(--ink)}
   </div>
 </div>
 
-<script src="boparts_sesion.js?v=2026-10-31.1"></script>
+<script src="boparts_sesion.js?v=2026-11-01.1"></script>
 <script>
 
 
@@ -487,7 +495,7 @@ function primerNombre(n) {
 }
 var ultimo = null;   // ultimo abono registrado (para el mensaje de WhatsApp)
 
-var APP_VERSION = 'v3.2';
+var APP_VERSION = 'v3.3';
 document.getElementById('fechaHdr').textContent = APP_VERSION + ' · ' + new Date().toLocaleDateString('es-VE', {weekday:'long', day:'numeric', month:'long'});
 
 // Metodos de pago (sin CREDITO)
@@ -715,8 +723,21 @@ function sincronizarTasa(despues) {
 }
 
 sincronizarTasa(function() { renderLista(); renderDetalle(); });
-function alEntrar() { cargar(); }
-revisarSesion(cargar);
+// v3.3 — metodos de la hoja CANALES; la moneda la pone la cuenta del metodo
+function cargarMetodosCobro() {
+  amarrarMoneda('abMetodo', 'abMoneda', function() { return METODOS; });
+  cargarCanales('entra', function(lista) {
+    var sl = document.getElementById('abMetodo');
+    var antes = sl.selectedOptions && sl.selectedOptions[0] ? sl.selectedOptions[0].text : '';
+    METODOS = lista.filter(function(m) { return !m.credito; });
+    sl.innerHTML = opcionesDeMetodos(METODOS);
+    for (var i = 0; i < METODOS.length; i++) if (METODOS[i].label === antes) { sl.value = String(i); break; }
+    amarrarMoneda('abMetodo', 'abMoneda', function() { return METODOS; });
+    previewAbono();
+  });
+}
+function alEntrar() { cargar(); cargarMetodosCobro(); }
+revisarSesion(function() { cargar(); cargarMetodosCobro(); });
 
 // Lee la respuesta del script con cuidado: si Apps Script devuelve su pagina de error (HTML),
 // r.json() explota con "Unexpected token '<'". Asi se explica que pasa en vez de mostrar eso.

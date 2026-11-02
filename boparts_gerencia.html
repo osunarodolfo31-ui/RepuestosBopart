@@ -1,7 +1,10 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_gerencia.html
-  VERSION: v3.3 (2026-10-19) | build 2026-10-31.1 | requiere Apps Script v27.2
+  VERSION: v3.4 (2026-11-01) | build 2026-11-01.1 | requiere Apps Script v28
+  v3.4: Cuentas por pagar y Liquidacion de aliados se mudan a la pantalla Dinero (boparts_dinero.html), junto al
+  flujo de caja: pagar es una salida de una cuenta. Aqui queda un enlace. Nada mas cambia.
+  VERSION anterior: v3.3 (2026-10-19) | build 2026-10-31.1 | requiere Apps Script v27.2
   v3.3: CUENTAS POR PAGAR POR FACTURA. Cada factura se abre con un toque: monto, pagado, pagos, productos y
   foto; se paga completa o se abona parcial desde ahi, eligiendo la cuenta de donde sale. "Ver pagadas" y
   "Ver proveedores al dia" muestran el historial. El pago lleva un ID y no se duplica al reintentar.
@@ -384,13 +387,17 @@ select option{background:#1E1E1E;color:var(--ink)}
 
   <div id="cuerpo"><div class="cart-empty">Cargando...</div></div>
 
-  <div id="pagarBox"></div>
+  <div class="section">
+    <div class="stitle">Dinero</div>
+    <div class="aviso" style="margin-top:0">Cuentas por pagar, liquidacion de aliados, saldos por cuenta, cambios con OB y flujo de caja
+      estan ahora en <b>Dinero</b>.</div>
+    <a href="boparts_dinero.html" class="tab on" style="display:block;text-align:center;margin-top:10px;padding:10px;text-decoration:none">Abrir Dinero</a>
+  </div>
 
   <div id="conteosBox"></div>
 
   <div id="apartadosBox"></div>
 
-  <div id="liqBox"></div>
 
   <div id="tareasBox"></div>
 
@@ -477,6 +484,11 @@ select option{background:#1E1E1E;color:var(--ink)}
       <span class="nlbl">Gerencia</span>
       <span class="ndesc">Solo socios</span>
     </a>
+    <a class="ncard" href="boparts_dinero.html">
+      <span class="nicon">🏦</span>
+      <span class="nlbl">Dinero</span>
+      <span class="ndesc">Bancos y flujo de caja</span>
+    </a>
     <a class="ncard" href="boparts_apartados.html">
       <span class="nicon">🔖</span>
       <span class="nlbl">Apartados</span>
@@ -500,7 +512,7 @@ select option{background:#1E1E1E;color:var(--ink)}
   </div>
 </div>
 
-<script src="boparts_sesion.js?v=2026-10-31.1"></script>
+<script src="boparts_sesion.js?v=2026-11-01.1"></script>
 <script>
 
 
@@ -513,7 +525,7 @@ function sellarVersion(d) {
   if (t) t.textContent = 'app ' + APP_VERSION + ' \u00b7 script ' + VER_SCRIPT;
   return d;
 }
-var APP_VERSION = 'v3.3';
+var APP_VERSION = 'v3.4';
 var TASA = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
 var periodo = 'hoy', DATA = null;
 
@@ -544,10 +556,8 @@ function abrirGerencia() {
   cargarTasa();
   cargarCategorias();
   cargarApartados();
-  cargarPagar();
   cargarConteos();
   cargarClientes();
-  cargarLiquidacion();
   cargarTareas();
   cargar();
 }
@@ -733,6 +743,7 @@ function cargarApartados() {
 var CXP = [], FACT_ABIERTA = '', VER_PAGADAS = {}, CUENTAS_PAGO = ['Efectivo USD', 'Efectivo Bs', 'Banesco', 'Bancamiga', 'Bancrecer', 'Bancrecer Empresarial', 'Zelle', 'Binance'];
 var PAGO_PEND = {};   // ID de cada pago en curso: se conserva si hay que reintentar, para no duplicar
 function cargarPagar() {
+  if (!document.getElementById('pagarBox')) return;   // v3.4: las cuentas por pagar viven en Dinero
   Promise.all([
     fetch(SCRIPT_URL + '?action=cxp&t=' + Date.now()).then(leerJSON),
     fetch(SCRIPT_URL + '?action=compras&estado=PENDIENTE%20COSTO&t=' + Date.now()).then(leerJSON),
@@ -1380,6 +1391,7 @@ else {
 var LIQ = [], liqTasa = 0;
 
 function cargarLiquidacion() {
+  if (!document.getElementById('liqBox')) return;   // v3.4: la liquidacion vive en Dinero
   fetch(SCRIPT_URL + '?action=liquidacion&t=' + Date.now())
     .then(leerJSON)
     .then(function(d) {

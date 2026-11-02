@@ -1,6 +1,23 @@
 /**
  * Repuesto BoParts — Code.gs
- * VERSION: v27.3 (2026-10-31) | productos con codigo propio, conteos que perdian la fecha
+ * VERSION: v28 (2026-11-01) | bancos con moneda y canales, cuenta con OB International, flujo de caja
+ *
+ * v28 — DINERO. (1) Hoja CANALES: cada cuenta tiene sus metodos habilitados para ENTRAR, SALIR o AMBOS, con
+ *   su comision (fija y %). La moneda la pone la cuenta (hoja CUENTAS), no quien registra. action=metodos
+ *   arma los metodos de las pantallas desde CANALES (sentido=entra|sale); si CANALES no sirve, sigue con
+ *   METODOS_PAGO como antes. El efectivo ya se guarda con su cuenta (Efectivo USD / Efectivo Bs).
+ *   (2) Gastos y pagos a proveedor RECHAZAN un metodo que la cuenta no tiene habilitado para salir y una
+ *   moneda distinta a la de la cuenta (asi entro el gasto de Bs 9.159 como dolares). La liquidacion de un
+ *   aliado exige una cuenta valida si sale dinero.
+ *   (3) Zelle y Binance no son cuentas de la tienda: son de Rodolfo. Se desactivan y nace la cuenta
+ *   "OB International" (USD): lo que la casa de cambio de Rodolfo guarda de la tienda. CAMBIO_OB pasa Bs de
+ *   un banco a OB (o al reves) SIEMPRE a la tasa de trabajo; la tasa queda guardada en cada operacion.
+ *   (4) action=dinero: saldo por cuenta desde su SALDO_INICIAL, entradas, salidas y comisiones por cuenta y
+ *   metodo, movimientos del periodo, cuenta con OB y lo que no se pudo asignar a una cuenta. Lee las hojas
+ *   que ya existen: ventas, abonos, apartados, devoluciones, gastos, pagos a proveedor, compras de contado,
+ *   liquidaciones y MOV_CUENTAS. No cambia como se guarda una venta.
+ *
+ * VERSION anterior: v27.3 (2026-10-31) | productos con codigo propio, conteos que perdian la fecha
  *
  * v27.3 — (1) Un producto NUEVO de una recepcion ya no se crea sin codigo, con "-" ni con el codigo de otro
  *   producto: el servidor le asigna uno unico (N-AAMMDD-01) y la pantalla lo dice. (2) Si un conteo perdio su
@@ -407,7 +424,7 @@ var PERMISOS_GET = {
   tareas:'VENDEDOR',
   producto:'SOCIO',
   ventas:'SOCIO', socios:'SOCIO', cxp:'SOCIO', cliente_stats:'SOCIO', compras:'SOCIO', diag:'SOCIO',
-  liquidacion:'SOCIO', rendimiento:'SOCIO'
+  liquidacion:'SOCIO', rendimiento:'SOCIO', dinero:'SOCIO'
 };
 var PERMISOS_POST = {
   fotos:'VENDEDOR', cliente:'VENDEDOR', demanda:'VENDEDOR', conteo:'VENDEDOR', gasto:'VENDEDOR',
@@ -646,7 +663,7 @@ function claveDePost_(data) {
 // OJO: esta constante es lo que ven las apps en el menu. Se habia quedado en v21.4 mientras el
 // encabezado ya decia v24, asi que el sello de version — que existe justamente para saber si lo
 // desplegado es lo que crees — estaba mintiendo. Cada version nueva se cambia AQUI tambien.
-var VERSION_SCRIPT = 'v27.3';
+var VERSION_SCRIPT = 'v28';
 
 function json_(obj) {
   // La version viaja en cada respuesta: es la forma rapida de saber si lo desplegado es lo que crees
@@ -717,7 +734,11 @@ function rutearGet_(e) {
     return json_(catalogoProveedores_(ssA));
   }
   if (accion === 'metodos') {
-    return json_(metodosYAliados_(ssA));
+    return json_(metodosYAliados_(ssA, e.parameter.sentido));
+  }
+  // v28 — flujo de caja: saldos por cuenta, entradas y salidas, comisiones y cuenta con OB
+  if (accion === 'dinero') {
+    return json_(estadoDinero_(ssA, e.parameter.desde, e.parameter.hasta));
   }
   if (accion === 'liquidacion') {
     return json_(estadoLiquidacion_(ssA));
@@ -3102,6 +3123,16 @@ function abonoCxp_(ss, d, quien) {
     var ids = sh.getRange(2, 15, sh.getLastRow() - 1, 1).getValues();
     for (var i = 0; i < ids.length; i++) if (String(ids[i][0]).trim() === idPago) return {ok:true, tipo:'cxp_abono', repetido:true};
   }
+  // v28 — el pago sale de una cuenta: metodo habilitado para salir y moneda de la cuenta. Si la pantalla no
+  // manda la moneda (Gerencia v3.3), se toma la de la cuenta y el monto se expresa en ella a la tasa de trabajo.
+  var cp = exigirCanal_(ss, d.metodo, d.banco, d.moneda || '', 'SALE');
+  d.banco = cp.cuenta;
+  if (!d.moneda || !(Number(d.montoPagado) > 0)) {
+    var tasaP = Number(d.tasa) || leerConfig_(ss).tasa || 0;
+    d.moneda = cp.moneda;
+    d.montoPagado = cp.moneda === 'BS' ? Math.round(monto * tasaP) : monto;
+    d.tasa = tasaP;
+  }
   var est = estadoCxp_(ss).proveedores.filter(function(p) { return p.proveedor === String(d.proveedor).trim(); })[0];
   if (!est) throw rechazo_('No hay facturas de ' + d.proveedor);
   if (monto > est.saldoUSD + 0.05) throw rechazo_('El pago ($' + monto + ') supera lo que se le debe ($' + est.saldoUSD + ')');
@@ -3119,7 +3150,7 @@ function abonoCxp_(ss, d, quien) {
   var autor = (quien && quien.nombre) || d.registradoPor || '';
   filas.forEach(function(x) {
     sh.appendRow([fechaVE_(d.fecha), d.hora || Utilities.formatDate(ahora, TZ_VE, 'HH:mm'), est.proveedor, 'ABONO', x.f.id, x.f.factura,
-                  x.monto, d.moneda || 'USD', Number(d.montoPagado) || x.monto, Number(d.tasa) || 0, d.metodo || '', d.banco || '',
+                  x.monto, d.moneda || 'USD', round2_((Number(d.montoPagado) || monto) * x.monto / monto), Number(d.tasa) || 0, d.metodo || '', d.banco || '',
                   autor, d.notas || '', idPago]);
     formatoFecha_(sh, sh.getLastRow(), 1);
   });
@@ -3769,8 +3800,10 @@ function hojaSemilla_(ss, nombre, encabezados, semilla) {
   return sh;
 }
 
-function metodosYAliados_(ss) {
+function metodosYAliados_(ss, sentido) {
   var avisos = [];
+  // v28: si la hoja CANALES sirve, los metodos salen de ahi (por cuenta y sentido). Los aliados igual.
+  var desdeCanales = metodosDesdeCanales_(ss, sentido);
   var shM = hojaSemilla_(ss, 'METODOS_PAGO',
     ['LABEL','METODO','BANCO','MONEDA','FIJO_BS','PCT','CREDITO','ACTIVO'], METODOS_DEFECTO);
   if (!shM) avisos.push('La hoja METODOS_PAGO tiene otras columnas; se estan usando los metodos de siempre. ' +
@@ -3814,6 +3847,13 @@ function metodosYAliados_(ss) {
 
   // Si alguien deja las hojas sin una sola fila utilizable, se responde con lo de siempre en vez de
   // dejar la pantalla de venta sin metodos de pago.
+  if (desdeCanales && desdeCanales.length) {
+    // La fila de credito (cuenta por cobrar) no es una cuenta: se conserva de METODOS_PAGO o la de siempre.
+    var cred = metodos.filter(function(m) { return m.credito; })[0] ||
+               {label:'CREDITO (cuenta por cobrar)', metodo:'Credito', banco:'', moneda:'USD', fijo:0, pct:0, credito:true};
+    metodos = desdeCanales.slice();
+    if (String(sentido || 'entra').toLowerCase() !== 'sale') metodos.push(cred);
+  }
   var deHoja = metodos.length > 0;
   if (!metodos.length) {
     metodos = METODOS_DEFECTO.map(function(r) {
@@ -3823,7 +3863,8 @@ function metodosYAliados_(ss) {
   if (!aliados.length) {
     aliados = ALIADOS_DEFECTO.map(function(r) { return {id:r[0], nombre:r[1], negocio:r[2], pct:r[3]}; });
   }
-  return {ok:true, metodos:metodos, aliados:aliados, deHoja:deHoja, avisos:avisos};
+  return {ok:true, metodos:metodos, aliados:aliados, deHoja:deHoja, avisos:avisos, canales:!!(desdeCanales && desdeCanales.length),
+          sentido:String(sentido || 'entra').toLowerCase()};
 }
 
 
@@ -3927,6 +3968,12 @@ function liquidarAliado_(ss, d) {
   var ganado = com.totalUSD;
   var compensa = round2_(Math.min(ganado, deuda));    // lo que se le descuenta de la deuda
   var neto = round2_(ganado - compensa);              // lo que sale en efectivo o pago movil
+  // v28 — si sale dinero, tiene que salir de una cuenta de la hoja CUENTAS (para el flujo de caja).
+  if (neto > 0.009) {
+    var ctaL = cuentaPorNombre_(ss, d.cuenta || d.metodo);
+    if (!ctaL) throw rechazo_('Indica de que cuenta sale el pago (' + listaCuentas_(ss).map(function(c) { return c.cuenta; }).join(', ') + ')');
+    d.metodo = ctaL.cuenta;
+  }
   var hoy = new Date();
   var fechaHoy = Utilities.formatDate(hoy, TZ_VE, 'dd/MM/yyyy');
   var idLiq = 'LQ' + Utilities.formatDate(hoy, TZ_VE, 'yyyyMMdd-HHmmss');
@@ -3988,6 +4035,14 @@ function guardarGasto_(ss, data) {
       if (String(ids[i][0]).trim() === idG) return {ok:true, tipo:'gasto', repetido:true};
     }
   }
+  // v28 — si el dinero sale de una cuenta de la tienda, el metodo tiene que estar habilitado para SALIR de esa
+  // cuenta y la moneda es la de la cuenta. Si lo pago un socio de su bolsillo, no sale de ninguna cuenta.
+  var ppV = String(data.pagadoPor || '').toUpperCase();
+  if (ppV !== 'RODOLFO' && ppV !== 'JAVIER') {
+    var cg = exigirCanal_(ss, data.metodo, data.banco, data.moneda, 'SALE');
+    data.banco = cg.cuenta;
+    data.moneda = cg.moneda;
+  }
   var usd = data.moneda === 'BS' ? (tasaG ? monto / tasaG : 0) : monto;
   var bs  = data.moneda === 'BS' ? monto : monto * tasaG;
   shG.appendRow([idG, fechaVE_(data.fecha), data.hora||'', data.categoria||'', data.descripcion||'',
@@ -4016,16 +4071,44 @@ function guardarGasto_(ss, data) {
 // CUENTAS es una hoja: agregar una cuenta nueva no requiere tocar codigo.
 var CUENTAS_DEFECTO = [
   ['Efectivo USD', 'USD', 'SI'], ['Efectivo Bs', 'BS', 'SI'], ['Banesco', 'BS', 'SI'], ['Bancamiga', 'BS', 'SI'],
-  ['Bancrecer', 'BS', 'SI'], ['Bancrecer Empresarial', 'BS', 'SI'], ['Zelle', 'USD', 'SI'], ['Binance', 'USD', 'SI']
+  ['Bancrecer', 'BS', 'SI'], ['Bancrecer Empresarial', 'BS', 'SI'], ['Zelle', 'USD', 'NO'], ['Binance', 'USD', 'NO'],
+  ['OB International', 'USD', 'SI']
 ];
-function listaCuentas_(ss) {
+// v28 — Zelle y Binance son cuentas PERSONALES de Rodolfo que el pone a disposicion de la tienda a traves de su
+// casa de cambio. Para la tienda no son dos cuentas: es UNA, lo que OB International le guarda.
+var CUENTA_OB = 'OB International';
+function asegurarCuentaOB_(ss, sh) {
+  if (!sh || sh.getLastRow() < 1) return;
+  var n = sh.getLastRow() - 1;
+  var filas = n > 0 ? sh.getRange(2, 1, n, 3).getValues() : [];
+  for (var i = 0; i < filas.length; i++) if (String(filas[i][0]).trim().toUpperCase() === CUENTA_OB.toUpperCase()) return;
+  // Primera vez: se crea OB y se apagan Zelle y Binance (no se borran: quedan para leer el historico).
+  // Con candado y mirando otra vez adentro: dos pantallas abriendo a la vez no pueden crear OB dos veces.
+  var lk = LockService.getScriptLock();
+  if (!lk.tryLock(5000)) return;
+  try {
+    var n2 = sh.getLastRow() - 1;
+    var f2 = n2 > 0 ? sh.getRange(2, 1, n2, 3).getValues() : [];
+    for (var k = 0; k < f2.length; k++) if (String(f2[k][0]).trim().toUpperCase() === CUENTA_OB.toUpperCase()) return;
+    for (var j = 0; j < f2.length; j++) {
+      var nom = String(f2[j][0]).trim().toUpperCase();
+      if (nom === 'ZELLE' || nom === 'BINANCE') sh.getRange(j + 2, 3).setValue('NO');
+    }
+    sh.appendRow([CUENTA_OB, 'USD', 'SI']);
+    SpreadsheetApp.flush();
+  } finally { lk.releaseLock(); }
+}
+function listaCuentas_(ss, conInactivas) {
   var sh = hojaSemilla_(ss, 'CUENTAS', ['CUENTA', 'MONEDA', 'ACTIVA'], CUENTAS_DEFECTO);
+  try { asegurarCuentaOB_(ss, sh); } catch (eOb) {}
   var out = [];
   var filas = (sh && sh.getLastRow() >= 2) ? sh.getRange(2, 1, sh.getLastRow() - 1, 3).getValues() : CUENTAS_DEFECTO;
   filas.forEach(function(r) {
     var n = String(r[0] || '').trim(), m = String(r[1] || '').trim().toUpperCase();
-    if (!n || (m !== 'USD' && m !== 'BS') || !siNo_(r[2], true)) return;
-    out.push({cuenta:n, moneda:m});
+    if (!n || (m !== 'USD' && m !== 'BS')) return;
+    var activa = siNo_(r[2], true);
+    if (!activa && !conInactivas) return;
+    out.push({cuenta:n, moneda:m, activa:activa, ob:n.toUpperCase() === CUENTA_OB.toUpperCase()});
   });
   return out;
 }
@@ -4034,7 +4117,7 @@ function hojaMovCuentas_(ss) {
     'CUENTA_DESTINO','MONTO_DESTINO','MONEDA_DESTINO','TASA','SOCIO','REGISTRADO_POR','NOTAS']);
 }
 var TIPOS_MOV_CUENTA = {SALDO_INICIAL:'D', TRASPASO:'OD', AJUSTE_ENTRA:'D', AJUSTE_SALE:'O',
-                        RETIRO_SOCIO:'O', REEMBOLSO_SOCIO:'O', APORTE_SOCIO:'D'};
+                        RETIRO_SOCIO:'O', REEMBOLSO_SOCIO:'O', APORTE_SOCIO:'D', CAMBIO_OB:'OD'};
 function movCuenta_(ss, d, quien) {
   var tipo = String(d.tipoMov || '').trim().toUpperCase();
   var forma = TIPOS_MOV_CUENTA[tipo];
@@ -4059,9 +4142,25 @@ function movCuenta_(ss, d, quien) {
     return round2_(n);
   }
   var o = null, mo = '', dd = null, md = '';
-  if (forma.indexOf('O') >= 0) { o = cuenta(d.origen, 'de origen'); mo = monto(d.montoOrigen, 'que sale'); }
-  if (forma.indexOf('D') >= 0) { dd = cuenta(d.destino, 'de destino'); md = monto(d.montoDestino, 'que entra'); }
+  if (forma.indexOf('O') >= 0) o = cuenta(d.origen, 'de origen');
+  if (forma.indexOf('D') >= 0) dd = cuenta(d.destino, 'de destino');
   if (o && dd && o.cuenta === dd.cuenta) throw new Error('El origen y el destino son la misma cuenta');
+  // v28 — Toda operacion con OB International entre monedas distintas va A LA TASA DE TRABAJO. OB no cobra
+  // comision: su ganancia es la tasa, y la tasa es la del sistema. El monto del lado de OB lo calcula el
+  // servidor; nadie lo escribe, asi no puede quedar distinto.
+  var esOB = !!((o && o.ob) || (dd && dd.ob));
+  if (tipo === 'CAMBIO_OB' && !esOB) throw new Error('Un cambio con OB tiene que salir de OB o entrar a OB');
+  if (esOB && o && dd && o.moneda !== dd.moneda) {
+    var tasaT = leerConfig_(ss).tasa;
+    if (!(tasaT > 0)) throw new Error('No hay tasa de trabajo cargada en Gerencia: no se puede cambiar con OB');
+    if (dd.ob) { mo = monto(d.montoOrigen, 'que sale'); md = round2_(o.moneda === 'BS' ? mo / tasaT : mo * tasaT); }
+    else       { md = monto(d.montoDestino, 'que entra'); mo = round2_(dd.moneda === 'BS' ? md / tasaT : md * tasaT); }
+    if (!(mo > 0) || !(md > 0)) throw new Error('Monto invalido');
+    d.tasa = tasaT;
+  } else {
+    if (o) mo = monto(d.montoOrigen, 'que sale');
+    if (dd) md = monto(d.montoDestino, 'que entra');
+  }
   var socio = '';
   if (tipo.indexOf('SOCIO') >= 0) {
     socio = String(d.socio || '').trim().toUpperCase();
@@ -4069,7 +4168,7 @@ function movCuenta_(ss, d, quien) {
   }
   var tasa = Number(d.tasa) || 0;
   // En un cambio de moneda la tasa sale de los dos montos: es la tasa a la que de verdad se cambio.
-  if (o && dd && o.moneda !== dd.moneda) tasa = o.moneda === 'BS' ? round2_(mo / md) : round2_(md / mo);
+  if (o && dd && o.moneda !== dd.moneda && !esOB) tasa = o.moneda === 'BS' ? round2_(mo / md) : round2_(md / mo);
   // Todo lo que puede fallar se revisa ANTES de escribir: si no, un reintento veria el ID ya escrito,
   // diria "ya estaba" y el movimiento del socio nunca llegaria a su cuenta corriente.
   var usdSocio = 0;
@@ -4092,7 +4191,7 @@ function movCuenta_(ss, d, quien) {
                    origen:id, descripcion:(o ? 'Sale de ' + o.cuenta : 'Entra a ' + dd.cuenta) + (d.notas ? ' - ' + d.notas : ''),
                    registradoPor:(quien && quien.nombre) || ''});
   }
-  return {ok:true, tipo:'mov_cuenta', id:id, repetido:false};
+  return {ok:true, tipo:'mov_cuenta', id:id, repetido:false, montoOrigen:mo, montoDestino:md, tasa:tasa};
 }
 
 // ============================================================
@@ -4666,4 +4765,442 @@ function prepararTareas() {
   sembrarTareas_(ss);
   shTareasDia_(ss);
   return 'Listo: hojas TAREAS y TAREAS_DIA creadas.';
+}
+
+// ============================================================
+// CANALES Y FLUJO DE CAJA (v28)
+// ============================================================
+// CANALES: A CUENTA, B METODO, C SENTIDO (ENTRA | SALE | AMBOS), D ETIQUETA, E FIJO, F PCT, G ACTIVO
+//   - CUENTA tiene que existir y estar activa en CUENTAS: de ahi sale la MONEDA. Nadie la escribe al registrar.
+//   - FIJO es la comision fija por operacion y PCT la porcentual (1,5 = 1,5%), en la moneda de la cuenta.
+//   - ETIQUETA es lo que se ve en las pantallas. El orden de las filas es el orden en pantalla.
+// Agregar un banco, un metodo o cambiar una comision es editar la hoja: no hace falta tocar codigo.
+var CANALES_CAB = ['CUENTA', 'METODO', 'SENTIDO', 'ETIQUETA', 'FIJO', 'PCT', 'ACTIVO'];
+var CANALES_DEFECTO = [
+  ['Efectivo USD',          'Efectivo',       'AMBOS', 'Efectivo USD',          0, 0, 'SI'],
+  ['Efectivo Bs',           'Efectivo',       'AMBOS', 'Efectivo Bs',           0, 0, 'SI'],
+  ['Banesco',               'Pago Movil',     'AMBOS', 'Pago Movil Banesco',    0, 0, 'SI'],
+  ['Banesco',               'Transferencia',  'SALE',  'Transferencia Banesco', 0, 0, 'SI'],
+  ['Bancrecer',             'Pago Movil',     'AMBOS', 'Pago Movil Bancrecer',  0, 0, 'SI'],
+  ['Bancamiga',             'Punto de Venta', 'ENTRA', 'Punto Bancamiga',       0, 1.5, 'SI'],
+  ['Bancrecer Empresarial', 'Punto de Venta', 'ENTRA', 'Punto Bancrecer Emp.',  0, 0, 'SI'],
+  ['Bancrecer Empresarial', 'Cashea',         'ENTRA', 'Cashea Bancrecer',      0, 0, 'SI'],
+  ['OB International',      'Zelle',          'AMBOS', 'Zelle (OB)',            0, 0, 'SI'],
+  ['OB International',      'Binance',        'AMBOS', 'Binance (OB)',          0, 0, 'SI'],
+  ['OB International',      'Efectivo',       'SALE',  'Dolares de OB en efectivo', 0, 0, 'SI']
+];
+
+// La primera vez, las comisiones se copian de METODOS_PAGO (lo que hoy cobra cada metodo), por etiqueta.
+function semillaCanales_(ss) {
+  var sem = CANALES_DEFECTO.map(function(r) { return r.slice(); });
+  try {
+    var shM = ss.getSheetByName('METODOS_PAGO');
+    if (shM && shM.getLastRow() >= 2) {
+      var porEtq = {};
+      shM.getRange(2, 1, shM.getLastRow() - 1, 6).getValues().forEach(function(r) {
+        var k = String(r[0] || '').trim().toUpperCase(); if (k) porEtq[k] = r;
+      });
+      sem.forEach(function(r) {
+        var m = porEtq[String(r[3]).toUpperCase()];
+        if (m) { r[4] = Number(m[4]) || 0; r[5] = Number(m[5]) || 0; }
+      });
+    }
+  } catch (e) {}
+  return sem;
+}
+
+// Canales utilizables: cuenta activa, metodo escrito y sentido valido. Cada uno trae la moneda de su cuenta.
+function listaCanales_(ss) {
+  var sh = ss.getSheetByName('CANALES');
+  if (!sh) {
+    var lkC = LockService.getScriptLock();
+    if (lkC.tryLock(8000)) {
+      try {
+        sh = ss.getSheetByName('CANALES');
+        if (!sh) {
+          sh = hojaSemilla_(ss, 'CANALES', CANALES_CAB, semillaCanales_(ss));
+          if (sh) {
+            sh.getRange(1, 9).setValue('Cada fila habilita un metodo en una cuenta. SENTIDO: ENTRA, SALE o AMBOS. ' +
+              'FIJO y PCT son la comision en la moneda de la cuenta (PCT 1,5 = 1,5%). La moneda la define la hoja CUENTAS.');
+          }
+          SpreadsheetApp.flush();
+        } else {
+          sh = hojaSemilla_(ss, 'CANALES', CANALES_CAB, null);
+        }
+      } finally { lkC.releaseLock(); }
+    }
+    if (!sh) return [];
+  } else {
+    sh = hojaSemilla_(ss, 'CANALES', CANALES_CAB, null);
+  }
+  if (!sh || sh.getLastRow() < 2) return [];
+  var cuentas = {};
+  listaCuentas_(ss).forEach(function(c) { cuentas[c.cuenta.toUpperCase()] = c; });
+  var out = [];
+  sh.getRange(2, 1, sh.getLastRow() - 1, 7).getValues().forEach(function(r) {
+    var c = cuentas[String(r[0] || '').trim().toUpperCase()];
+    var metodo = String(r[1] || '').trim();
+    var sentido = String(r[2] || '').trim().toUpperCase();
+    if (!c || !metodo || metodo.length > 40) return;
+    if (sentido !== 'ENTRA' && sentido !== 'SALE' && sentido !== 'AMBOS') return;
+    if (!siNo_(r[6], true)) return;
+    var etq = String(r[3] || '').trim() || (metodo + ' ' + c.cuenta);
+    out.push({cuenta:c.cuenta, moneda:c.moneda, ob:c.ob, metodo:metodo, sentido:sentido, etiqueta:etq.slice(0, 60),
+              fijo:Number(r[4]) || 0, pct:Number(r[5]) || 0});
+  });
+  return out;
+}
+function canalSirve_(c, sentido) {
+  var s = String(sentido || 'ENTRA').toUpperCase();
+  return c.sentido === 'AMBOS' || c.sentido === s;
+}
+
+// Mismo formato que METODOS_PAGO, para que las pantallas no cambien su forma de leerlo.
+// banco = la CUENTA (tambien en efectivo): asi cada pago queda amarrado a su cuenta.
+function metodosDesdeCanales_(ss, sentido) {
+  var s = String(sentido || 'entra').toLowerCase() === 'sale' ? 'SALE' : 'ENTRA';
+  var lista;
+  try { lista = listaCanales_(ss); } catch (e) { return null; }
+  return lista.filter(function(c) { return canalSirve_(c, s); }).map(function(c) {
+    return {label:c.etiqueta, metodo:c.metodo, banco:c.cuenta, moneda:c.moneda, fijo:c.fijo, pct:c.pct, credito:false,
+            cuenta:c.cuenta, ob:c.ob};
+  });
+}
+
+function cuentaPorNombre_(ss, nombre, conInactivas) {
+  var n = String(nombre || '').trim().toUpperCase();
+  if (!n) return null;
+  return listaCuentas_(ss, conInactivas).filter(function(c) { return c.cuenta.toUpperCase() === n; })[0] || null;
+}
+
+// A que cuenta pertenece un pago guardado. Sirve para lo nuevo y para el historico:
+//   - BANCO con el nombre de una cuenta -> esa cuenta (Zelle o Binance, aunque esten apagadas, son OB);
+//   - Efectivo sin banco -> Efectivo USD o Efectivo Bs segun la moneda;
+//   - metodo Zelle o Binance -> OB International.
+// cuentasMap: {NOMBRE: cuenta} con TODAS las cuentas, activas o no.
+function resolverCuenta_(cuentasMap, metodo, banco, moneda) {
+  var b = String(banco || '').trim().toUpperCase(), m = String(metodo || '').trim().toUpperCase();
+  var ob = cuentasMap[CUENTA_OB.toUpperCase()];
+  if (b === 'ZELLE' || b === 'BINANCE' || m === 'ZELLE' || m === 'BINANCE') return ob || null;
+  if (b && cuentasMap[b]) return cuentasMap[b];
+  if (m === 'EFECTIVO' || m.indexOf('EFECTIVO') === 0) {
+    var mon = String(moneda || '').toUpperCase();
+    if (mon === 'USD') return cuentasMap['EFECTIVO USD'] || null;
+    if (mon === 'BS')  return cuentasMap['EFECTIVO BS'] || null;
+    return null;   // efectivo sin moneda: no se sabe a cual caja fue
+  }
+  if (m && cuentasMap[m]) return cuentasMap[m];   // liquidaciones viejas guardaban la cuenta en METODO
+  return null;
+}
+
+// Para lo que registran los socios (gastos, pagos a proveedor): o el canal existe y la moneda es la de la
+// cuenta, o no se escribe nada y la pantalla dice por que.
+function exigirCanal_(ss, metodo, banco, moneda, sentido) {
+  var todas = {};
+  listaCuentas_(ss, true).forEach(function(c) { todas[c.cuenta.toUpperCase()] = c; });
+  var cta = resolverCuenta_(todas, metodo, banco, moneda);
+  if (!cta) throw rechazo_('No se sabe de que cuenta sale el dinero (' + (metodo || 'sin metodo') + (banco ? ' ' + banco : '') +
+                           '). Elige un metodo de la lista.');
+  if (!cta.activa) throw rechazo_('La cuenta ' + cta.cuenta + ' esta desactivada en la hoja CUENTAS.');
+  var canales = listaCanales_(ss);
+  if (canales.length) {
+    var m = String(metodo || '').trim().toUpperCase();
+    var ok = canales.filter(function(c) { return c.cuenta === cta.cuenta && c.metodo.toUpperCase() === m && canalSirve_(c, sentido); })[0];
+    if (!ok) {
+      var hab = canales.filter(function(c) { return c.cuenta === cta.cuenta && canalSirve_(c, sentido); }).map(function(c) { return c.metodo; });
+      throw rechazo_(cta.cuenta + ' no tiene habilitado "' + (metodo || '?') + '" para ' + (String(sentido).toUpperCase() === 'SALE' ? 'sacar' : 'recibir') +
+                     ' dinero.' + (hab.length ? ' Habilitado: ' + hab.join(', ') + '.' : ' No tiene ningun metodo habilitado (hoja CANALES).') +
+                     ' Si la pantalla es vieja, toca Actualizar.');
+    }
+  }
+  var mon = String(moneda || '').trim().toUpperCase();
+  if (mon && mon !== cta.moneda) {
+    throw rechazo_(cta.cuenta + ' es una cuenta en ' + (cta.moneda === 'BS' ? 'bolivares' : 'dolares') + ' y el monto vino en ' +
+                   (mon === 'BS' ? 'bolivares' : 'dolares') + '. Revisa la moneda: no se registro nada.');
+  }
+  return cta;
+}
+
+// ------------------------------------------------------------
+// action=dinero — EL FLUJO DE CAJA
+// ------------------------------------------------------------
+// Saldo de una cuenta = su ultimo SALDO_INICIAL + todo lo que entro y salio desde esa fecha (incluida)
+//                       - las comisiones estimadas de cada operacion.
+// Sin SALDO_INICIAL la cuenta muestra entradas y salidas, pero NO saldo: un saldo inventado es peor que ninguno.
+// Lo que no se puede asignar a una cuenta (efectivo viejo sin moneda, metodo desconocido) va en sinCuenta,
+// con su monto, en vez de esconderse dentro de un total.
+function estadoDinero_(ss, desde, hasta) {
+  var d1 = desde || '0000-00-00', d2 = hasta || '9999-99-99';
+  var cfg = leerConfig_(ss), tasaHoy = Number(cfg.tasa) || 0;
+  var cuentas = listaCuentas_(ss, true);
+  var porNombre = {};
+  cuentas.forEach(function(c) { porNombre[c.cuenta.toUpperCase()] = c; });
+  var canales = [];
+  try { canales = listaCanales_(ss); } catch (e) {}
+
+  var movs = [], sinCuenta = [], avisos = [];
+  function n_(v) { var x = Number(v); return isFinite(x) ? x : 0; }
+  function comisionDe(cta, metodo, sentido, monto) {
+    var m = String(metodo || '').trim().toUpperCase();
+    var c = canales.filter(function(k) { return k.cuenta === cta.cuenta && k.metodo.toUpperCase() === m && canalSirve_(k, sentido); })[0];
+    if (!c || (!c.fijo && !c.pct)) return 0;
+    return round2_(c.fijo + monto * c.pct / 100);
+  }
+  // Convierte un monto a la moneda de la cuenta. tasa = la de la operacion si existe; si no, la de hoy.
+  function aMoneda(monto, deMon, cta, tasa) {
+    var t = n_(tasa) || tasaHoy;
+    if (!deMon || deMon === cta.moneda) return {monto:monto, estimado:false};
+    if (!t) return {monto:0, estimado:true};
+    return {monto:round2_(cta.moneda === 'BS' ? monto * t : monto / t), estimado:true};
+  }
+  // signo: +1 entra a la cuenta, -1 sale. monto siempre positivo y en la moneda de la cuenta.
+  function agregar(o) {
+    if (!o.cuenta) { sinCuenta.push(o); return; }
+    if (!(o.monto > 0)) return;
+    var t = n_(o.tasa) || tasaHoy;
+    o.usd = o.cuenta.moneda === 'USD' ? o.monto : (t ? round2_(o.monto / t) : 0);
+    o.comision = o.sinComision ? 0 : comisionDe(o.cuenta, o.metodo, o.signo > 0 ? 'ENTRA' : 'SALE', o.monto);
+    o.comisionUSD = o.comision ? (o.cuenta.moneda === 'USD' ? o.comision : (t ? round2_(o.comision / t) : 0)) : 0;
+    movs.push(o);
+  }
+  function filas(nombre, ancho) {
+    var sh = ss.getSheetByName(nombre);
+    if (!sh || sh.getLastRow() < 2) return [];
+    return sh.getRange(2, 1, sh.getLastRow() - 1, Math.max(ancho, 1)).getValues();
+  }
+
+  // 1) VENTAS: hasta 3 pagos por venta. No cuentan el credito ni el anticipo de un apartado (ese dinero ya
+  //    entro por APARTADOS_MOV), ni la entrega de un apartado (VAP-): su pago final tambien esta en APARTADOS_MOV.
+  var shV = ss.getSheetByName(SH_VENTAS);
+  if (shV && shV.getLastRow() >= 2) {
+    var anchoV = Math.max(shV.getLastColumn(), 30);
+    shV.getRange(2, 1, shV.getLastRow() - 1, anchoV).getValues().forEach(function(r) {
+      var f = iso_(r[0]); if (!f) return;
+      var idV = String(r[23] || '');
+      if (idV.indexOf('VAP-') === 0) return;
+      var totUsd = usdCelda_(r[5]), totBs = n_(r[6]);
+      var tasaV = (totUsd > 0 && totBs > 0) ? totBs / totUsd : 0;
+      for (var k = 0; k < 3; k++) {
+        var met = String(r[7 + k * 3] || '').trim(), ban = String(r[8 + k * 3] || '').trim(), monto = n_(r[9 + k * 3]);
+        var mon = String(r[27 + k] || '').trim().toUpperCase();
+        if (!met || !(monto > 0)) continue;
+        var mu = met.toUpperCase();
+        if (mu === 'CREDITO' || mu === 'POR COBRAR' || mu.indexOf('ANTICIPO') === 0) continue;
+        var estimado = false;
+        if (!mon) {
+          // Sin moneda guardada: un banco es en su moneda; efectivo viejo se decide por el tamano del monto.
+          if (mu === 'EFECTIVO' && !ban) { mon = monto <= 300 ? 'USD' : 'BS'; estimado = true; }
+        }
+        var cta = resolverCuenta_(porNombre, met, ban, mon);
+        if (cta && !mon) mon = cta.moneda;
+        var base = {fecha:f, origen:'VENTA', ref:'Nota ' + (r[24] || '?'), desc:String(r[25] || 'Particular'), metodo:met,
+                    signo:1, tasa:tasaV, estimado:estimado};
+        if (!cta) { base.monto = monto; base.moneda = mon || '?'; base.motivo = 'Metodo sin cuenta: ' + met + (ban ? ' ' + ban : ''); agregar(base); continue; }
+        var cv = aMoneda(monto, mon, cta, tasaV);
+        base.cuenta = cta; base.monto = cv.monto; base.estimado = estimado || cv.estimado;
+        agregar(base);
+      }
+    });
+  }
+
+  // 2) ABONOS de clientes (CXC_MOV). La compensacion con comisiones y el credito a favor no son dinero.
+  filas('CXC_MOV', 16).forEach(function(r) {
+    if (String(r[4]).toUpperCase() !== 'ABONO') return;
+    var f = iso_(r[0]); if (!f) return;
+    var met = String(r[11] || '').trim(), mu = met.toUpperCase();
+    if (mu === 'COMPENSACION' || mu === 'CREDITO A FAVOR' || !met) return;
+    var mon = String(r[8] || '').trim().toUpperCase(), monto = n_(r[9]) || n_(r[7]);
+    if (!mon) mon = 'USD';
+    var cta = resolverCuenta_(porNombre, met, r[12], mon);
+    var base = {fecha:f, origen:'ABONO', ref:String(r[5] || ''), desc:String(r[2] || ''), metodo:met, signo:1, tasa:r[10]};
+    if (!cta) { base.monto = monto; base.moneda = mon; base.motivo = 'Metodo sin cuenta: ' + met; agregar(base); return; }
+    var cv = aMoneda(monto, mon, cta, r[10]);
+    base.cuenta = cta; base.monto = cv.monto; base.estimado = cv.estimado;
+    agregar(base);
+  });
+
+  // 3) APARTADOS: abonos entran; la devolucion del anticipo sale. El credito a favor no mueve dinero.
+  filas('APARTADOS_MOV', 13).forEach(function(r) {
+    var t = String(r[3] || '').toUpperCase(); if (t !== 'ABONO' && t !== 'DEVOLUCION') return;
+    var f = iso_(r[1]); if (!f) return;
+    var met = String(r[8] || '').trim(), mon = String(r[5] || 'USD').trim().toUpperCase(), monto = n_(r[6]) || n_(r[4]);
+    var cta = resolverCuenta_(porNombre, met, r[9], mon);
+    var base = {fecha:f, origen:'APARTADO', ref:String(r[0] || ''), desc:t === 'ABONO' ? 'Abono de apartado' : 'Devolucion de apartado',
+                metodo:met, signo:t === 'ABONO' ? 1 : -1, tasa:r[7]};
+    if (!cta) { base.monto = monto; base.moneda = mon; base.motivo = 'Metodo sin cuenta: ' + (met || '(vacio)'); agregar(base); return; }
+    var cv = aMoneda(monto, mon, cta, r[7]);
+    base.cuenta = cta; base.monto = cv.monto; base.estimado = cv.estimado;
+    agregar(base);
+  });
+
+  // 4) DEVOLUCIONES y cambios: diferencia < 0 se le devolvio al cliente; > 0 el cliente pago la diferencia.
+  filas('DEVOLUCIONES', 16).forEach(function(r) {
+    var dif = n_(r[9]); if (!dif) return;
+    var res = String(r[10] || '').toUpperCase();
+    if (res === 'CREDITO_A_FAVOR') return;
+    var f = iso_(r[1]); if (!f) return;
+    var met = String(r[11] || '').trim();
+    var cta = resolverCuenta_(porNombre, met, r[12], '');
+    var base = {fecha:f, origen:'DEVOLUCION', ref:'Dev ' + r[0] + ' / nota ' + r[3], desc:String(r[5] || ''), metodo:met,
+                signo:dif > 0 ? 1 : -1, estimado:true};
+    if (!cta) { base.monto = Math.abs(dif); base.moneda = 'USD'; base.motivo = 'Metodo sin cuenta: ' + (met || '(vacio)'); agregar(base); return; }
+    var cv = aMoneda(Math.abs(dif), 'USD', cta, 0);
+    base.cuenta = cta; base.monto = cv.monto;
+    agregar(base);
+  });
+
+  // 5) GASTOS pagados con dinero de la tienda (si lo pago un socio, no salio de ninguna cuenta: es su prestamo).
+  filas('GASTOS', 16).forEach(function(r) {
+    var pp = String(r[12] || '').toUpperCase();
+    if (pp === 'RODOLFO' || pp === 'JAVIER') return;
+    var f = iso_(r[1]); if (!f) return;
+    var met = String(r[10] || '').trim(), mon = String(r[6] || '').trim().toUpperCase();
+    var cta = resolverCuenta_(porNombre, met, r[11], mon);
+    var base = {fecha:f, origen:'GASTO', ref:String(r[0] || ''), desc:String(r[3] || '') + ' - ' + String(r[4] || ''), metodo:met,
+                signo:-1, tasa:r[7]};
+    if (!cta) { base.monto = n_(r[5]); base.moneda = mon || '?'; base.motivo = 'Metodo sin cuenta: ' + (met || '(vacio)'); agregar(base); return; }
+    // MONTO_USD (I) y MONTO_BS (J) ya vienen corregidos: se usa el de la moneda de la cuenta.
+    base.cuenta = cta; base.monto = cta.moneda === 'BS' ? n_(r[9]) : n_(r[8]);
+    base.estimado = !!(mon && mon !== cta.moneda);
+    agregar(base);
+  });
+
+  // 6) PAGOS A PROVEEDOR (CXP_MOV ABONO)
+  filas('CXP_MOV', 15).forEach(function(r) {
+    if (String(r[3]).toUpperCase() !== 'ABONO') return;
+    var f = iso_(r[0]); if (!f) return;
+    var met = String(r[10] || '').trim(), mon = String(r[7] || 'USD').trim().toUpperCase();
+    var cta = resolverCuenta_(porNombre, met, r[11], mon);
+    var base = {fecha:f, origen:'PROVEEDOR', ref:String(r[5] || r[4] || ''), desc:String(r[2] || ''), metodo:met, signo:-1, tasa:r[9]};
+    if (!cta) { base.monto = n_(r[6]); base.moneda = 'USD'; base.motivo = 'Cuenta desconocida: ' + (r[11] || met || '(vacia)'); agregar(base); return; }
+    var cv = (mon === cta.moneda && n_(r[8]) > 0) ? {monto:n_(r[8]), estimado:false} : aMoneda(n_(r[6]), 'USD', cta, r[9]);
+    base.cuenta = cta; base.monto = cv.monto; base.estimado = cv.estimado;
+    agregar(base);
+  });
+
+  // 7) COMPRAS DE CONTADO costeadas, pagadas por la tienda (no por un socio)
+  filas('COMPRAS', 20).forEach(function(r) {
+    if (String(r[8] || '').toUpperCase() !== 'COSTEADA') return;
+    if (String(r[14] || 'CONTADO').toUpperCase() !== 'CONTADO') return;
+    if (String(r[19] || '').trim()) return;
+    var total = n_(r[9]); if (!(total > 0)) return;
+    var f = iso_(r[1]); if (!f) return;
+    var met = String(r[17] || '').trim();
+    var cta = resolverCuenta_(porNombre, met, r[18], '');
+    var base = {fecha:f, origen:'COMPRA', ref:String(r[0] || ''), desc:'Compra de contado ' + String(r[3] || r[2] || ''), metodo:met || '?', signo:-1};
+    if (!cta) { base.monto = total; base.moneda = 'USD'; base.motivo = 'Compra de contado sin cuenta' + (r[18] ? ': ' + r[18] : ''); agregar(base); return; }
+    var cv = aMoneda(total, 'USD', cta, 0);
+    base.cuenta = cta; base.monto = cv.monto; base.estimado = cv.estimado; base.sinComision = true;
+    agregar(base);
+  });
+
+  // 8) LIQUIDACIONES de aliados: lo que se les pago en dinero
+  filas('LIQUIDACIONES', 13).forEach(function(r) {
+    var pag = n_(r[8]); if (!(pag > 0)) return;
+    var f = iso_(r[1]); if (!f) return;
+    var cta = resolverCuenta_(porNombre, r[9], r[9], '');
+    var base = {fecha:f, origen:'ALIADO', ref:String(r[0] || ''), desc:'Liquidacion ' + String(r[3] || ''), metodo:String(r[9] || ''), signo:-1, tasa:r[10]};
+    if (!cta) { base.monto = pag; base.moneda = 'USD'; base.motivo = 'Liquidacion sin cuenta: ' + (r[9] || '(vacia)'); agregar(base); return; }
+    var cv = aMoneda(pag, 'USD', cta, r[10]);
+    base.cuenta = cta; base.monto = cv.monto; base.estimado = cv.estimado; base.sinComision = true;
+    agregar(base);
+  });
+
+  // 9) MOV_CUENTAS: saldo inicial, traspasos, cambios con OB, ajustes y socios
+  var iniciales = {};   // CUENTA -> {fecha, monto}
+  var opsOB = [];
+  filas('MOV_CUENTAS', 14).forEach(function(r) {
+    var f = iso_(r[1]); if (!f) return;
+    var tipo = String(r[3] || '').toUpperCase();
+    var o = porNombre[String(r[4] || '').trim().toUpperCase()], dd = porNombre[String(r[7] || '').trim().toUpperCase()];
+    var mo = n_(r[5]), md = n_(r[8]), tasa = n_(r[10]);
+    if (tipo === 'SALDO_INICIAL') {
+      if (dd) {
+        var k = dd.cuenta.toUpperCase(), prev = iniciales[k];
+        if (!prev || f >= prev.fecha) iniciales[k] = {fecha:f, monto:md};
+      }
+      return;
+    }
+    var etq = {TRASPASO:'Traspaso', CAMBIO_OB:'Cambio con OB', AJUSTE_ENTRA:'Ajuste: sobra', AJUSTE_SALE:'Ajuste: falta',
+               RETIRO_SOCIO:'Retiro de socio', REEMBOLSO_SOCIO:'Reembolso a socio', APORTE_SOCIO:'Aporte de socio'}[tipo] || tipo;
+    var desc = etq + (r[11] ? ' ' + r[11] : '') + (r[13] ? ' - ' + r[13] : '');
+    if (o)  agregar({fecha:f, origen:'MOVIMIENTO', ref:String(r[0] || ''), desc:desc + (dd ? ' (a ' + dd.cuenta + ')' : ''), metodo:etq,
+                     signo:-1, cuenta:o, monto:mo, tasa:tasa, sinComision:true, tipoMov:tipo});
+    if (dd) agregar({fecha:f, origen:'MOVIMIENTO', ref:String(r[0] || ''), desc:desc + (o ? ' (de ' + o.cuenta + ')' : ''), metodo:etq,
+                     signo:1, cuenta:dd, monto:md, tasa:tasa, sinComision:true, tipoMov:tipo});
+    if ((o && o.ob) || (dd && dd.ob)) {
+      opsOB.push({fecha:f, id:String(r[0] || ''), tipo:etq, sale:o ? o.cuenta : '', montoSale:mo, monedaSale:o ? o.moneda : '',
+                  entra:dd ? dd.cuenta : '', montoEntra:md, monedaEntra:dd ? dd.moneda : '', tasa:tasa,
+                  quien:String(r[12] || ''), notas:String(r[13] || '')});
+    }
+  });
+
+  // ---- Saldos ----
+  var resumen = {};
+  cuentas.forEach(function(c) {
+    var ini = iniciales[c.cuenta.toUpperCase()];
+    resumen[c.cuenta] = {cuenta:c.cuenta, moneda:c.moneda, activa:c.activa, ob:c.ob,
+                         saldoInicial:ini ? ini.monto : null, fechaInicial:ini ? ini.fecha : '',
+                         saldo:ini ? ini.monto : null, entra:0, sale:0, comision:0, n:0, sinMovSaldo:0};
+  });
+  movs.forEach(function(m) {
+    var r = resumen[m.cuenta.cuenta]; if (!r) return;
+    if (r.saldo !== null && m.fecha >= r.fechaInicial) r.saldo = round2_(r.saldo + m.signo * m.monto - m.comision);
+    if (m.fecha >= d1 && m.fecha <= d2) {
+      if (m.signo > 0) r.entra = round2_(r.entra + m.monto); else r.sale = round2_(r.sale + m.monto);
+      r.comision = round2_(r.comision + m.comision); r.n++;
+    }
+  });
+  var listaRes = cuentas.map(function(c) {
+    var r = resumen[c.cuenta];
+    r.saldoUSD = r.saldo === null ? null : (c.moneda === 'USD' ? r.saldo : (tasaHoy ? round2_(r.saldo / tasaHoy) : null));
+    return r;
+  }).filter(function(r) { return r.activa || r.n || r.saldo !== null; });
+
+  // ---- Flujo del periodo ----
+  var enPer = movs.filter(function(m) { return m.fecha >= d1 && m.fecha <= d2; });
+  var flujo = {entraUSD:0, saleUSD:0, comisionUSD:0, porOrigen:{}, porCanal:{}, internoUSD:0};
+  enPer.forEach(function(m) {
+    // Lo que solo se mueve entre cuentas de la tienda (traspasos y cambios) no es ni ingreso ni egreso.
+    var interno = m.tipoMov === 'TRASPASO' || m.tipoMov === 'CAMBIO_OB';
+    if (interno) { if (m.signo > 0) flujo.internoUSD = round2_(flujo.internoUSD + m.usd); }
+    else if (m.signo > 0) flujo.entraUSD = round2_(flujo.entraUSD + m.usd); else flujo.saleUSD = round2_(flujo.saleUSD + m.usd);
+    flujo.comisionUSD = round2_(flujo.comisionUSD + m.comisionUSD);
+    if (!interno) {
+      var o = flujo.porOrigen[m.origen] || (flujo.porOrigen[m.origen] = {entraUSD:0, saleUSD:0, n:0});
+      if (m.signo > 0) o.entraUSD = round2_(o.entraUSD + m.usd); else o.saleUSD = round2_(o.saleUSD + m.usd);
+      o.n++;
+    }
+    var kc = m.cuenta.cuenta + '|' + m.metodo;
+    var c = flujo.porCanal[kc] || (flujo.porCanal[kc] = {cuenta:m.cuenta.cuenta, moneda:m.cuenta.moneda, metodo:m.metodo, entra:0, sale:0, comision:0, n:0});
+    if (m.signo > 0) c.entra = round2_(c.entra + m.monto); else c.sale = round2_(c.sale + m.monto);
+    c.comision = round2_(c.comision + m.comision); c.n++;
+  });
+  flujo.netoUSD = round2_(flujo.entraUSD - flujo.saleUSD - flujo.comisionUSD);
+  flujo.porCanal = Object.keys(flujo.porCanal).map(function(k) { return flujo.porCanal[k]; })
+    .sort(function(a, b) { return a.cuenta.localeCompare(b.cuenta) || (b.entra + b.sale) - (a.entra + a.sale); });
+
+  var lista = enPer.slice().sort(function(a, b) { return b.fecha.localeCompare(a.fecha); }).slice(0, 400).map(function(m) {
+    return {fecha:m.fecha, cuenta:m.cuenta.cuenta, moneda:m.cuenta.moneda, origen:m.origen, ref:m.ref, desc:m.desc, metodo:m.metodo,
+            signo:m.signo, monto:m.monto, usd:m.usd, comision:m.comision, estimado:!!m.estimado};
+  });
+  var sinC = sinCuenta.filter(function(m) { return m.fecha >= d1 && m.fecha <= d2; }).map(function(m) {
+    return {fecha:m.fecha, origen:m.origen, ref:m.ref, desc:m.desc, metodo:m.metodo, signo:m.signo, monto:m.monto, moneda:m.moneda, motivo:m.motivo};
+  });
+
+  // ---- OB International: todo lo que paso por OB en el periodo ----
+  var ctaOB = resumen[CUENTA_OB];
+  var obMovs = lista.filter(function(m) { return m.cuenta === CUENTA_OB; });
+  var ob = {cuenta:CUENTA_OB, saldo:ctaOB ? ctaOB.saldo : null, fechaInicial:ctaOB ? ctaOB.fechaInicial : '',
+            cambios:opsOB.filter(function(x) { return x.fecha >= d1 && x.fecha <= d2; }).sort(function(a, b) { return b.fecha.localeCompare(a.fecha); }),
+            movimientos:obMovs};
+
+  var sinIni = listaRes.filter(function(r) { return r.activa && r.saldoInicial === null; }).map(function(r) { return r.cuenta; });
+  if (sinIni.length) avisos.push('Sin saldo inicial: ' + sinIni.join(', ') + '. Esas cuentas muestran entradas y salidas, no saldo.');
+  if (!canales.length) avisos.push('La hoja CANALES no se pudo leer: las comisiones no se estan calculando.');
+  if (!tasaHoy) avisos.push('No hay tasa de trabajo: los montos en Bs no se pudieron pasar a dolares.');
+
+  return {ok:true, desde:d1, hasta:d2, tasa:tasaHoy, tasaFecha:cfg.fecha, cuentas:listaRes, flujo:flujo, movimientos:lista,
+          sinCuenta:sinC, ob:ob, socios:saldosSocios_(ss), avisos:avisos,
+          canales:canales.map(function(c) { return {cuenta:c.cuenta, metodo:c.metodo, sentido:c.sentido, etiqueta:c.etiqueta, fijo:c.fijo, pct:c.pct, moneda:c.moneda}; })};
 }

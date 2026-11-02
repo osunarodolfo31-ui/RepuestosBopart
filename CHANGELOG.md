@@ -1,5 +1,43 @@
 # CHANGELOG — Repuesto BoParts
 
+## Apps Script v28 + dinero v1.0 — build 2026-11-01.1 — bancos con moneda, cuenta con OB y flujo de caja
+
+**Lo que estaba roto.** La hoja MOV_CUENTAS nunca existio: no habia saldo inicial ni traspasos, asi que ninguna
+cuenta tenia saldo. El efectivo se guardaba sin cuenta (BANCO vacio) y en ventas viejas sin moneda. Zelle y
+Binance figuraban como cuentas de la tienda, pero son cuentas personales de Rodolfo que usa su casa de cambio
+(OB International). Gastos dejaba poner cualquier moneda con cualquier metodo (asi entro Bs 9.159 como dolares).
+
+- **Hoja CANALES** (nueva, se crea sola): CUENTA, METODO, SENTIDO (ENTRA/SALE/AMBOS), ETIQUETA, FIJO, PCT, ACTIVO.
+  La moneda la pone la cuenta (hoja CUENTAS). Sembrada con lo que hay hoy; las comisiones se copian de METODOS_PAGO.
+  `action=metodos&sentido=entra|sale` arma los metodos de cada pantalla desde ahi. Si CANALES falla, sigue
+  METODOS_PAGO como antes. METODOS_PAGO NO se borra.
+- **CUENTAS**: Zelle y Binance pasan a ACTIVA = NO (no se borran) y nace **OB International** (USD). Se hace solo
+  la primera vez que una pantalla pide las cuentas.
+- **CAMBIO_OB** en MOV_CUENTAS: Bs de un banco a OB (o al reves) SIEMPRE a la tasa de trabajo. El monto del lado de
+  OB lo calcula el servidor. La tasa queda guardada en cada operacion.
+- **Validacion**: gastos y pagos a proveedor rechazan un metodo que la cuenta no tiene habilitado para salir y una
+  moneda distinta a la de la cuenta ("No se registro: ..."). Si el gasto lo pago un socio, no se valida cuenta.
+  La liquidacion de un aliado exige una cuenta de CUENTAS si sale dinero. Las VENTAS no se rechazan por esto: el
+  mostrador manda; la pantalla de ventas fija la moneda.
+- **`action=dinero`** (solo socios): saldo por cuenta desde su ultimo SALDO_INICIAL, entradas, salidas y comisiones
+  por cuenta y metodo, movimientos, cuenta con OB, cuenta de socios y lo que no se pudo asignar a una cuenta. Lee
+  VENTAS, CXC_MOV, APARTADOS_MOV, DEVOLUCIONES, GASTOS, CXP_MOV, COMPRAS (contado), LIQUIDACIONES y MOV_CUENTAS.
+  No cuenta credito, anticipos ni entregas de apartado (VAP-) para no contar dos veces. Efectivo viejo sin moneda:
+  hasta 300 = USD, mas = Bs, marcado "estimado". Las comisiones se calculan con la tabla CANALES (estimadas).
+- **boparts_dinero.html v1.0** (nueva): flujo del periodo, saldo por cuenta con Arqueo y Saldo inicial, cuenta con
+  OB y sus cambios con tasa, por cuenta y metodo, movimientos, sin cuenta, cuentas por pagar (con proximos
+  vencimientos), liquidacion de aliados, cuenta de socios y Mover dinero.
+- **gerencia v3.4**: cuentas por pagar y liquidacion de aliados se mudan a Dinero.
+- **gastos v2.2**: metodos de salida desde CANALES, moneda fija; "Mover dinero" se va a Dinero.
+- **ventas v15.0, cobros v3.3, apartados v1.9**: moneda fija al elegir el metodo; Zelle y Binance (OB) disponibles.
+- **devoluciones v1.9**: al devolver dinero se elige por donde sale (antes "pago movil" sin banco).
+- **boparts_sesion.js**: `cargarCanales()`, `opcionesDeMetodos()`, `amarrarMoneda()`. Todas las pantallas: tarjeta
+  Dinero en el menu y build 2026-11-01.1.
+
+Pendiente conocido: compras v3.1 sigue eligiendo la cuenta de contado de la lista vieja (no valida canal); la
+comision FIJO se interpreta en la moneda de la cuenta, pero ventas la suma como Bs (hoy todos los canales en USD
+tienen 0).
+
 ## Apps Script v27.3 + compras v3.1 — build 2026-10-31.1 — codigo propio y conteos que perdian la fecha
 
 Causa de los "conteos que desaparecen": NO era la compra. En 10 productos alguien borro a mano la celda FECHA_CONTEO
