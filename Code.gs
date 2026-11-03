@@ -1,6 +1,14 @@
 /**
  * Repuesto BoParts — Code.gs
- * VERSION: v28.6 (2026-11-02) | documentos: buscar y reimprimir notas y facturas
+ * VERSION: v28.7 (2026-11-02) | tasa BCV automatica
+ *
+ * v28.7 — actualizarTasaBCV(): trae la tasa oficial del BCV (USD) de DolarAPI (https://ve.dolarapi.com/v1/dolares/oficial)
+ *   y, si no responde, de la pagina del BCV (https://www.bcv.org.ve/). La guarda en CONFIG (B10/B11) y en TASAS con
+ *   la nota "BCV automatica". Se rechaza un valor que se mueva mas de 25% contra el anterior (dato roto). Corre
+ *   sola cada 2 horas con el disparador que crea instalarTasaBCVAutomatica() (una vez, desde el editor). Gerencia
+ *   tiene el boton "Traer del BCV" (tipo=bcv_auto). La tasa de TRABAJO no se toca: la fija un socio.
+ *
+ * VERSION anterior: v28.6 (2026-11-02) | documentos: buscar y reimprimir notas y facturas
  *
  * v28.6 — action=documentos (q, desde, hasta): lista de notas de entrega con cliente, total, pagos, productos, si
  *   tiene factura y cuantas devoluciones. Busca por numero de nota, cliente, cedula/RIF, producto o numero de
@@ -492,7 +500,7 @@ var PERMISOS_POST = {
   factura_venta:'VENDEDOR', factura_digital:'VENDEDOR', apartado:'VENDEDOR', apartado_abono:'VENDEDOR', apartado_entregar:'VENDEDOR',
   tarea_marcar:'VENDEDOR', tarea_propia:'VENDEDOR',
   costeo:'SOCIO', cxp_abono:'SOCIO', conteo_revision:'SOCIO', devolucion:'SOCIO', apartado_cerrar:'SOCIO',
-  tasa:'SOCIO', socio:'SOCIO', liquidar_aliado:'SOCIO', precio:'SOCIO', tarea_def:'SOCIO',
+  tasa:'SOCIO', bcv_auto:'SOCIO', socio:'SOCIO', liquidar_aliado:'SOCIO', precio:'SOCIO', tarea_def:'SOCIO',
   anular_venta:'SOCIO', mov_cuenta:'SOCIO'
 };
 
@@ -723,7 +731,7 @@ function claveDePost_(data) {
 // OJO: esta constante es lo que ven las apps en el menu. Se habia quedado en v21.4 mientras el
 // encabezado ya decia v24, asi que el sello de version — que existe justamente para saber si lo
 // desplegado es lo que crees — estaba mintiendo. Cada version nueva se cambia AQUI tambien.
-var VERSION_SCRIPT = 'v28.6';
+var VERSION_SCRIPT = 'v28.7';
 
 function json_(obj) {
   // La version viaja en cada respuesta: es la forma rapida de saber si lo desplegado es lo que crees
@@ -1166,6 +1174,13 @@ function doPost(e) {
         SpreadsheetApp.flush();   // v26.1: vaciar ANTES de soltar el candado
         lockAp.releaseLock();
       }
+    }
+
+    // ---- TASA BCV AUTOMATICA (v28.7): boton "Traer del BCV" en Gerencia ----
+    if (data.tipo === 'bcv_auto') {
+      var lockB = LockService.getScriptLock(); lockB.waitLock(15000);
+      try { return json_(actualizarTasaBCV_(ss, (quien && quien.nombre) || 'Gerencia')); }
+      finally { SpreadsheetApp.flush(); lockB.releaseLock(); }
     }
 
     // ---- TASA BCV (v13): la fija un socio desde Gerencia y la usan todas las apps ----
@@ -5699,8 +5714,72 @@ function documentoNota_(ss, num) {
   var fa = facturasPorVenta_(ss)[idV] || null, factDoc = null;
   if (fa && fa.json) { try { factDoc = JSON.parse(fa.json); } catch (e) {} }
   return {ok:true, nota:n, idVenta:idV, fecha:iso_(rv[0]), hora:String(rv[1] || ''), vendedor:String(rv[2] || ''),
-          canal:String(rv[3] || ''), credito:Number(rv[30]) > 0, cliente:cli, lineas:lineas,
+          canal:String(rv[3] || ''), credito:Number(rv[30]) > 0, creditoUSD:Number(rv[30]) || 0, cliente:cli, lineas:lineas,
           totalUSD:usdCelda_(rv[5]), totalBS:Number(rv[6]) || 0, pagos:pagosDeVenta_(rv),
           factura:fa ? {numero:fa.numero, control:fa.control, modo:fa.modo, doc:factDoc} : null,
           devoluciones:(devolucionesPorNota_(ss)[n] || [])};
+}
+
+
+// ============================================================
+// TASA BCV AUTOMATICA (v28.7)
+// ============================================================
+// Fuente 1: DolarAPI, publica y sin clave. Devuelve {promedio, fechaActualizacion}.
+// Fuente 2: la pagina del BCV (su certificado SSL suele dar problemas: por eso no se valida). Se lee el bloque
+//           id="dolar". Si el BCV cambia su pagina, esta fuente deja de servir y queda la primera.
+// Lo que llegue se revisa antes de guardarlo: numero valido y no mas de 25% de diferencia con la tasa anterior.
+function bcvDesdeDolarApi_() {
+  var r = UrlFetchApp.fetch('https://ve.dolarapi.com/v1/dolares/oficial', {muteHttpExceptions:true, headers:{'Accept':'application/json'}});
+  if (r.getResponseCode() !== 200) throw new Error('DolarAPI respondio ' + r.getResponseCode());
+  var d = JSON.parse(r.getContentText());
+  var v = Number(d.promedio) || Number(d.venta) || 0;
+  if (!(v > 0)) throw new Error('DolarAPI sin tasa');
+  return {tasa:v, fecha:String(d.fechaActualizacion || ''), fuente:'DolarAPI'};
+}
+function bcvDesdePaginaBcv_() {
+  var r = UrlFetchApp.fetch('https://www.bcv.org.ve/', {muteHttpExceptions:true, validateHttpsCertificates:false});
+  if (r.getResponseCode() !== 200) throw new Error('BCV respondio ' + r.getResponseCode());
+  var html = r.getContentText();
+  var i = html.indexOf('id="dolar"');
+  if (i < 0) throw new Error('La pagina del BCV cambio: no se encontro el dolar');
+  var m = /<strong>\s*([\d.]+,\d+)\s*<\/strong>/.exec(html.slice(i, i + 1500));
+  if (!m) throw new Error('No se pudo leer la tasa en la pagina del BCV');
+  var v = Number(m[1].replace(/\./g, '').replace(',', '.'));
+  var f = /content="(\d{4}-\d{2}-\d{2})/.exec(html.slice(html.indexOf('Fecha Valor'), html.indexOf('Fecha Valor') + 600) || '');
+  return {tasa:v, fecha:f ? f[1] : '', fuente:'bcv.org.ve'};
+}
+function actualizarTasaBCV_(ss, quien) {
+  var errores = [], dato = null;
+  try { dato = bcvDesdeDolarApi_(); } catch (e1) { errores.push(String(e1.message || e1)); }
+  if (!dato) { try { dato = bcvDesdePaginaBcv_(); } catch (e2) { errores.push(String(e2.message || e2)); } }
+  if (!dato) return {ok:false, error:'No se pudo traer la tasa BCV: ' + errores.join(' / ') + '. Puedes escribirla a mano.'};
+  var cfg = ss.getSheetByName('CONFIG');
+  var antes = Number(cfg.getRange('B10').getValue()) || 0;
+  var t = Math.round(dato.tasa * 10000) / 10000;
+  if (antes > 0 && Math.abs(t - antes) / antes > 0.25) {
+    return {ok:false, error:'La tasa que llego (' + t + ' de ' + dato.fuente + ') se mueve mas de 25% contra la anterior (' + antes +
+            '). No se guardo: revisala y, si es correcta, escribela a mano.'};
+  }
+  if (t === antes) return {ok:true, tipo:'bcv_auto', tasa:t, fuente:dato.fuente, fecha:dato.fecha, sinCambio:true};
+  cfg.getRange('A10').setValue('TASA_BCV'); cfg.getRange('B10').setValue(t);
+  cfg.getRange('A11').setValue('TASA_BCV_FECHA'); cfg.getRange('B11').setValue(new Date()); cfg.getRange('B11').setNumberFormat('dd/MM/yyyy');
+  var shB = hojaAp_(ss, 'TASAS', ['FECHA','HORA','TASA','FIJADA_POR','NOTAS']);
+  var ahora = new Date();
+  shB.appendRow([ahora, Utilities.formatDate(ahora, TZ_VE, 'HH:mm'), t, quien || 'Automatico',
+                 'BCV automatica (' + dato.fuente + (dato.fecha ? ', ' + String(dato.fecha).slice(0, 10) : '') + ')']);
+  shB.getRange(shB.getLastRow(), 1).setNumberFormat('dd/MM/yyyy');
+  return {ok:true, tipo:'bcv_auto', tasa:t, anterior:antes, fuente:dato.fuente, fecha:dato.fecha};
+}
+// La corre el disparador. Tambien se puede correr a mano desde el editor para probar.
+function actualizarTasaBCV() {
+  var lk = LockService.getScriptLock(); if (!lk.tryLock(20000)) return;
+  try { var r = actualizarTasaBCV_(SpreadsheetApp.getActiveSpreadsheet(), 'Automatico'); Logger.log(JSON.stringify(r)); }
+  finally { SpreadsheetApp.flush(); lk.releaseLock(); }
+}
+// Correr UNA vez desde el editor: deja la tasa BCV actualizandose sola cada 2 horas. No duplica el disparador.
+function instalarTasaBCVAutomatica() {
+  ScriptApp.getProjectTriggers().forEach(function(t) { if (t.getHandlerFunction() === 'actualizarTasaBCV') ScriptApp.deleteTrigger(t); });
+  ScriptApp.newTrigger('actualizarTasaBCV').timeBased().everyHours(2).create();
+  actualizarTasaBCV();
+  return 'Listo: la tasa BCV se actualiza sola cada 2 horas.';
 }

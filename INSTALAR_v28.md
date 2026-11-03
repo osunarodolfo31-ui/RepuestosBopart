@@ -1,4 +1,4 @@
-# Instalar v28.6 (build 2026-11-02.6)
+# Instalar v28.8 (build 2026-11-02.8)
 
 1. Apps Script: abre el proyecto de la hoja, pega Code.gs completo, Guardar, Implementar > Administrar
    implementaciones > lapiz > Version: Nueva version > Implementar. La URL no cambia.
@@ -17,3 +17,9 @@
 Volver atras: Apps Script > Administrar implementaciones > version anterior (v28 o v27.3). GitHub > History de cada
 archivo > commit anterior. CANALES y la fila OB International pueden quedarse: v27.3 no las lee (en CUENTAS,
 vuelve a poner Zelle y Binance en SI si los necesitas).
+
+## Tasa BCV automatica (una sola vez)
+1. Despues de desplegar, en el editor de Apps Script elige la funcion instalarTasaBCVAutomatica y pulsa Ejecutar.
+2. Google pedira permiso para "conectarse a un servicio externo" y "ejecutarse cuando no estas presente": aceptalo
+   (es para leer la tasa de DolarAPI / BCV). Sin ese permiso, el boton "Traer del BCV" tambien falla.
+3. Queda un activador cada 2 horas (Activadores, icono del reloj). Para quitarlo, se borra ahi.

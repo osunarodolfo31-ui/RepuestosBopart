@@ -1,7 +1,9 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_documentos.html
-  VERSION: v1.0 (2026-11-02) | build 2026-11-02.6 | requiere Apps Script v28.6 y boparts_pdf.js
+  VERSION: v1.1 (2026-11-02) | build 2026-11-02.8 | requiere Apps Script v28.6 y boparts_pdf.js v1.1
+  v1.1: la nota reimpresa sale con el modelo profesional nuevo (igual a la de Ventas).
+  VERSION anterior: v1.0 (2026-11-02) | build 2026-11-02.6
   v1.0: pantalla nueva. Busca notas de entrega por numero, cliente, cedula/RIF, producto o numero de factura (con
   algo escrito busca en todo el historico; sin busqueda, el periodo). Cada nota muestra total, pagos, productos,
   si tiene factura y devoluciones. Reimprime la NOTA y la FACTURA desde el servidor (aunque el telefono no la haya
@@ -373,12 +375,12 @@ select option{background:#1E1E1E;color:var(--ink)}
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
-<script src="boparts_pdf.js?v=2026-11-02.6"></script>
-<script src="boparts_sesion.js?v=2026-11-02.6"></script>
+<script src="boparts_pdf.js?v=2026-11-02.8"></script>
+<script src="boparts_sesion.js?v=2026-11-02.8"></script>
 <script>
 var SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
 var SCRIPT_URL_SESION = SCRIPT_URL;
-var APP_VERSION = 'v1.0', VER_SCRIPT = '?';
+var APP_VERSION = 'v1.1', VER_SCRIPT = '?';
 var periodo = '30', DOCS = [], LOGO = '', tBusca = null, pedido = 0;
 cargarLogoPDF(function(d) { LOGO = d; });
 

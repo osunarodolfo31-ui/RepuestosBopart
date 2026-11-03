@@ -1,7 +1,9 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_gerencia.html
-  VERSION: v3.4 (2026-11-01) | build 2026-11-02.6 | requiere Apps Script v28
+  VERSION: v3.5 (2026-11-02) | build 2026-11-02.8 | requiere Apps Script v28.7
+  v3.5: boton "Traer del BCV" junto a la tasa BCV (la trae el script; ademas se actualiza sola cada 2 horas).
+  VERSION anterior: v3.4 (2026-11-01) | build 2026-11-02.7 | requiere Apps Script v28
   v3.4: Cuentas por pagar y Liquidacion de aliados se mudan a la pantalla Dinero (boparts_dinero.html), junto al
   flujo de caja: pagar es una salida de una cuenta. Aqui queda un enlace. Nada mas cambia.
   VERSION anterior: v3.3 (2026-10-19) | build 2026-10-31.1 | requiere Apps Script v27.2
@@ -359,6 +361,7 @@ select option{background:#1E1E1E;color:var(--ink)}
   <div class="rango">
     <input type="number" id="bcvIn" step="0.01" placeholder="0.00" style="flex:1">
     <button class="tab on" onclick="guardarBCV()">Fijar</button>
+    <button class="tab" onclick="traerBCV()" id="btnBcvAuto">Traer del BCV</button>
   </div>
   <div class="aviso" id="bcvInfo"></div>
 
@@ -512,7 +515,7 @@ select option{background:#1E1E1E;color:var(--ink)}
   </div>
 </div>
 
-<script src="boparts_sesion.js?v=2026-11-02.6"></script>
+<script src="boparts_sesion.js?v=2026-11-02.8"></script>
 <script>
 
 
@@ -525,7 +528,7 @@ function sellarVersion(d) {
   if (t) t.textContent = 'app ' + APP_VERSION + ' \u00b7 script ' + VER_SCRIPT;
   return d;
 }
-var APP_VERSION = 'v3.4';
+var APP_VERSION = 'v3.5';
 var TASA = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
 var periodo = 'hoy', DATA = null;
 
@@ -691,6 +694,20 @@ function guardarBCV() {
       cargarTasa();
     })
     .catch(function(e) { toast('No se pudo fijar la tasa BCV: ' + e.message, 'err'); });
+}
+
+// v3.5 — trae la tasa oficial del BCV por el script (DolarAPI o la pagina del BCV). Tambien se actualiza sola.
+function traerBCV() {
+  var b = document.getElementById('btnBcvAuto'); b.disabled = true; b.textContent = 'Trayendo...';
+  fetch(SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body:JSON.stringify({tipo:'bcv_auto'})})
+    .then(leerJSON)
+    .then(function(d) {
+      b.disabled = false; b.textContent = 'Traer del BCV';
+      if (!d || !d.ok) throw new Error(d && d.error ? d.error : 'no se pudo');
+      toast(d.sinCambio ? 'La tasa BCV sigue en ' + d.tasa + ' (' + d.fuente + ')' : 'Tasa BCV: ' + d.tasa + ' (' + d.fuente + ')', 'ok');
+      cargarTasa();
+    })
+    .catch(function(e) { b.disabled = false; b.textContent = 'Traer del BCV'; if (e && e.message !== 'SESION') toast(e.message, 'err'); });
 }
 
 function guardarTasa() {

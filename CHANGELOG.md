@@ -1,5 +1,22 @@
 # CHANGELOG — Repuesto BoParts
 
+## Apps Script v28.7 + gerencia v3.5 — build 2026-11-02.8 — tasa BCV automatica
+
+- actualizarTasaBCV(): DolarAPI (https://ve.dolarapi.com/v1/dolares/oficial) y, si falla, la pagina del BCV.
+  Guarda en CONFIG B10/B11 y en TASAS ("BCV automatica"). Rechaza un salto de mas de 25%.
+- instalarTasaBCVAutomatica(): se corre UNA vez desde el editor; deja un disparador cada 2 horas.
+- Gerencia: boton "Traer del BCV". La tasa de trabajo no cambia: la sigue fijando un socio, y se mantiene la
+  ultima fijada hasta que alguien la cambie (nunca queda en blanco).
+
+## boparts_pdf.js v1.1 + ventas v15.3 + documentos v1.1 — build 2026-11-02.7 — nota de entrega profesional
+
+Un solo modelo (pdfDocumento) para la nota al vender, la cotizacion y la reimpresion: emisor completo, numero,
+fecha y hora, vendedor, condicion; recuadros de cliente y de operacion (tasa del dia, moneda); renglones con #,
+codigo, cantidad, precio unitario y total en Bs y referencia en USD; forma de pago y saldo a credito; total
+destacado y equivalente en USD; condiciones (revision al recibir, cambios y devoluciones 5 dias); firmas de
+entregado y recibido conforme; pie con "sin valor fiscal" y pagina N de M en cada pagina. La cotizacion conserva
+su moneda (Bs o USD) y su validez de 24 horas. Apps Script: documento devuelve creditoUSD (reimpresion del saldo).
+
 ## Apps Script v28.6 + documentos v1.0 + boparts_pdf.js — build 2026-11-02.6 — buscar y reimprimir
 
 - boparts_documentos.html (nueva, grupo Clientes del menu, tambien para el vendedor): busca notas por numero,

@@ -1,5 +1,5 @@
 /* =============================================================================
-   boparts_pdf.js — DOCUMENTOS EN PDF COMPARTIDOS (v1.0, 2026-11-02)
+   boparts_pdf.js — DOCUMENTOS EN PDF COMPARTIDOS (v1.1, 2026-11-02: nota de entrega y cotizacion profesionales)
    =============================================================================
    Una sola copia de los datos del emisor y de los dibujos de la factura digital y de la nota de entrega.
    Lo usan boparts_ventas.html (al vender) y boparts_documentos.html (al reimprimir), asi la reimpresion sale
@@ -166,99 +166,201 @@ function pdfFactura(f, opts) {
 }
 
 
-// NOTA DE ENTREGA (reimpresion). d = respuesta de action=documento. Misma presentacion que la de Ventas.
-function pdfNota(d, opts) {
+// ============================================================================================
+// NOTA DE ENTREGA y COTIZACION (v1.1) — un solo modelo para vender, cotizar y reimprimir.
+// d = {tipo:'nota'|'cot', nota, fecha:'yyyy-mm-dd', hora, vendedor, credito, creditoUSD, cliente:{nombre,rif,tel,dir},
+//      lineas:[{codigo, producto, cantidad, precio(USD), tasa, subBs}], totalUSD, totalBS, tasa, pagos:[...],
+//      moneda:'BS'|'USD' (solo cotizacion)}
+// opts = {logo, reimpresion}
+// ============================================================================================
+function pdfDocumento(d, opts) {
   opts = opts || {};
   var E = BOPARTS_EMPRESA;
-  function fmtB(n) { return 'Bs ' + Math.round(Number(n) || 0).toLocaleString('es-VE'); }
-  function fmtU(n) { return '$' + (Math.round((Number(n) || 0) * 100) / 100).toFixed(2); }
+  var esCot = d.tipo === 'cot';
+  var enUSD = esCot && d.moneda === 'USD';
+  function fB(n) { return (Math.round((Number(n) || 0) * 100) / 100).toLocaleString('es-VE', {minimumFractionDigits:2, maximumFractionDigits:2}); }
+  function fU(n) { return '$' + (Math.round((Number(n) || 0) * 100) / 100).toFixed(2); }
   return new Promise(function(resolve, reject) {
     try {
       var JS = window.jspdf && window.jspdf.jsPDF;
       if (!JS) throw new Error('Libreria PDF no cargo (sin internet?)');
-      var num = 'NE-' + ('000' + d.nota).slice(-4);
       var doc = new JS({unit:'mm', format:'a4'});
-      var W = 210, M = 14, y = 12;
-      var amarillo = [245,168,0], negro = [17,17,17], gris = [120,120,120];
-      var p = String(d.fecha || '').split('-'), fecha = p.length === 3 ? p[2] + '/' + p[1] + '/' + p[0] : d.fecha;
-
-      doc.setFillColor(negro[0],negro[1],negro[2]); doc.roundedRect(M, y, W - 2*M, 30, 2, 2, 'F');
-      var tx = M + 6;
-      if (opts.logo) { try { doc.addImage(opts.logo, 'PNG', M + 4, y + 4, 22, 22); tx = M + 30; } catch (e) {} }
-      doc.setTextColor(255,255,255); doc.setFont('helvetica','bold'); doc.setFontSize(15); doc.text(E.nombre, tx, y + 10);
-      doc.setTextColor(amarillo[0],amarillo[1],amarillo[2]); doc.setFontSize(9); doc.text(E.rif, tx, y + 15);
-      doc.setTextColor(200,200,200); doc.setFont('helvetica','normal'); doc.setFontSize(7);
-      doc.text(E.dir, tx, y + 20); doc.text(E.contacto, tx, y + 24);
-      doc.setFillColor(amarillo[0],amarillo[1],amarillo[2]); doc.roundedRect(W - M - 52, y + 6, 46, 18, 2, 2, 'F');
-      doc.setTextColor(negro[0],negro[1],negro[2]); doc.setFont('helvetica','bold'); doc.setFontSize(10);
-      doc.text('NOTA DE ENTREGA', W - M - 29, y + 13, {align:'center'});
-      doc.setFontSize(11); doc.text('N ' + num, W - M - 29, y + 20, {align:'center'});
-      y += 33;
-
-      doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(gris[0],gris[1],gris[2]);
-      doc.text('FECHA', M, y); doc.text('CONDICION', M + 45, y); doc.text('VENDEDOR', M + 95, y);
-      doc.setFont('helvetica','bold'); doc.setTextColor(negro[0],negro[1],negro[2]); doc.setFontSize(9);
-      doc.text(fecha + (d.hora ? '  ' + d.hora : ''), M, y + 5); doc.text(d.credito ? 'CREDITO' : 'CONTADO', M + 45, y + 5);
-      doc.text(String(d.vendedor || '').slice(0, 30), M + 95, y + 5);
-      y += 9; doc.setDrawColor(230,230,230); doc.line(M, y, W - M, y); y += 4;
-
+      var W = 210, H = 297, M = 14, y = 14;
+      var negro = [24,24,24], gris = [105,105,105], claro = [244,244,244], linea = [220,220,220], acento = [245,168,0];
+      var num = (esCot ? 'COT-' : 'NE-') + ('000' + d.nota).slice(-4);
+      var p = String(d.fecha || '').split('-'), fecha = p.length === 3 ? p[2] + '/' + p[1] + '/' + p[0] : (d.fecha || '');
       var c = d.cliente || {};
-      doc.setFillColor(amarillo[0],amarillo[1],amarillo[2]); doc.rect(M, y, W - 2*M, 6, 'F');
-      doc.setFontSize(8); doc.setTextColor(negro[0],negro[1],negro[2]); doc.text('INFORMACION DEL CLIENTE', M + 3, y + 4.2);
-      y += 6;
-      doc.setFillColor(249,249,249); doc.rect(M, y, W - 2*M, 18, 'F');
-      doc.setFontSize(7); doc.setFont('helvetica','normal'); doc.setTextColor(gris[0],gris[1],gris[2]);
-      doc.text('NOMBRE / RAZON SOCIAL', M + 3, y + 4);
-      doc.setFontSize(11); doc.setFont('helvetica','bold'); doc.setTextColor(negro[0],negro[1],negro[2]);
-      doc.text(String(c.nombre || '').toUpperCase().slice(0, 60), M + 3, y + 9);
-      doc.setFontSize(7); doc.setFont('helvetica','normal'); doc.setTextColor(gris[0],gris[1],gris[2]);
-      doc.text(('RIF: ' + (c.rif || '-') + (c.tel ? '   TEL: ' + c.tel : '') + (c.dir ? '   DIR: ' + c.dir : '')).slice(0, 120), M + 3, y + 14);
-      y += 22;
 
-      var body = [], totalBs = 0, totalUsd = 0;
-      (d.lineas || []).forEach(function(l) {
-        var subUsd = l.precio * l.cantidad;
-        var subBs = l.subBs || Math.round(subUsd * (l.tasa || 0));
-        totalBs += subBs; totalUsd += subUsd;
-        var puBs = l.cantidad ? subBs / l.cantidad : 0;
-        body.push([l.producto, String(l.cantidad), fmtB(puBs), fmtB(subBs)]);
+      // ---------- Encabezado: emisor ----------
+      var tx = M;
+      if (opts.logo) { try { doc.addImage(opts.logo, 'PNG', M, y - 2, 24, 24); tx = M + 28; } catch (e) {} }
+      doc.setTextColor(negro[0],negro[1],negro[2]); doc.setFont('helvetica','bold'); doc.setFontSize(13);
+      doc.text(E.nombre, tx, y + 3);
+      doc.setFontSize(8.5); doc.text(E.rif, tx, y + 8);
+      doc.setFont('helvetica','normal'); doc.setFontSize(7.2); doc.setTextColor(gris[0],gris[1],gris[2]);
+      var dir = doc.splitTextToSize(E.dir, (W - M - 68) - tx); doc.text(dir, tx, y + 12.5);
+      doc.text(E.contacto, tx, y + 12.5 + dir.length * 3.2);
+
+      // ---------- Encabezado: documento ----------
+      var bx = W - M - 66, bw = 66;
+      doc.setFont('helvetica','bold'); doc.setFontSize(15); doc.setTextColor(negro[0],negro[1],negro[2]);
+      doc.text(esCot ? 'COTIZACION' : 'NOTA DE ENTREGA', W - M, y + 3, {align:'right'});
+      doc.setFontSize(11); doc.setTextColor(acento[0] - 40, acento[1] - 50, 0);
+      doc.text('N° ' + num, W - M, y + 9, {align:'right'});
+      if (opts.reimpresion) {
+        doc.setFontSize(6.5); doc.setTextColor(gris[0],gris[1],gris[2]); doc.text('REIMPRESION', W - M, y + 12.5, {align:'right'});
+      }
+      var meta = [['Fecha', fecha + (d.hora ? '  ' + d.hora : '')], ['Vendedor', d.vendedor || '-']];
+      if (esCot) meta.push(['Validez', '24 horas'], ['Moneda', enUSD ? 'Dolares (USD)' : 'Bolivares (Bs)']);
+      else meta.push(['Condicion', d.credito ? 'CREDITO' : 'CONTADO']);
+      var my = y + 16;
+      meta.forEach(function(m) {
+        doc.setFont('helvetica','normal'); doc.setFontSize(7.2); doc.setTextColor(gris[0],gris[1],gris[2]); doc.text(m[0], bx, my);
+        doc.setFont('helvetica','bold'); doc.setTextColor(negro[0],negro[1],negro[2]); doc.text(String(m[1]).slice(0, 34), W - M, my, {align:'right'});
+        my += 3.8;
       });
-      if (d.totalBS && Math.abs(d.totalBS - totalBs) > 1) totalBs = d.totalBS;     // descuento a nivel de venta
-      if (d.totalUSD) totalUsd = d.totalUSD;
-      doc.autoTable({
-        startY:y, margin:{left:M, right:M},
-        head:[['DESCRIPCION','CANT.','PRECIO Bs','TOTAL Bs']], body:body,
-        styles:{fontSize:8, cellPadding:2, textColor:[17,17,17]},
-        headStyles:{fillColor:negro, textColor:[255,255,255], fontStyle:'bold'},
-        alternateRowStyles:{fillColor:[246,246,246]},
-        columnStyles:{1:{halign:'center', cellWidth:16}, 2:{cellWidth:32, halign:'right'}, 3:{cellWidth:34, halign:'right', fontStyle:'bold'}}
-      });
-      y = doc.lastAutoTable.finalY + 5;
-      doc.setFillColor(amarillo[0],amarillo[1],amarillo[2]); doc.roundedRect(W - M - 62, y, 62, 16, 1.5, 1.5, 'F');
-      doc.setTextColor(negro[0],negro[1],negro[2]); doc.setFontSize(7); doc.setFont('helvetica','bold'); doc.text('TOTAL', W - M - 58, y + 5);
-      doc.setFontSize(14); doc.text(fmtB(totalBs), W - M - 4, y + 11, {align:'right'});
-      doc.setFontSize(7); doc.setFont('helvetica','normal'); doc.text('Ref. ' + fmtU(totalUsd), W - M - 58, y + 13);
-      y += 22;
-      if ((d.pagos || []).length) {
-        doc.setFontSize(8); doc.setFont('helvetica','bold'); doc.text('FORMA DE PAGO', M, y); y += 4.5;
-        doc.setFont('helvetica','normal'); doc.setFontSize(7.5); doc.setTextColor(gris[0],gris[1],gris[2]);
-        d.pagos.forEach(function(pg) {
-          if (!pg.monto) return;
-          doc.text('- ' + pg.metodo + (pg.banco ? ' ' + pg.banco : '') + ': ' + (pg.moneda === 'USD' || /credito/i.test(pg.metodo) ? fmtU(pg.monto) : fmtB(pg.monto)), M + 2, y); y += 4;
+      y = Math.max(y + 16 + dir.length * 3.2, my) + 2;
+      doc.setFillColor(acento[0],acento[1],acento[2]); doc.rect(M, y, W - 2 * M, 1.1, 'F');
+      y += 5;
+
+      // ---------- Cliente y operacion ----------
+      var colW = (W - 2 * M - 6) / 2;
+      function caja(x, titulo, filas) {
+        doc.setFillColor(claro[0],claro[1],claro[2]); doc.roundedRect(x, y, colW, 25, 1.5, 1.5, 'F');
+        doc.setFont('helvetica','bold'); doc.setFontSize(7.5); doc.setTextColor(negro[0],negro[1],negro[2]); doc.text(titulo, x + 3, y + 4.5);
+        var yy = y + 9.5;
+        filas.forEach(function(f) {
+          doc.setFont('helvetica','normal'); doc.setFontSize(7); doc.setTextColor(gris[0],gris[1],gris[2]); doc.text(f[0], x + 3, yy);
+          doc.setFont('helvetica', f[2] ? 'bold' : 'normal'); doc.setFontSize(f[2] ? 8.5 : 7.5); doc.setTextColor(negro[0],negro[1],negro[2]);
+          doc.text(doc.splitTextToSize(String(f[1] || '-'), colW - 30)[0], x + 26, yy);
+          yy += 4;
         });
       }
-      y += 8; doc.setDrawColor(150,150,150); doc.setLineDashPattern([1,1], 0);
-      doc.line(M, y, M + 75, y); doc.line(W - M - 75, y, W - M, y); doc.setLineDashPattern([], 0);
-      doc.setFontSize(7); doc.setTextColor(gris[0],gris[1],gris[2]);
-      doc.text('Firma y sello del receptor', M, y + 4); doc.text('Firma del representante BOSC SUPPLY', W - M, y + 4, {align:'right'});
+      caja(M, 'CLIENTE', [['Nombre', String(c.nombre || '').toUpperCase(), true], ['C.I. / RIF', c.rif], ['Telefono', c.tel], ['Direccion', c.dir]]);
+      var tasa = Number(d.tasa) || 0;
+      var info = esCot
+        ? [['Tasa del dia', tasa ? 'Bs ' + fB(tasa) + ' por USD' : '-'], ['Moneda', enUSD ? 'Dolares (USD)' : 'Bolivares (Bs)'], ['Validez', '24 horas o hasta agotar existencia']]
+        : [['Tasa del dia', tasa ? 'Bs ' + fB(tasa) + ' por USD' : '-'], ['Moneda', 'Bolivares (referencia en USD)'], ['Condicion', d.credito ? 'Credito' : 'Contado']];
+      caja(M + colW + 6, 'OPERACION', info);
+      y += 30;
 
-      var fy = 285;
-      doc.setFillColor(negro[0],negro[1],negro[2]); doc.rect(M, fy - 6, W - 2*M, 8, 'F');
-      doc.setTextColor(200,200,200); doc.setFontSize(7); doc.text(E.nombre + ' | ' + E.rif + ' | ' + E.tienda, W/2, fy - 1, {align:'center'});
-      doc.setTextColor(150,150,150); doc.setFontSize(6.5);
-      doc.text('Este documento no tiene valor fiscal. Solo sirve como comprobante de entrega.' + (opts.reimpresion ? '  REIMPRESION.' : ''), W/2, fy + 6, {align:'center'});
+      // ---------- Renglones ----------
+      var totalBs = 0, totalUsd = 0, unidades = 0;
+      var body = (d.lineas || []).map(function(l, i) {
+        var subUsd = (Number(l.precio) || 0) * (Number(l.cantidad) || 0);
+        var t = Number(l.tasa) || tasa;
+        var subBs = Number(l.subBs) || Math.round(subUsd * t * 100) / 100;
+        totalBs += subBs; totalUsd += subUsd; unidades += Number(l.cantidad) || 0;
+        var puBs = l.cantidad ? subBs / l.cantidad : 0;
+        return enUSD
+          ? [String(i + 1), l.codigo || '', l.producto, String(l.cantidad), fU(l.precio), fU(subUsd)]
+          : [String(i + 1), l.codigo || '', l.producto, String(l.cantidad), fB(puBs), fB(subBs), fU(subUsd)];
+      });
+      if (!esCot && d.totalBS && Math.abs(d.totalBS - totalBs) > 1) totalBs = d.totalBS;
+      if (!esCot && d.totalUSD) totalUsd = d.totalUSD;
+      var head = enUSD ? [['#', 'CODIGO', 'DESCRIPCION', 'CANT.', 'P. UNIT. $', 'TOTAL $']]
+                       : [['#', 'CODIGO', 'DESCRIPCION', 'CANT.', 'P. UNIT. Bs', 'TOTAL Bs', 'REF. $']];
+      var cs = enUSD ? {0:{cellWidth:8, halign:'center'}, 1:{cellWidth:27}, 3:{cellWidth:14, halign:'center'}, 4:{cellWidth:24, halign:'right'}, 5:{cellWidth:26, halign:'right', fontStyle:'bold'}}
+                     : {0:{cellWidth:8, halign:'center'}, 1:{cellWidth:27}, 3:{cellWidth:13, halign:'center'}, 4:{cellWidth:24, halign:'right'}, 5:{cellWidth:26, halign:'right', fontStyle:'bold'}, 6:{cellWidth:18, halign:'right', textColor:[105,105,105]}};
+      var paginas = 0;
+      doc.autoTable({
+        startY:y, margin:{left:M, right:M, bottom:22}, head:head, body:body,
+        styles:{fontSize:7.6, cellPadding:{top:1.8, bottom:1.8, left:1.6, right:1.6}, textColor:negro, lineColor:linea, lineWidth:0.1},
+        headStyles:{fillColor:negro, textColor:[255,255,255], fontStyle:'bold', fontSize:7.2},
+        alternateRowStyles:{fillColor:[250,250,250]}, columnStyles:cs,
+        didDrawPage:function() { paginas++; }
+      });
+      y = doc.lastAutoTable.finalY + 5;
+      if (y > H - 95) { doc.addPage(); y = 20; }
+
+      // ---------- Pagos (izq) y totales (der) ----------
+      var yIni = y;
+      if (!esCot) {
+        doc.setFont('helvetica','bold'); doc.setFontSize(7.5); doc.setTextColor(negro[0],negro[1],negro[2]); doc.text('FORMA DE PAGO', M, y); y += 4.5;
+        doc.setFont('helvetica','normal'); doc.setFontSize(7.5);
+        var hay = false;
+        (d.pagos || []).forEach(function(pg) {
+          if (!pg.monto) return; hay = true;
+          var usdish = pg.moneda === 'USD' || /credito/i.test(pg.metodo);
+          doc.setTextColor(gris[0],gris[1],gris[2]); doc.text(String(pg.label || (pg.metodo + (pg.banco ? ' ' + pg.banco : ''))).slice(0, 40), M, y);
+          doc.setTextColor(negro[0],negro[1],negro[2]); doc.text(usdish ? fU(pg.monto) : 'Bs ' + fB(pg.monto), M + 82, y, {align:'right'});
+          y += 4;
+        });
+        if (!hay) { doc.setTextColor(gris[0],gris[1],gris[2]); doc.text('-', M, y); y += 4; }
+        if (d.credito && d.creditoUSD) {
+          doc.setFont('helvetica','bold'); doc.setTextColor(negro[0],negro[1],negro[2]);
+          doc.text('Saldo a credito: ' + fU(d.creditoUSD), M, y + 1); y += 5;
+        }
+      }
+      var yPag = y; y = yIni;
+      var tx0 = W - M - 76;
+      function fila(lbl, val) {
+        doc.setFont('helvetica','normal'); doc.setFontSize(7.8); doc.setTextColor(gris[0],gris[1],gris[2]); doc.text(lbl, tx0, y);
+        doc.setTextColor(negro[0],negro[1],negro[2]); doc.text(val, W - M, y, {align:'right'}); y += 4.6;
+      }
+      fila('Renglones / unidades', (d.lineas || []).length + ' / ' + unidades);
+      fila('Subtotal', enUSD ? fU(totalUsd) : 'Bs ' + fB(totalBs));
+      y += 1;
+      doc.setFillColor(negro[0],negro[1],negro[2]); doc.roundedRect(tx0 - 3, y - 4, 76 + 3, 11, 1.5, 1.5, 'F');
+      doc.setFont('helvetica','bold'); doc.setFontSize(8.5); doc.setTextColor(255,255,255); doc.text('TOTAL', tx0, y + 2.8);
+      doc.setFontSize(13); doc.setTextColor(acento[0],acento[1],acento[2]);
+      doc.text(enUSD ? fU(totalUsd) : 'Bs ' + fB(totalBs), W - M - 2, y + 3.2, {align:'right'});
+      y += 11;
+      if (!enUSD) { doc.setFont('helvetica','normal'); doc.setFontSize(7.2); doc.setTextColor(gris[0],gris[1],gris[2]);
+        doc.text('Equivalente: ' + fU(totalUsd) + (tasa ? '  ·  tasa Bs ' + fB(tasa) : ''), W - M, y, {align:'right'}); y += 4; }
+      y = Math.max(y, yPag) + 6;
+
+      // ---------- Condiciones ----------
+      var cond = esCot
+        ? ['Precios sujetos a cambio sin previo aviso. Cotizacion valida por 24 horas o hasta agotar existencia.',
+           'Esta cotizacion no constituye compromiso de venta ni reserva de mercancia.']
+        : ['Revise su mercancia al recibirla: una vez firmada esta nota se entiende recibida conforme.',
+           'Cambios y devoluciones dentro de los 5 dias siguientes, presentando esta nota y el producto sin uso y en su empaque original.',
+           'Montos en bolivares a la tasa del dia de la venta; la referencia en dolares es informativa.'];
+      doc.setDrawColor(linea[0],linea[1],linea[2]); doc.setFillColor(252,252,252);
+      var lns = [];
+      cond.forEach(function(t) { lns = lns.concat(doc.splitTextToSize('• ' + t, W - 2 * M - 6)); });
+      var hC = 6 + lns.length * 3.3;
+      doc.roundedRect(M, y, W - 2 * M, hC, 1.2, 1.2, 'FD');
+      doc.setFont('helvetica','bold'); doc.setFontSize(7.2); doc.setTextColor(negro[0],negro[1],negro[2]); doc.text('CONDICIONES', M + 3, y + 4);
+      doc.setFont('helvetica','normal'); doc.setFontSize(6.9); doc.setTextColor(gris[0],gris[1],gris[2]); doc.text(lns, M + 3, y + 8);
+      y += hC + 10;
+
+      // ---------- Firmas (solo nota) ----------
+      if (!esCot) {
+        if (y > H - 45) { doc.addPage(); y = 30; }
+        var fw = 78;
+        doc.setDrawColor(150,150,150);
+        doc.line(M, y + 10, M + fw, y + 10); doc.line(W - M - fw, y + 10, W - M, y + 10);
+        doc.setFont('helvetica','bold'); doc.setFontSize(7.2); doc.setTextColor(negro[0],negro[1],negro[2]);
+        doc.text('ENTREGADO POR', M, y + 14); doc.text('RECIBIDO CONFORME', W - M - fw, y + 14);
+        doc.setFont('helvetica','normal'); doc.setFontSize(6.8); doc.setTextColor(gris[0],gris[1],gris[2]);
+        doc.text((d.vendedor || '') + ' · ' + E.nombre, M, y + 18);
+        doc.text('Nombre:                              C.I.:                     Fecha:', W - M - fw, y + 18);
+      }
+
+      // ---------- Pie en todas las paginas ----------
+      var total = doc.internal.getNumberOfPages();
+      for (var pg = 1; pg <= total; pg++) {
+        doc.setPage(pg);
+        doc.setDrawColor(linea[0],linea[1],linea[2]); doc.line(M, H - 16, W - M, H - 16);
+        doc.setFont('helvetica','normal'); doc.setFontSize(6.6); doc.setTextColor(gris[0],gris[1],gris[2]);
+        doc.text(esCot ? 'Documento informativo. No constituye factura ni compromiso de venta.'
+                       : 'Documento sin valor fiscal. Comprobante de entrega de mercancia.', M, H - 12);
+        doc.text(E.tienda, M, H - 8.5);
+        doc.text(num + '  ·  Pagina ' + pg + ' de ' + total, W - M, H - 12, {align:'right'});
+      }
+
       var nombre = num + '_' + String(c.nombre || 'cliente').replace(/[^a-zA-Z0-9]+/g, '_').slice(0, 30) + '.pdf';
-      resolve({blob:doc.output('blob'), nombre:nombre, num:num, totalBs:totalBs, totalUsd:totalUsd});
+      resolve({blob:doc.output('blob'), nombre:nombre, num:num, totalBs:Math.round(totalBs), totalUsd:totalUsd, moneda:enUSD ? 'USD' : 'BS'});
     } catch (e) { reject(e); }
   });
+}
+// Reimpresion desde Documentos (action=documento)
+function pdfNota(d, opts) {
+  var x = {};
+  for (var k in d) x[k] = d[k];
+  x.tipo = 'nota';
+  if (!x.tasa) { var l0 = (d.lineas || [])[0]; x.tasa = l0 && l0.tasa ? l0.tasa : (d.totalUSD ? d.totalBS / d.totalUSD : 0); }
+  return pdfDocumento(x, opts);
 }
