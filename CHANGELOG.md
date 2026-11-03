@@ -1,5 +1,10 @@
 # CHANGELOG — Repuesto BoParts
 
+## build 2026-11-02.9 — Dinero v1.4
+- Montos en Bs con 2 decimales (antes redondeaba a entero: 52.499,87 se veia 52.500).
+- Movimientos con comision muestran el neto que llega (entradas) o el total que sale (salidas).
+- Solo cambia boparts_dinero.html; el resto solo sube el build. Code.gs NO cambia (sigue v28.7).
+
 ## Apps Script v28.7 + gerencia v3.5 — build 2026-11-02.8 — tasa BCV automatica
 
 - actualizarTasaBCV(): DolarAPI (https://ve.dolarapi.com/v1/dolares/oficial) y, si falla, la pagina del BCV.

@@ -1,7 +1,10 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_dinero.html
-  VERSION: v1.3 (2026-11-02) | build 2026-11-02.8 | requiere Apps Script v28.3
+  VERSION: v1.4 (2026-11-02) | build 2026-11-02.9 | requiere Apps Script v28.3
+  v1.4: Montos en Bs con 2 decimales (antes se redondeaban a entero y el saldo no cuadraba a la vista con el banco).
+  Los movimientos con comision muestran el neto que llega (entradas) o el total que sale (salidas).
+  VERSION anterior: v1.3 (2026-11-02) | build 2026-11-02.9 | requiere Apps Script v28.3
   v1.3: Mover dinero pregunta POR DONDE sale el dinero de la cuenta de origen (Pago Movil, Transferencia...) y
   muestra la comision que cobra el banco (tabla CANALES, con minimo). La comision sale de la cuenta ademas del
   monto y queda guardada en el movimiento.
@@ -461,11 +464,11 @@ select option{background:#1E1E1E;color:var(--ink)}
 </div>
 
 
-<script src="boparts_sesion.js?v=2026-11-02.8"></script>
+<script src="boparts_sesion.js?v=2026-11-02.9"></script>
 <script>
 var SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
 var SCRIPT_URL_SESION = SCRIPT_URL;
-var APP_VERSION = 'v1.3';
+var APP_VERSION = 'v1.4';
 var VER_SCRIPT = '?';
 var periodo = 'mes', DIN = null, CXP = [], LIQ = [], liqTasa = 0, SALIDAS = [], CUENTAS = [];
 var VER_PAGADAS = {}, FACT_ABIERTA = '', PAGO_PEND = {}, ID_MOV = '', ARQ = null, FILTRO_CTA = '';
@@ -492,7 +495,11 @@ function num(v) {
 function p2(n) { return (n < 10 ? '0' : '') + n; }
 function iso(d) { return d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate()); }
 function usd(n) { return (n < 0 ? '-$' : '$') + Math.abs(Math.round((n || 0) * 100) / 100).toFixed(2); }
-function bs(n) { return (n < 0 ? '-' : '') + 'Bs ' + Math.round(Math.abs(n || 0)).toLocaleString('es-VE'); }
+// v1.4: Bs con 2 decimales y formato venezolano fijo (1.234,56), para cuadrar centimo a centimo con el banco.
+function bs(n) {
+  var a = (Math.round(Math.abs(n || 0) * 100) / 100).toFixed(2).split('.');
+  return (n < 0 ? '-' : '') + 'Bs ' + a[0].replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ',' + a[1];
+}
 function enMon(n, mon) { return mon === 'BS' ? bs(n) : usd(n); }
 function fechaES(f) { var p = String(f).split('-'); return p.length === 3 ? p[2] + '/' + p[1] + '/' + p[0] : f; }
 function escHtml(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
@@ -695,7 +702,9 @@ function pintarMovs() {
   lista.slice(0, 150).forEach(function(m) {
     h += '<div class="grow"><div class="gizq"><div class="gdesc">' + escHtml(m.desc) + '</div><div class="gmeta">' + fechaES(m.fecha) + ' · ' +
       escHtml(m.cuenta) + ' · ' + escHtml(m.metodo) + (m.ref ? ' · ' + escHtml(m.ref) : '') + (m.estimado ? ' · <span style="color:var(--brand)">monto estimado</span>' : '') +
-      (m.comision ? ' · comision ' + enMon(m.comision, m.moneda) : '') + '</div></div>' +
+      (m.comision ? ' · comision ' + enMon(m.comision, m.moneda) +
+        (m.signo > 0 ? ' · <b>neto ' + enMon(m.monto - m.comision, m.moneda) + '</b>'
+                     : ' · <b>sale en total ' + enMon(m.monto + m.comision, m.moneda) + '</b>') : '') + '</div></div>' +
       '<div class="gder ' + (m.signo > 0 ? 'pos' : 'neg') + '">' + (m.signo > 0 ? '+' : '-') + enMon(m.monto, m.moneda) + '</div></div>';
   });
   if (lista.length > 150) h += '<div class="aviso">Se muestran los 150 mas recientes. Acorta el periodo para ver el resto.</div>';
