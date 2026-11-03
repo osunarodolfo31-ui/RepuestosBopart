@@ -1,6 +1,31 @@
 /**
  * Repuesto BoParts — Code.gs
- * VERSION: v28.4 (2026-11-02) | LISTA DE PRODUCTOS limpia
+ * VERSION: v28.6 (2026-11-02) | documentos: buscar y reimprimir notas y facturas
+ *
+ * v28.6 — action=documentos (q, desde, hasta): lista de notas de entrega con cliente, total, pagos, productos, si
+ *   tiene factura y cuantas devoluciones. Busca por numero de nota, cliente, cedula/RIF, producto o numero de
+ *   factura. action=documento&nota=N: todo lo necesario para REIMPRIMIR esa nota desde el servidor (renglones con
+ *   su tasa, cliente con telefono y direccion, pagos) y, si tiene, el documento de su factura.
+ *
+ * VERSION anterior: v28.5 (2026-11-02) | factura digital en modo preparacion
+ *   (domicilio fiscal nuevo segun RIF del 13/10/2026: Av Florencio Jimenez Km 7, Local B-1, La Capilla, ZP 3001)
+ *
+ * v28.5 — FACTURA DIGITAL (adecuacion a la Providencia SNAT/2026/00093, vigente el 19/04/2027).
+ *   El numero de control NO lo puede generar la tienda: lo asigna una imprenta digital autorizada. Hasta que
+ *   haya una conectada, el sistema trabaja en MODO PRUEBA: arma el documento completo con todos los campos que
+ *   exige la norma, lo guarda en FACTURAS y el PDF sale con la marca "DOCUMENTO DE PRUEBA - SIN VALOR FISCAL",
+ *   numero PRUEBA-000001 y control "por asignar". No toca la numeracion fiscal de CONFIG ni marca la venta como
+ *   facturada (la venta se puede anular igual).
+ *   - tipo=factura_digital {idVenta, cliente:{nombre, rif, dir, correo, tel}}: el SERVIDOR arma el documento
+ *     con la venta guardada (renglones de VENTAS_DETALLE, base e IVA de VENTAS, tasa BCV de la venta, pagos),
+ *     no con lo que mande el telefono. Una factura por venta: pedirla otra vez devuelve la misma.
+ *   - Hoja FISCAL (clave/valor): datos del emisor, actividad economica, serie, MODO (PRUEBA | IMPRENTA), si
+ *     la empresa es agente de percepcion de IGTF (BOSC: contribuyente ordinario = NO) y los datos de la imprenta.
+ *   - MODO IMPRENTA llama a imprentaEmitir_(), que hoy dice "no hay imprenta conectada": ahi se conecta la API
+ *     de la imprenta que se contrate. Nada mas del sistema cambia ese dia.
+ *   - El correo del cliente se guarda en CLIENTES (columna M, CORREO).
+ *
+ * VERSION anterior: v28.4 (2026-11-02) | LISTA DE PRODUCTOS limpia
  *
  * v28.4 — (0) asegurarFilas_(): antes de escribir un bloque de filas (detalle de venta, de compra, de apartado,
  *   de devolucion, conciliacion), si la hoja no tiene filas suficientes se agregan. VENTAS_DETALLE tenia 971 filas
@@ -458,12 +483,13 @@ var PERMISOS_GET = {
   tareas:'VENDEDOR',
   producto:'SOCIO',
   ventas:'SOCIO', socios:'SOCIO', cxp:'SOCIO', cliente_stats:'SOCIO', compras:'SOCIO', diag:'SOCIO',
-  liquidacion:'SOCIO', rendimiento:'SOCIO', dinero:'SOCIO'
+  liquidacion:'SOCIO', rendimiento:'SOCIO', dinero:'SOCIO',
+  documentos:'VENDEDOR', documento:'VENDEDOR'
 };
 var PERMISOS_POST = {
   fotos:'VENDEDOR', cliente:'VENDEDOR', demanda:'VENDEDOR', conteo:'VENDEDOR', gasto:'VENDEDOR',
   proveedor:'VENDEDOR', compra:'VENDEDOR', cotizacion:'VENDEDOR', abono:'VENDEDOR', venta:'VENDEDOR',
-  factura_venta:'VENDEDOR', apartado:'VENDEDOR', apartado_abono:'VENDEDOR', apartado_entregar:'VENDEDOR',
+  factura_venta:'VENDEDOR', factura_digital:'VENDEDOR', apartado:'VENDEDOR', apartado_abono:'VENDEDOR', apartado_entregar:'VENDEDOR',
   tarea_marcar:'VENDEDOR', tarea_propia:'VENDEDOR',
   costeo:'SOCIO', cxp_abono:'SOCIO', conteo_revision:'SOCIO', devolucion:'SOCIO', apartado_cerrar:'SOCIO',
   tasa:'SOCIO', socio:'SOCIO', liquidar_aliado:'SOCIO', precio:'SOCIO', tarea_def:'SOCIO',
@@ -697,7 +723,7 @@ function claveDePost_(data) {
 // OJO: esta constante es lo que ven las apps en el menu. Se habia quedado en v21.4 mientras el
 // encabezado ya decia v24, asi que el sello de version — que existe justamente para saber si lo
 // desplegado es lo que crees — estaba mintiendo. Cada version nueva se cambia AQUI tambien.
-var VERSION_SCRIPT = 'v28.4';
+var VERSION_SCRIPT = 'v28.6';
 
 function json_(obj) {
   // La version viaja en cada respuesta: es la forma rapida de saber si lo desplegado es lo que crees
@@ -769,6 +795,13 @@ function rutearGet_(e) {
   }
   if (accion === 'metodos') {
     return json_(metodosYAliados_(ssA, e.parameter.sentido));
+  }
+  // v28.6 — buscar notas/facturas y reimprimirlas desde el servidor
+  if (accion === 'documentos') {
+    return json_(listaDocumentos_(ssA, e.parameter.q, e.parameter.desde, e.parameter.hasta));
+  }
+  if (accion === 'documento') {
+    return json_(documentoNota_(ssA, e.parameter.nota));
   }
   // v28 — flujo de caja: saldos por cuenta, entradas y salidas, comisiones y cuenta con OB
   if (accion === 'dinero') {
@@ -1072,6 +1105,13 @@ function doPost(e) {
       var lockA = LockService.getScriptLock(); lockA.waitLock(15000);
       try { return json_(liquidarAliado_(ss, data)); }
       finally { SpreadsheetApp.flush(); lockA.releaseLock(); }
+    }
+
+    // ---- FACTURA DIGITAL (v28.5): el documento lo arma el servidor con los datos de la venta ----
+    if (data.tipo === 'factura_digital') {
+      var lockFd = LockService.getScriptLock(); lockFd.waitLock(15000);
+      try { return json_(facturaDigital_(ss, data, quien)); }
+      finally { SpreadsheetApp.flush(); lockFd.releaseLock(); }
     }
 
     // ---- FACTURA ASOCIADA A UNA VENTA (v20) ----
@@ -5309,4 +5349,358 @@ function estadoDinero_(ss, desde, hasta) {
   return {ok:true, desde:d1, hasta:d2, tasa:tasaHoy, tasaFecha:cfg.fecha, cuentas:listaRes, flujo:flujo, movimientos:lista,
           sinCuenta:sinC, ob:ob, socios:saldosSocios_(ss), avisos:avisos,
           canales:canales.map(function(c) { return {cuenta:c.cuenta, metodo:c.metodo, sentido:c.sentido, etiqueta:c.etiqueta, fijo:c.fijo, pct:c.pct, moneda:c.moneda}; })};
+}
+
+
+// ============================================================
+// FACTURA DIGITAL (v28.5) — modo preparacion para la Providencia SNAT/2026/00093
+// ============================================================
+// FISCAL: hoja clave/valor. Lo que no este, toma el valor por defecto. Se edita a mano; no hace falta codigo.
+var FISCAL_DEFECTO = [
+  ['RAZON_SOCIAL', 'BOSC SUPPLY, C.A.'],
+  ['RIF', 'J-50828177-2'],
+  // Domicilio del RIF actualizado el 13/10/2026 (comprobante 202603V0000072239671)
+  ['DOMICILIO_FISCAL', 'AV FLORENCIO JIMENEZ KILOMETRO 7 LOCAL NRO B-1 SECTOR LA CAPILLA BARQUISIMETO LARA'],
+  ['ZONA_POSTAL', '3001'],
+  ['TELEFONO', '0424-5575850 / 0414-9536708'],
+  ['CORREO', 'boscsupply@gmail.com'],
+  ['ACTIVIDAD_ECONOMICA', '', 'Codigo de actividad economica del RIF. Confirmar con el contador.'],
+  ['NOMBRE_COMERCIAL', 'Repuesto BoParts'],
+  ['SUCURSAL', '', 'Direccion de la tienda si es distinta del domicilio fiscal'],
+  ['SERIE', 'A'],
+  ['MODO', 'PRUEBA', 'PRUEBA o IMPRENTA. No pasar a IMPRENTA hasta conectar la imprenta digital.'],
+  ['CONTRIBUYENTE', 'ORDINARIO'],
+  ['AGENTE_IGTF', 'NO', 'SI solo si el SENIAT designa a BOSC agente de percepcion del IGTF (contribuyente especial)'],
+  ['ALICUOTA_GENERAL', 16],
+  ['PRUEBA_NUM', 0, 'Lo lleva el sistema'],
+  ['IMPRENTA_RAZON_SOCIAL', ''],
+  ['IMPRENTA_RIF', ''],
+  ['IMPRENTA_PROVIDENCIA', ''],
+  ['IMPRENTA_URL', '']
+];
+function hojaFiscal_(ss) {
+  var sh = ss.getSheetByName('FISCAL');
+  if (!sh) {
+    sh = ss.insertSheet('FISCAL');
+    sh.getRange(1, 1, 1, 3).setValues([['CLAVE', 'VALOR', 'NOTA']]);
+    sh.getRange(2, 1, FISCAL_DEFECTO.length, 3).setValues(FISCAL_DEFECTO.map(function(r) { return [r[0], r[1], r[2] || '']; }));
+    sh.getRange(1, 4).setValue('MODO: PRUEBA hasta que haya una imprenta digital autorizada conectada. El token de la ' +
+      'imprenta NO va aqui: va en Propiedades del script (IMPRENTA_TOKEN).');
+    sh.setFrozenRows(1);
+  }
+  return sh;
+}
+function leerFiscal_(ss) {
+  var sh = hojaFiscal_(ss), out = {};
+  FISCAL_DEFECTO.forEach(function(r) { out[r[0]] = r[1]; });
+  if (sh.getLastRow() >= 2) {
+    sh.getRange(2, 1, sh.getLastRow() - 1, 2).getValues().forEach(function(r) {
+      var k = String(r[0] || '').trim().toUpperCase();
+      if (k) out[k] = (r[1] === null || r[1] === undefined) ? '' : r[1];
+    });
+  }
+  return out;
+}
+function fijarFiscal_(ss, clave, valor) {
+  var sh = hojaFiscal_(ss);
+  var n = sh.getLastRow() - 1;
+  var ks = n > 0 ? sh.getRange(2, 1, n, 1).getValues() : [];
+  for (var i = 0; i < ks.length; i++) {
+    if (String(ks[i][0]).trim().toUpperCase() === clave) { sh.getRange(i + 2, 2).setValue(valor); return; }
+  }
+  sh.appendRow([clave, valor]);
+}
+
+// FACTURAS: A..P como siempre (v20) + Q MODO, R SERIE, S CORREO, T DIRECCION, U DOC_JSON
+var FACT_CAB_EXTRA = ['MODO', 'SERIE', 'CORREO', 'DIRECCION', 'DOC_JSON'];
+function hojaFacturas_(ss) {
+  var fx = hojaAp_(ss, 'FACTURAS', ['NUM_FACTURA','NUM_CONTROL','FECHA','HORA','CLIENTE','CEDULA_RIF',
+    'BASE_USD','IVA_USD','TOTAL_USD','TASA_BCV','TOTAL_BS','FORMA_PAGO','ID_VENTA','VENDEDOR','ANULADA','NOTAS']);
+  if (!String(fx.getRange(1, 17).getValue() || '').trim()) fx.getRange(1, 17, 1, FACT_CAB_EXTRA.length).setValues([FACT_CAB_EXTRA]);
+  return fx;
+}
+function facturaGuardada_(fx, idVenta) {
+  if (fx.getLastRow() < 2) return null;
+  var v = fx.getRange(2, 1, fx.getLastRow() - 1, 21).getValues();
+  for (var i = v.length - 1; i >= 0; i--) {
+    if (String(v[i][12]).trim() === String(idVenta).trim() && String(v[i][14] || '').toUpperCase() !== 'SI' && v[i][20]) {
+      try { return JSON.parse(String(v[i][20])); } catch (e) { return null; }
+    }
+  }
+  return null;
+}
+
+// Un RIF/cedula con forma valida: letra V, E, J, G o P y numeros. Se normaliza a J-12345678-9 / V-12345678.
+function normalizarRif_(t) {
+  var s = String(t || '').toUpperCase().replace(/[\s.]/g, '');
+  var m = /^([VEJGP])-?(\d{5,9})-?(\d)?$/.exec(s);
+  if (!m) return '';
+  return m[1] + '-' + m[2] + (m[3] !== undefined ? '-' + m[3] : '');
+}
+
+function facturaDigital_(ss, d, quien) {
+  var idVenta = String(d.idVenta || '').trim();
+  if (!idVenta) throw rechazo_('Falta la venta');
+  var fx = hojaFacturas_(ss);
+  var previa = facturaGuardada_(fx, idVenta);
+  if (previa) { previa.repetida = true; return {ok:true, tipo:'factura_digital', doc:previa, repetida:true}; }
+
+  var F = leerFiscal_(ss);
+  var modo = String(F.MODO || 'PRUEBA').trim().toUpperCase();
+
+  // ---- La venta, tal como quedo guardada ----
+  var shV = ss.getSheetByName(SH_VENTAS);
+  var v = ventaPorId_(ss, idVenta);
+  if (!v) throw rechazo_('No se encontro la venta ' + idVenta);
+  var rv = shV.getRange(v.fila, 1, 1, Math.max(shV.getLastColumn(), 41)).getValues()[0];
+  var baseUSD = usdCelda_(rv[31]), ivaUSD = usdCelda_(rv[32]), tasaBCV = Number(rv[34]) || Number(leerConfig_(ss).bcv) || 0;
+  if (!(ivaUSD > 0)) throw rechazo_('Esa venta se registro SIN factura (sin IVA). Para facturarla hay que hacer la venta con "Factura" activado.');
+  if (!(tasaBCV > 0)) throw rechazo_('No hay tasa BCV para expresar la factura en bolivares. La carga un socio en Gerencia.');
+
+  // ---- Cliente: lo que manda la pantalla, validado ----
+  var c = d.cliente || {};
+  var rif = normalizarRif_(c.rif);
+  var nombre = String(c.nombre || '').trim();
+  var dir = String(c.dir || '').trim();
+  var correo = String(c.correo || '').trim();
+  if (!nombre) throw rechazo_('Falta el nombre o razon social del cliente');
+  if (!rif) throw rechazo_('La cedula o RIF "' + (c.rif || '') + '" no tiene forma valida (ej. V-12345678 o J-12345678-9)');
+  if (/^[JG]/.test(rif) && !dir) throw rechazo_('Un cliente con RIF ' + rif.charAt(0) + ' necesita su domicilio fiscal en la factura');
+  if (correo && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo)) throw rechazo_('El correo "' + correo + '" no es valido');
+
+  // ---- Renglones: los de la venta original (sin devoluciones ni cambios) ----
+  var det = ss.getSheetByName(SH_DETALLE);
+  var renglones = [], brutoUSD = 0;
+  if (det && det.getLastRow() >= 2) {
+    det.getRange(2, 1, det.getLastRow() - 1, 16).getValues().forEach(function(r) {
+      if (String(r[0]).trim() !== idVenta) return;
+      var canal = String(r[4] || '').toUpperCase();
+      if (canal === 'DEVOLUCION' || canal === 'CAMBIO') return;
+      var cant = Number(r[7]) || 0, pre = Number(r[8]) || 0;
+      if (!(cant > 0)) return;
+      brutoUSD += cant * pre;
+      renglones.push({codigo:String(r[5] || ''), descripcion:String(r[6] || ''), cantidad:cant, precioUSD:pre});
+    });
+  }
+  if (!renglones.length) throw rechazo_('La venta no tiene renglones en VENTAS_DETALLE: no se puede facturar');
+
+  var alic = Number(F.ALICUOTA_GENERAL) || 16;
+  var items = renglones.map(function(x) {
+    var pu = round2_(x.precioUSD * tasaBCV);
+    return {codigo:x.codigo, descripcion:x.descripcion, cantidad:x.cantidad, precioUnitBs:pu, impuesto:'G', alicuota:alic,
+            descuentoBs:0, montoBs:round2_(pu * x.cantidad), precioUnitUSD:x.precioUSD};
+  });
+  var brutoBs = round2_(items.reduce(function(a, x) { return a + x.montoBs; }, 0));
+  // La base imponible es la que quedo en la venta: si hubo descuento, la diferencia sale como DESCUENTO.
+  var baseBs = round2_(baseUSD * tasaBCV);
+  if (!(baseBs > 0) || baseBs > brutoBs + 0.05) baseBs = brutoBs;
+  var descBs = round2_(Math.max(0, brutoBs - baseBs));
+  var ivaBs = round2_(baseBs * alic / 100);
+  var totalBs = round2_(baseBs + ivaBs);
+
+  // ---- Pagos ----
+  var pagos = [], pagadoDivisasBs = 0;
+  for (var k = 0; k < 3; k++) {
+    var met = String(rv[7 + k * 3] || '').trim(), monto = Number(rv[9 + k * 3]) || 0, mon = String(rv[27 + k] || '').toUpperCase();
+    if (!met || !(monto > 0)) continue;
+    var enBs = mon === 'USD' ? round2_(monto * tasaBCV) : monto;
+    if (mon === 'USD' && !/CREDITO/i.test(met)) pagadoDivisasBs += enBs;
+    pagos.push({forma:met + (rv[8 + k * 3] ? ' ' + rv[8 + k * 3] : ''), moneda:mon || 'BS', monto:monto, montoBs:enBs});
+  }
+  var condicion = Number(rv[30]) > 0 ? 'CREDITO' : 'CONTADO';
+  // IGTF: solo lo cobra un agente de percepcion (contribuyente especial designado). BOSC es ordinario: NO.
+  var agenteIgtf = String(F.AGENTE_IGTF || 'NO').toUpperCase() === 'SI';
+  var igtfBase = agenteIgtf ? round2_(Math.min(pagadoDivisasBs, totalBs)) : 0;
+  var igtf = agenteIgtf ? round2_(igtfBase * 0.03) : 0;
+
+  var ahora = new Date();
+  var doc = {
+    version:1, modo:modo, tipo:'FACTURA',
+    emisor:{razonSocial:String(F.RAZON_SOCIAL), rif:String(F.RIF), domicilioFiscal:String(F.DOMICILIO_FISCAL),
+            zonaPostal:String(F.ZONA_POSTAL || ''), telefono:String(F.TELEFONO || ''), correo:String(F.CORREO || ''),
+            actividadEconomica:String(F.ACTIVIDAD_ECONOMICA || ''), nombreComercial:String(F.NOMBRE_COMERCIAL || ''),
+            sucursal:String(F.SUCURSAL || ''), contribuyente:String(F.CONTRIBUYENTE || 'ORDINARIO')},
+    receptor:{rif:rif, razonSocial:nombre.toUpperCase(), domicilioFiscal:dir.toUpperCase(), correo:correo, telefono:String(c.tel || '')},
+    serie:String(F.SERIE || 'A'), numero:'', control:'', fechaEmision:Utilities.formatDate(ahora, TZ_VE, 'dd/MM/yyyy'),
+    horaEmision:Utilities.formatDate(ahora, TZ_VE, 'hh:mm:ss a'), fechaAsignacion:'', horaAsignacion:'', condicion:condicion,
+    moneda:'BS', tasaBCV:tasaBCV, items:items, pagos:pagos,
+    totales:{descuentoBs:descBs, exentoBs:0, baseImponibleBs:baseBs, subtotalBs:baseBs, alicuota:alic, ivaBs:ivaBs, totalBs:totalBs,
+             igtfAplica:agenteIgtf, igtfBaseBs:igtfBase, igtfBs:igtf, totalConIgtfBs:round2_(totalBs + igtf),
+             baseUSD:round2_(baseUSD), ivaUSD:round2_(ivaUSD), totalUSD:round2_(baseUSD + ivaUSD)},
+    venta:{idVenta:idVenta, notaNum:Number(rv[24]) || 0, vendedor:String(rv[2] || '')},
+    imprenta:{razonSocial:String(F.IMPRENTA_RAZON_SOCIAL || ''), rif:String(F.IMPRENTA_RIF || ''), providencia:String(F.IMPRENTA_PROVIDENCIA || '')},
+    leyendas:['Precios pactados en divisas: monto en USD, su equivalente en bolivares y el tipo de cambio BCV (Bs ' + tasaBCV +
+              ' por USD) segun el numeral 12 del articulo 8 de la Providencia SNAT/2026/00093.']
+  };
+  if (agenteIgtf) doc.leyendas.push('Este pago esta sujeto al cobro adicional del 3% del Impuesto a las Grandes Transacciones Financieras ' +
+    '(IGTF) en caso de ser cancelado en divisas. No aplica en pago en Bs.');
+
+  if (modo === 'IMPRENTA') {
+    var r = imprentaEmitir_(doc, F);           // hoy lanza "no hay imprenta conectada": no se escribe nada
+    doc.numero = r.numero; doc.control = r.control; doc.fechaAsignacion = r.fechaAsignacion; doc.horaAsignacion = r.horaAsignacion;
+    if (r.pdfUrl) doc.pdfUrl = r.pdfUrl;
+  } else {
+    var n = (Number(F.PRUEBA_NUM) || 0) + 1;
+    fijarFiscal_(ss, 'PRUEBA_NUM', n);
+    doc.modo = 'PRUEBA';
+    doc.numero = 'PRUEBA-' + ('00000' + n).slice(-6);
+    doc.control = 'POR ASIGNAR';
+    doc.leyendas.unshift('DOCUMENTO DE PRUEBA - SIN VALOR FISCAL. El numero de control lo asigna una imprenta digital autorizada por el SENIAT.');
+  }
+
+  // ---- Constancia ----
+  fx.appendRow([doc.numero, doc.control, fechaVE_(doc.fechaEmision), doc.horaEmision, doc.receptor.razonSocial, rif,
+                round2_(baseUSD), round2_(ivaUSD), round2_(baseUSD + ivaUSD), tasaBCV, totalBs,
+                pagos.map(function(p) { return p.forma; }).join(' + '), idVenta, (quien && quien.nombre) || String(rv[2] || ''),
+                '', doc.modo === 'PRUEBA' ? 'Prueba: sin valor fiscal' : '',
+                doc.modo, doc.serie, correo, dir, JSON.stringify(doc)]);
+  formatoFecha_(fx, fx.getLastRow(), 3);
+  // En modo IMPRENTA la venta queda marcada como facturada (no se anula: necesita nota de credito).
+  if (doc.modo === 'IMPRENTA') { shV.getRange(v.fila, 36).setValue(doc.numero); shV.getRange(v.fila, 37).setValue(doc.control); }
+  try { guardarCorreoCliente_(ss, rif, correo); } catch (eC) {}
+  return {ok:true, tipo:'factura_digital', doc:doc, repetida:false};
+}
+
+// El correo del cliente va a CLIENTES (columna M), buscando por cedula/RIF (solo los numeros).
+function guardarCorreoCliente_(ss, rif, correo) {
+  if (!correo) return;
+  var sh = ss.getSheetByName('CLIENTES');
+  if (!sh || sh.getLastRow() < 2) return;
+  if (!String(sh.getRange(1, 13).getValue() || '').trim()) sh.getRange(1, 13).setValue('CORREO');
+  var dig = soloDigitos_(rif);
+  var ced = sh.getRange(2, 2, sh.getLastRow() - 1, 1).getValues();
+  for (var i = 0; i < ced.length; i++) {
+    if (dig && soloDigitos_(ced[i][0]) === dig) { sh.getRange(i + 2, 13).setValue(correo); return; }
+  }
+}
+
+// AQUI SE CONECTA LA IMPRENTA DIGITAL. Recibe el documento armado y debe devolver
+// {numero, control, fechaAsignacion, horaAsignacion, pdfUrl?}. La URL va en FISCAL (IMPRENTA_URL) y el token en
+// Propiedades del script (IMPRENTA_TOKEN), nunca en la hoja. Cada imprenta tiene su propio formato: se escribe
+// cuando se contrate una.
+function imprentaEmitir_(doc, F) {
+  throw rechazo_('No hay imprenta digital conectada. Mientras tanto, deja MODO = PRUEBA en la hoja FISCAL.');
+}
+
+
+// ============================================================
+// DOCUMENTOS (v28.6) — buscar y reimprimir notas de entrega y facturas
+// ============================================================
+function facturasPorVenta_(ss) {
+  var out = {};
+  var fx = ss.getSheetByName('FACTURAS');
+  if (!fx || fx.getLastRow() < 2) return out;
+  var ancho = Math.max(fx.getLastColumn(), 21);
+  fx.getRange(2, 1, fx.getLastRow() - 1, ancho).getValues().forEach(function(r) {
+    var id = String(r[12] || '').trim();
+    if (!id || String(r[14] || '').toUpperCase() === 'SI') return;
+    out[id] = {numero:String(r[0] || ''), control:String(r[1] || ''), modo:String(r[16] || (r[1] ? 'MANUAL' : '')), json:String(r[20] || '')};
+  });
+  return out;
+}
+function devolucionesPorNota_(ss) {
+  var out = {};
+  var dv = ss.getSheetByName('DEVOLUCIONES');
+  if (!dv || dv.getLastRow() < 2) return out;
+  dv.getRange(2, 1, dv.getLastRow() - 1, 7).getValues().forEach(function(r) {
+    var n = Number(r[3]) || 0; if (!n) return;
+    (out[n] = out[n] || []).push({num:r[0], fecha:iso_(r[1]), tipo:String(r[6] || '')});
+  });
+  return out;
+}
+function pagosDeVenta_(r) {
+  var out = [];
+  for (var k = 0; k < 3; k++) {
+    var met = String(r[7 + k * 3] || '').trim(), ban = String(r[8 + k * 3] || '').trim(), monto = Number(r[9 + k * 3]) || 0;
+    var mon = String(r[27 + k] || '').toUpperCase();
+    if (!met) continue;
+    out.push({metodo:met, banco:ban, monto:monto, moneda:mon});
+  }
+  return out;
+}
+
+function listaDocumentos_(ss, q, desde, hasta) {
+  var sh = ss.getSheetByName(SH_VENTAS);
+  if (!sh || sh.getLastRow() < 2) return {ok:true, documentos:[]};
+  var hoy = Utilities.formatDate(new Date(), TZ_VE, 'yyyy-MM-dd');
+  var texto = String(q || '').trim();
+  // Con algo que buscar, se busca en TODO el historico; sin busqueda, el periodo (por defecto 30 dias).
+  var d1 = desde || '', d2 = hasta || hoy;
+  if (!texto && !d1) { var a = new Date(); a.setDate(a.getDate() - 30); d1 = Utilities.formatDate(a, TZ_VE, 'yyyy-MM-dd'); }
+  var qn = texto.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  var qDig = soloDigitos_(texto);
+  var esNumero = /^\d+$/.test(texto);
+  var fac = facturasPorVenta_(ss), devs = devolucionesPorNota_(ss);
+  var ancho = Math.max(sh.getLastColumn(), 31);
+  var out = [];
+  sh.getRange(2, 1, sh.getLastRow() - 1, ancho).getValues().forEach(function(r) {
+    var nota = Number(r[24]) || 0;
+    if (!nota) return;
+    var f = iso_(r[0]);
+    // Sin busqueda: el periodo. Con busqueda: todo el historico, salvo que el usuario haya puesto fechas.
+    var usarFechas = !texto || desde || hasta;
+    if (usarFechas && d1 && (!f || f < d1)) return;
+    if (usarFechas && f && f > d2) return;
+    var idV = String(r[23] || ''), cli = String(r[25] || ''), rif = String(r[26] || ''), prods = String(r[4] || '');
+    var fa = fac[idV] || null;
+    if (texto) {
+      var hay = false;
+      if (esNumero && nota === Number(texto)) hay = true;
+      var base = (cli + ' ' + prods + ' ' + (fa ? fa.numero + ' ' + fa.control : '') + ' ' + idV).toLowerCase()
+        .normalize('NFD').replace(/[̀-ͯ]/g, '');
+      if (!hay && qn.length >= 2 && base.indexOf(qn) >= 0) hay = true;
+      if (!hay && qDig.length >= 5 && soloDigitos_(rif).indexOf(qDig) >= 0) hay = true;
+      if (!hay) return;
+    }
+    out.push({nota:nota, idVenta:idV, fecha:f, hora:String(r[1] || ''), vendedor:String(r[2] || ''), canal:String(r[3] || ''),
+              cliente:cli, rif:rif, totalUSD:usdCelda_(r[5]), totalBS:Number(r[6]) || 0, credito:Number(r[30]) > 0,
+              productos:prods.slice(0, 220), pagos:pagosDeVenta_(r),
+              factura:fa ? {numero:fa.numero, modo:fa.modo} : null, devoluciones:(devs[nota] || []).length});
+  });
+  out.sort(function(x, y) { return y.nota - x.nota; });
+  var total = out.length;
+  return {ok:true, desde:d1, hasta:d2, q:texto, total:total, documentos:out.slice(0, 150)};
+}
+
+function documentoNota_(ss, num) {
+  var n = parseInt(num) || 0;
+  if (!n) throw rechazo_('Indica el numero de nota');
+  var sh = ss.getSheetByName(SH_VENTAS);
+  var ancho = Math.max(sh.getLastColumn(), 31);
+  var rv = null;
+  if (sh.getLastRow() >= 2) {
+    var vals = sh.getRange(2, 1, sh.getLastRow() - 1, ancho).getValues();
+    for (var i = vals.length - 1; i >= 0; i--) if (Number(vals[i][24]) === n) { rv = vals[i]; break; }
+  }
+  if (!rv) throw rechazo_('No se encontro la nota ' + n);
+  var idV = String(rv[23] || '');
+  var det = ss.getSheetByName(SH_DETALLE), lineas = [];
+  if (det && det.getLastRow() >= 2) {
+    det.getRange(2, 1, det.getLastRow() - 1, 16).getValues().forEach(function(r) {
+      if (String(r[0]) !== idV) return;
+      var canal = String(r[4] || '').toUpperCase();
+      if (canal === 'DEVOLUCION' || canal === 'CAMBIO') return;
+      var cant = Number(r[7]) || 0; if (!(cant > 0)) return;
+      lineas.push({codigo:String(r[5] || ''), producto:String(r[6] || ''), cantidad:cant, precio:Number(r[8]) || 0,
+                   tasa:Number(r[13]) || 0, subBs:Number(r[14]) || 0});
+    });
+  }
+  // Ventas viejas sin detalle: se reimprime con el texto de PRODUCTOS
+  if (!lineas.length && rv[4]) lineas.push({codigo:'', producto:String(rv[4]), cantidad:1, precio:usdCelda_(rv[5]), tasa:0, subBs:Number(rv[6]) || 0});
+  var cli = {nombre:String(rv[25] || ''), rif:String(rv[26] || ''), tel:'', dir:'', correo:''};
+  var shC = ss.getSheetByName('CLIENTES');
+  var dig = soloDigitos_(cli.rif);
+  if (shC && shC.getLastRow() >= 2 && dig.length >= 5) {
+    var cv = shC.getRange(2, 1, shC.getLastRow() - 1, Math.max(shC.getLastColumn(), 13)).getValues();
+    for (var k = 0; k < cv.length; k++) {
+      if (soloDigitos_(cv[k][1]) === dig) { cli.tel = String(cv[k][2] || ''); cli.dir = String(cv[k][3] || ''); cli.correo = String(cv[k][12] || ''); break; }
+    }
+  }
+  var fa = facturasPorVenta_(ss)[idV] || null, factDoc = null;
+  if (fa && fa.json) { try { factDoc = JSON.parse(fa.json); } catch (e) {} }
+  return {ok:true, nota:n, idVenta:idV, fecha:iso_(rv[0]), hora:String(rv[1] || ''), vendedor:String(rv[2] || ''),
+          canal:String(rv[3] || ''), credito:Number(rv[30]) > 0, cliente:cli, lineas:lineas,
+          totalUSD:usdCelda_(rv[5]), totalBS:Number(rv[6]) || 0, pagos:pagosDeVenta_(rv),
+          factura:fa ? {numero:fa.numero, control:fa.control, modo:fa.modo, doc:factDoc} : null,
+          devoluciones:(devolucionesPorNota_(ss)[n] || [])};
 }

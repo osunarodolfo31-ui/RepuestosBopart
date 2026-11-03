@@ -1,7 +1,18 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_ventas.html
-  VERSION: v15.0 (2026-11-01) | build 2026-11-02.4 | requiere Apps Script v28
+  VERSION: v15.2 (2026-11-02) | build 2026-11-02.6 | requiere Apps Script v28.6
+  v15.2: el dibujo de la factura y los datos del emisor pasan a boparts_pdf.js (los comparte Documentos para
+  reimprimir). REQUIERE subir boparts_pdf.js.
+  VERSION anterior: v15.1 (2026-11-02) | build 2026-11-02.5 | requiere Apps Script v28.5
+  v15.1: FACTURA DIGITAL en modo preparacion (Providencia SNAT/2026/00093). El documento lo arma el SERVIDOR con la
+  venta guardada (tipo=factura_digital) y la pantalla solo lo dibuja, con todos los campos de una factura digital:
+  serie, numero, fecha y hora de emision, numero de control y fecha/hora de asignacion, actividad economica,
+  cliente con domicilio fiscal y correo, renglones con codigo, impuesto, alicuota y descuento, descuento, exento,
+  base imponible, IVA, total, pagos, equivalente en USD y tipo de cambio BCV, IGTF si aplica y datos de la
+  imprenta. Mientras no haya imprenta digital conectada sale con la marca "DOCUMENTO DE PRUEBA - SIN VALOR FISCAL".
+  Antes de emitir se confirman los datos fiscales del cliente (RIF, razon social, domicilio fiscal, correo).
+  VERSION anterior: v15.0 (2026-11-01) | build 2026-11-02.4 | requiere Apps Script v28
   v15.0: al elegir el metodo de pago, la moneda queda FIJA en la de su cuenta (hoja CANALES via action=metodos).
   Antes se podia elegir Pago Movil y cambiar la moneda a USD a mano. Aparecen Zelle y Binance (cuentas de OB).
   El efectivo queda guardado con su caja (Efectivo USD o Efectivo Bs) en BANCO.
@@ -224,6 +235,7 @@ select option{background:#1E1E1E;color:var(--ink)}
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+<script src="boparts_pdf.js?v=2026-11-02.6"></script>
 </head>
 <body>
 
@@ -419,7 +431,7 @@ select option{background:#1E1E1E;color:var(--ink)}
     <!-- BOTONES NOTA -->
     <div id="notaBtns" style="display:none">
       <button class="nbtn nbtn-p" id="btnDoc" onclick="generarDoc()">Generar y Compartir PDF</button>
-      <button class="nbtn nbtn-p" id="btnFactura" onclick="generarFactura()" style="background:var(--card2);color:var(--brand);border:1.5px solid var(--brand);display:none">Generar FACTURA fiscal</button>
+      <button class="nbtn nbtn-p" id="btnFactura" onclick="generarFactura()" style="background:var(--card2);color:var(--brand);border:1.5px solid var(--brand);display:none">Generar FACTURA digital</button>
       <div id="docListo" style="display:none">
         <button class="nbtn nbtn-w" id="btnCompartir" onclick="compartirPDF()" style="display:block">Compartir PDF (Gmail, WhatsApp...)</button>
         <button class="nbtn nbtn-s" onclick="verPDF()">Ver / Descargar PDF</button>
@@ -433,6 +445,24 @@ select option{background:#1E1E1E;color:var(--ink)}
 </div>
 
 <!-- TOAST -->
+<!-- FACTURA DIGITAL: datos fiscales del cliente (v15.1) -->
+<div class="overlay" id="factOv" style="z-index:260" onclick="if(event.target===this)cerrarFactOv()">
+  <div class="sheet">
+    <div class="sheet-title">Factura digital</div>
+    <div class="sheet-sub" id="fdSub">Confirma los datos fiscales del cliente. Asi saldran en la factura.</div>
+    <div class="field"><label>Cedula / RIF *</label><input type="text" id="fdRif" placeholder="V-12345678 o J-12345678-9" autocapitalize="characters"></div>
+    <div class="field"><label>Nombre o razon social *</label><input type="text" id="fdNombre"></div>
+    <div class="field"><label>Domicilio fiscal <span id="fdDirReq" style="color:var(--ink-muted)">(obligatorio con RIF J o G)</span></label><input type="text" id="fdDir" placeholder="Calle, edificio, sector, ciudad, estado"></div>
+    <div class="row2">
+      <div class="field"><label>Correo</label><input type="email" id="fdCorreo" placeholder="cliente@correo.com"></div>
+      <div class="field"><label>Telefono</label><input type="tel" id="fdTel"></div>
+    </div>
+    <div class="cominfo" id="fdModo">Modo prueba: sale con todos los campos de una factura digital, pero con la marca "SIN VALOR FISCAL" hasta que se conecte una imprenta digital autorizada.</div>
+    <button class="nbtn nbtn-p" id="fdBtn" onclick="emitirFactura()" style="margin-top:12px">Emitir factura</button>
+    <button class="nbtn nbtn-s" onclick="cerrarFactOv()">Cancelar</button>
+  </div>
+</div>
+
 <div class="toast" id="toast" onclick="this.className='toast'"></div>
 
 <!-- FAB NAV -->
@@ -514,7 +544,7 @@ select option{background:#1E1E1E;color:var(--ink)}
   </div>
 </div>
 
-<script src="boparts_sesion.js?v=2026-11-02.4"></script>
+<script src="boparts_sesion.js?v=2026-11-02.6"></script>
 <script>
 
 
@@ -530,7 +560,7 @@ function sellarVersion(d) {
   if (t) t.textContent = 'app ' + APP_VERSION + ' \u00b7 script ' + VER_SCRIPT;
   return d;
 }
-var APP_VERSION = 'v15.0';
+var APP_VERSION = 'v15.2';
 var TASA        = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
 var TASA_ORIGEN = TASA ? 'guardada' : 'ninguna';
 
@@ -1589,7 +1619,7 @@ function nuevaVenta() {
 function resetAll() {
   cart = []; pagos = []; pid = 0;
   aliadoOn = false; aliadoSel = null; cliSel = null; lastCredito = null;
-  olvidarIdVenta(); FACT = null;
+  olvidarIdVenta(); FACT = null; try { document.getElementById('btnFactura').textContent = 'Generar FACTURA digital'; } catch (eF) {}
   clienteVenta = null; saldoCliente = 0; saldoConocido = false; pintarClienteVenta();
   FACTURAR = false;
   var ft = document.getElementById('factTog'); if (ft) ft.classList.remove('on');
@@ -1846,12 +1876,7 @@ var LOGO_DATA = null;
   } catch (e) {}
 })();
 
-var EMPRESA = {
-  nombre:'BOSC SUPPLY, C.A.', rif:'RIF: J-50828177-2',
-  dir:'Calle Principal, Edif Torre C, Piso 2, Apt 24, Conj. Res. 408, Los Rastrojos, Lara',
-  contacto:'0424-5575850 | boscsupply@gmail.com',
-  tienda:'Repuesto BoParts · 0412-3185778 / 0414-9536708'
-};
+var EMPRESA = BOPARTS_EMPRESA;   // v15.2: un solo lugar para los datos del emisor (boparts_pdf.js)
 
 function construirPDF(tipo, numero) {
   return new Promise(function(resolve, reject) {
@@ -1961,175 +1986,65 @@ function construirPDF(tipo, numero) {
 }
 
 // ============================================================
-// FACTURA FISCAL (v13): numeracion y numero de control salen de CONFIG (rango de la imprenta autorizada).
-// Se expresa en bolivares a la tasa BCV del dia, con el IVA discriminado.
+// FACTURA DIGITAL (v15.1) — el documento lo arma el servidor (tipo=factura_digital) con la venta guardada.
+// Aqui solo se confirman los datos fiscales del cliente y se dibuja el PDF. Una factura por venta: pedirla
+// otra vez devuelve la misma (reimpresion), sin consumir otro numero.
 // ============================================================
-var FACT = null;
+var FACT = null;      // documento devuelto por el servidor
 function generarFactura() {
-  // Si ya se numero esta venta, se reimprime la misma factura: no se consume otro numero de control
   if (FACT) {
     construirFactura(FACT).then(function(pdf) { lastPDF = pdf; toast('Reimprimiendo ' + pdf.num, 'ok'); compartirPDF(); })
       .catch(function(e) { toast('No se pudo reimprimir: ' + e.message, 'err'); });
     return;
   }
+  if (!lastIdVenta) { toast('Primero registra la venta', 'err'); return; }
   if (!cliSel) {
     var visible = document.getElementById('cliSelected').style.display !== 'none';
     if (visible && cliMostrado) cliSel = cliMostrado;
     else if (clienteVenta) cliSel = clienteVenta;
   }
-  if (!cliSel) { toast('La factura necesita los datos del cliente', 'err'); return; }
-  if (!cliSel.rif) { toast('Falta la cedula o RIF del cliente: la factura lo exige', 'err'); return; }
-  if (!TASA_BCV || TASA_BCV < 1) { toast('No hay tasa BCV cargada. La carga un socio en Gerencia.', 'err'); return; }
-  var btn = document.getElementById('btnFactura');
-  btn.disabled = true; btn.textContent = 'Generando...';
-  fetch(SCRIPT_URL + '?action=nextFactura&t=' + Date.now())
-    .then(leerJSON)
-    .then(function(d) {
-      if (!d || !d.ok) throw new Error(d && d.error ? d.error : 'no se pudo numerar');
-      FACT = d;
-      return postScript({tipo:'factura_venta', idVenta:lastIdVenta, facturaNum:'F-' + ('00000' + d.factura).slice(-6),
-        controlNum:String(d.control), cliente:{nombre:cliSel.nombre, rif:cliSel.rif || ''},
-        baseUSD:baseCarritoUSD(), ivaUSD:Math.round(baseCarritoUSD() * IVA_PCT) / 100,
-        totalConIvaUSD:totalCarritoUSD(), tasaBCV:TASA_BCV, totalBS:Math.round(totalCarritoUSD() * TASA),
-        formaPago:lastPagos.map(function(p) { return p.label || p.metodo; }).join(' + '),
-        fecha:new Date().toLocaleDateString('es-VE'), hora:new Date().toLocaleTimeString('es-VE', {hour:'2-digit', minute:'2-digit'}),
-        vendedor:document.getElementById('selV').value || ''})
-        .then(function() { return construirFactura(d); })
-        .catch(function() { return construirFactura(d); });   // el PDF sale igual; el aviso lo da el script
+  var c = cliSel || {};
+  document.getElementById('fdRif').value = c.rif || '';
+  document.getElementById('fdNombre').value = c.nombre && c.nombre !== 'CLIENTE OCASIONAL' ? c.nombre : '';
+  document.getElementById('fdDir').value = c.dir || '';
+  document.getElementById('fdCorreo').value = c.correo || '';
+  document.getElementById('fdTel').value = c.tel || '';
+  document.getElementById('factOv').classList.add('open');
+}
+function cerrarFactOv() { document.getElementById('factOv').classList.remove('open'); }
+function emitirFactura() {
+  var cli = {rif:document.getElementById('fdRif').value.trim(), nombre:document.getElementById('fdNombre').value.trim(),
+             dir:document.getElementById('fdDir').value.trim(), correo:document.getElementById('fdCorreo').value.trim(),
+             tel:document.getElementById('fdTel').value.trim()};
+  if (!cli.rif || !cli.nombre) { toast('Falta la cedula/RIF o el nombre', 'err'); return; }
+  if (/^[JjGg]/.test(cli.rif) && !cli.dir) { toast('Con RIF J o G hace falta el domicilio fiscal', 'err'); return; }
+  var btn = document.getElementById('fdBtn'), btnF = document.getElementById('btnFactura');
+  btn.disabled = true; btn.textContent = 'Emitiendo...';
+  postScript({tipo:'factura_digital', idVenta:lastIdVenta, cliente:cli})
+    .then(function(r) {
+      if (!r || !r.ok || !r.doc) throw new Error(r && r.error ? r.error : 'no se emitio');
+      FACT = r.doc;
+      return construirFactura(r.doc).then(function(pdf) { return {pdf:pdf, r:r}; });
     })
-    .then(function(pdf) {
-      lastPDF = pdf;
-      btn.disabled = false; btn.textContent = 'Generar FACTURA fiscal';
+    .then(function(x) {
+      btn.disabled = false; btn.textContent = 'Emitir factura';
+      cerrarFactOv();
+      lastPDF = x.pdf;
+      if (btnF) btnF.textContent = 'Reimprimir FACTURA';
       document.getElementById('docListo').style.display = 'block';
-      toast('Factura ' + pdf.num + ' · control ' + FACT.control + (FACT.restantes ? ' · quedan ' + FACT.restantes : ''), 'ok');
+      toast((x.r.repetida ? 'Esa venta ya tenia factura: ' : 'Factura ') + x.pdf.num + (FACT.modo === 'PRUEBA' ? ' (modo prueba, sin valor fiscal)' : ''), 'ok');
       compartirPDF();
     })
     .catch(function(e) {
-      btn.disabled = false; btn.textContent = 'Generar FACTURA fiscal';
-      toast('No se genero la factura: ' + (e && e.message ? e.message : e), 'err');
+      btn.disabled = false; btn.textContent = 'Emitir factura';
+      if (e && e.message === 'SESION') return;
+      toast('No se emitio la factura: ' + (e && e.message ? e.message : e), 'err');
     });
 }
 
-function construirFactura(num) {
-  return new Promise(function(resolve, reject) {
-    try {
-      var JS = window.jspdf && window.jspdf.jsPDF;
-      if (!JS) throw new Error('Libreria PDF no cargo (sin internet?)');
-      var doc = new JS({unit:'mm', format:'a4'});
-      var W = 210, M = 14, y = 12;
-      var hoy = new Date();
-      var fecha = hoy.toLocaleDateString('es-VE', {day:'2-digit', month:'2-digit', year:'numeric'});
-      var amarillo = [245,168,0], negro = [17,17,17], gris = [120,120,120];
-      var nf = 'F-' + ('00000' + num.factura).slice(-6);
-
-      // Emisor
-      doc.setFillColor(negro[0],negro[1],negro[2]); doc.roundedRect(M, y, W - 2*M, 30, 2, 2, 'F');
-      var tx = M + 6;
-      if (LOGO_DATA) { try { doc.addImage(LOGO_DATA, 'PNG', M + 4, y + 4, 22, 22); tx = M + 30; } catch (e) {} }
-      doc.setTextColor(255,255,255); doc.setFont('helvetica','bold'); doc.setFontSize(15); doc.text(EMPRESA.nombre, tx, y + 10);
-      doc.setTextColor(amarillo[0],amarillo[1],amarillo[2]); doc.setFontSize(9); doc.text(EMPRESA.rif, tx, y + 15);
-      doc.setTextColor(200,200,200); doc.setFont('helvetica','normal'); doc.setFontSize(7);
-      doc.text('Domicilio fiscal: ' + EMPRESA.dir, tx, y + 20); doc.text(EMPRESA.contacto, tx, y + 24);
-      doc.setFillColor(amarillo[0],amarillo[1],amarillo[2]); doc.roundedRect(W - M - 58, y + 5, 52, 20, 2, 2, 'F');
-      doc.setTextColor(negro[0],negro[1],negro[2]); doc.setFont('helvetica','bold'); doc.setFontSize(12);
-      doc.text('FACTURA', W - M - 32, y + 11, {align:'center'});
-      doc.setFontSize(9); doc.text('N ' + nf, W - M - 32, y + 16.5, {align:'center'});
-      doc.setFontSize(8); doc.text('Control N ' + num.control, W - M - 32, y + 21.5, {align:'center'});
-      y += 33;
-
-      // Datos de la operacion
-      doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(gris[0],gris[1],gris[2]);
-      doc.text('FECHA DE EMISION', M, y); doc.text('CONDICION', M + 55, y); doc.text('TASA BCV', M + 105, y); doc.text('MONEDA', M + 150, y);
-      doc.setFont('helvetica','bold'); doc.setTextColor(negro[0],negro[1],negro[2]); doc.setFontSize(9);
-      doc.text(fecha, M, y + 5);
-      doc.text(lastCredito ? 'CREDITO' : (FACT_CASHEA ? 'CASHEA' : 'CONTADO'), M + 55, y + 5);
-      doc.text('Bs ' + TASA_BCV, M + 105, y + 5);
-      doc.text('BOLIVARES', M + 150, y + 5);
-      y += 9; doc.setDrawColor(230,230,230); doc.line(M, y, W - M, y); y += 4;
-
-      // Receptor
-      doc.setFillColor(amarillo[0],amarillo[1],amarillo[2]); doc.rect(M, y, W - 2*M, 6, 'F');
-      doc.setFontSize(8); doc.setTextColor(negro[0],negro[1],negro[2]); doc.text('DATOS DEL ADQUIRENTE', M + 3, y + 4.2);
-      y += 6;
-      doc.setFillColor(249,249,249); doc.rect(M, y, W - 2*M, 18, 'F');
-      doc.setFontSize(7); doc.setFont('helvetica','normal'); doc.setTextColor(gris[0],gris[1],gris[2]);
-      doc.text('NOMBRE O RAZON SOCIAL', M + 3, y + 4);
-      doc.setFontSize(11); doc.setFont('helvetica','bold'); doc.setTextColor(negro[0],negro[1],negro[2]);
-      doc.text(String(cliSel.nombre || '').toUpperCase().slice(0, 60), M + 3, y + 9);
-      doc.setFontSize(7); doc.setFont('helvetica','normal'); doc.setTextColor(gris[0],gris[1],gris[2]);
-      doc.text(('CEDULA / RIF: ' + (cliSel.rif || '-') + (cliSel.tel ? '   TELEFONO: ' + cliSel.tel : '') + (cliSel.dir ? '   DIRECCION: ' + cliSel.dir : '')).slice(0, 120), M + 3, y + 14);
-      y += 22;
-
-      // Renglones: precios sin IVA, en bolivares a tasa BCV
-      var body = [], base = 0;
-      for (var i = 0; i < lastCart.length; i++) {
-        var c = lastCart[i];
-        var sub = c.precio * c.cantidad; base += sub;
-        body.push([c.codigo || '', c.producto, String(c.cantidad),
-                   fmtBS(Math.round(c.precio * TASA_BCV * 100) / 100), '16%', fmtBS(Math.round(sub * TASA_BCV))]);
-      }
-      base = Math.round(base * 100) / 100;
-      var iva = Math.round(base * IVA_PCT) / 100;
-      var tot = Math.round((base + iva) * 100) / 100;
-      doc.autoTable({
-        startY: y, margin:{left:M, right:M},
-        head:[['CODIGO','DESCRIPCION','CANT.','PRECIO Bs','ALIC.','TOTAL Bs']], body:body,
-        styles:{fontSize:8, cellPadding:2, textColor:[17,17,17]},
-        headStyles:{fillColor:negro, textColor:[255,255,255], fontStyle:'bold'},
-        alternateRowStyles:{fillColor:[246,246,246]},
-        columnStyles:{0:{cellWidth:24}, 2:{halign:'center', cellWidth:14}, 3:{cellWidth:28, halign:'right'},
-                      4:{halign:'center', cellWidth:14}, 5:{cellWidth:30, halign:'right', fontStyle:'bold'}}
-      });
-      y = doc.lastAutoTable.finalY + 5;
-
-      // Totales discriminados
-      var bx = W - M - 78;
-      function fila(lbl, val, bold) {
-        doc.setFont('helvetica', bold ? 'bold' : 'normal'); doc.setFontSize(bold ? 11 : 9);
-        doc.setTextColor(negro[0],negro[1],negro[2]);
-        doc.text(lbl, bx, y); doc.text(val, W - M - 2, y, {align:'right'});
-        y += bold ? 7 : 5.5;
-      }
-      fila('Base imponible', fmtBS(Math.round(base * TASA_BCV)));
-      fila('IVA 16%', fmtBS(Math.round(iva * TASA_BCV)));
-      doc.setDrawColor(200,200,200); doc.line(bx, y - 3, W - M, y - 3); y += 1;
-      fila('TOTAL A PAGAR', fmtBS(Math.round(tot * TASA_BCV)), true);
-      doc.setFontSize(7); doc.setTextColor(gris[0],gris[1],gris[2]);
-      doc.text('Referencia: ' + fmtUSD(tot) + ' a tasa Bs ' + TASA_BCV, W - M - 2, y, {align:'right'});
-      y += 8;
-
-      // Forma de pago (con desglose Cashea si aplica)
-      doc.setFontSize(8); doc.setFont('helvetica','bold'); doc.setTextColor(negro[0],negro[1],negro[2]);
-      doc.text('FORMA DE PAGO', M, y); y += 5;
-      doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(gris[0],gris[1],gris[2]);
-      for (var k = 0; k < lastPagos.length; k++) {
-        var pg = lastPagos[k];
-        if (!pg.monto) continue;
-        doc.text('- ' + (pg.label || pg.metodo) + ': ' + (pg.moneda === 'USD' ? fmtUSD(pg.monto) : fmtBS(pg.monto)), M + 2, y);
-        y += 4.5;
-      }
-      if (FACT_CASHEA && FACT_CASHEA.financiado > 0) {
-        y += 1;
-        doc.setFont('helvetica','bold'); doc.setTextColor(negro[0],negro[1],negro[2]);
-        doc.text('DESGLOSE CASHEA', M, y); y += 5;
-        doc.setFont('helvetica','normal'); doc.setTextColor(gris[0],gris[1],gris[2]);
-        doc.text('- Inicial pagada en tienda: ' + fmtBS(Math.round(FACT_CASHEA.inicial * TASA_BCV)) + '  (' + fmtUSD(FACT_CASHEA.inicial) + ')', M + 2, y); y += 4.5;
-        doc.text('- Financiado por Cashea: ' + fmtBS(Math.round(FACT_CASHEA.financiado * TASA_BCV)) + '  (' + fmtUSD(FACT_CASHEA.financiado) + ')', M + 2, y); y += 4.5;
-        doc.text('- Las cuotas las administra Cashea en su aplicacion. El comercio no cobra cuotas.', M + 2, y); y += 4.5;
-      }
-
-      // Pie
-      var fy = 285;
-      doc.setFillColor(negro[0],negro[1],negro[2]); doc.rect(M, fy - 6, W - 2*M, 8, 'F');
-      doc.setTextColor(200,200,200); doc.setFontSize(7);
-      doc.text(EMPRESA.nombre + ' | ' + EMPRESA.rif + ' | ' + EMPRESA.tienda, W/2, fy - 1, {align:'center'});
-      doc.setTextColor(150,150,150); doc.setFontSize(6.5);
-      doc.text('Factura emitida conforme a la Providencia SNAT/2011/0071. Conserve este documento.', W/2, fy + 6, {align:'center'});
-
-      var nombreArchivo = nf + '_' + String(cliSel.nombre || 'cliente').replace(/[^a-zA-Z0-9]+/g, '_').slice(0, 30) + '.pdf';
-      resolve({blob: doc.output('blob'), nombre: nombreArchivo, num: nf, control: num.control, totalBs: Math.round(tot * TASA_BCV), totalUsd: tot});
-    } catch (e) { reject(e); }
-  });
+// v15.2: el dibujo de la factura vive en boparts_pdf.js (lo comparte Documentos para reimprimir).
+function construirFactura(f) {
+  return pdfFactura(f, {logo:LOGO_DATA, cashea:(FACT_CASHEA && f.venta && f.venta.idVenta === lastIdVenta) ? FACT_CASHEA : null});
 }
 var FACT_CASHEA = null;
 

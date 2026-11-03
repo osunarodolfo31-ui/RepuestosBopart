@@ -311,7 +311,8 @@ var MENU_FIJO = [
   {href:'boparts_tareas.html',     icono:'✅', nombre:'Mi día'}
 ];
 var MENU_GRUPOS = [
-  {id:'clientes', icono:'🧾', nombre:'Clientes', desc:'Cobros, apartados, devoluciones', items:[
+  {id:'clientes', icono:'🧾', nombre:'Clientes', desc:'Documentos, cobros, apartados, devoluciones', items:[
+    {href:'boparts_documentos.html',   icono:'🔎', nombre:'Documentos',   desc:'Buscar y reimprimir notas'},
     {href:'boparts_cobros.html',       icono:'🧾', nombre:'Cobros',       desc:'Cuentas por cobrar'},
     {href:'boparts_apartados.html',    icono:'🔖', nombre:'Apartados',    desc:'Y contra pedido'},
     {href:'boparts_devoluciones.html', icono:'↩️', nombre:'Devoluciones', desc:'Y cambios', socio:true}
@@ -396,7 +397,7 @@ if (document.readyState === 'loading') document.addEventListener('DOMContentLoad
    version.json dice cual es la buena, y si no coinciden aparece una barra con un boton que borra la
    cache y recarga. Nadie tiene que saber que es "borrar cache".
    Ademas, todo enlace entre pantallas lleva ?v=BUILD: moverse por el menu ya no trae copias viejas. */
-var BUILD = '2026-11-02.4';
+var BUILD = '2026-11-02.6';
 (function() {
   var intentos = 0;
   function sellarEnlaces() {

@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<!--
+  Repuesto BoParts — boparts_documentos.html
+  VERSION: v1.0 (2026-11-02) | build 2026-11-02.6 | requiere Apps Script v28.6 y boparts_pdf.js
+  v1.0: pantalla nueva. Busca notas de entrega por numero, cliente, cedula/RIF, producto o numero de factura (con
+  algo escrito busca en todo el historico; sin busqueda, el periodo). Cada nota muestra total, pagos, productos,
+  si tiene factura y devoluciones. Reimprime la NOTA y la FACTURA desde el servidor (aunque el telefono no la haya
+  descargado al vender) y lleva a Devoluciones con la nota ya cargada (solo socios).
+-->
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>BoParts · Documentos</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --brand:#F5A800;--brand-soft:rgba(245,168,0,.15);
+  --bg:#111;--bg2:#1A1A1A;--card:#1E1E1E;--card2:#252525;--border:#2E2E2E;
+  --ink:#F0F0F0;--ink-soft:#AAA;--ink-muted:#666;
+  --green:#22C55E;--red:#EF4444;
+  --radius:14px;--radius-sm:8px;
+}
+.gtot{font-size:12px;color:var(--ink-muted);margin-bottom:10px}
+.grow{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:9px 0;border-bottom:1px solid var(--border)}
+.grow:last-child{border-bottom:none}
+.gizq{min-width:0;flex:1}
+.gdesc{font-size:13px;color:var(--ink);line-height:1.35;word-break:break-word}
+.gmeta{font-size:11px;color:var(--ink-muted);margin-top:2px}
+.gder{font-size:13px;font-weight:600;color:var(--ink);white-space:nowrap}
+  
+
+html,body{min-height:100%;background:var(--bg);font-family:'Inter',sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased}
+header{background:var(--bg2);border-bottom:2px solid var(--brand);padding:12px 16px;display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:50}
+.logo{height:34px;width:auto}
+.hdr h1{font-size:15px;font-weight:700}
+.hdr p{font-size:11px;color:var(--ink-muted)}
+.container{padding:16px;max-width:520px;margin:0 auto;padding-bottom:100px}
+.section{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:12px}
+.stitle{font-size:12px;font-weight:700;color:var(--brand);text-transform:uppercase;letter-spacing:.5px;margin-bottom:12px}
+label{font-size:12px;color:var(--ink-soft);font-weight:600;display:block;margin-bottom:4px}
+input,select,textarea{width:100%;background:var(--card2);border:1.5px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;font-size:14px;font-family:inherit;color:var(--ink);outline:none;transition:border-color .15s}
+input:focus,select:focus,textarea:focus{border-color:var(--brand)}
+input::placeholder,textarea::placeholder{color:var(--ink-muted)}
+select option{background:#1E1E1E;color:var(--ink)}
+.field{margin-bottom:12px}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+
+/* DROPDOWN */
+.wrap{position:relative}
+.drop{background:var(--card2);border:1px solid var(--border);border-radius:var(--radius-sm);max-height:220px;overflow-y:auto;position:absolute;width:100%;z-index:80;display:none;margin-top:4px;box-shadow:0 8px 24px rgba(0,0,0,.4)}
+.drop.open{display:block}
+.ditem{padding:10px 12px;font-size:13px;cursor:pointer;border-bottom:1px solid var(--border);color:var(--ink)}
+.ditem:last-child{border-bottom:none}
+.ditem:active,.ditem:hover{background:var(--brand-soft)}
+.ditem-meta{font-size:10px;color:var(--ink-muted);margin-top:2px}
+.ditem-price{font-size:11px;color:var(--brand);font-weight:600;float:right}
+
+/* CART */
+.cart-empty{text-align:center;padding:20px;color:var(--ink-muted);font-size:13px}
+.citem{background:var(--card2);border-radius:var(--radius-sm);padding:12px;margin-bottom:8px;border:1px solid var(--border)}
+.ctop{display:flex;align-items:flex-start;gap:8px}
+.cname{font-size:13px;font-weight:600;flex:1;line-height:1.3}
+.cdel{background:none;border:none;color:var(--red);cursor:pointer;font-size:20px;line-height:1;padding:0;flex-shrink:0}
+.cbot{display:grid;grid-template-columns:90px 1fr 1fr;gap:8px;margin-top:8px;align-items:center}
+.qwrap{display:flex;align-items:center;gap:6px}
+.qbtn{background:var(--card);border:1px solid var(--border);border-radius:6px;width:28px;height:28px;color:var(--ink);font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.qin{width:36px;text-align:center;padding:4px;font-size:14px;font-weight:700;background:var(--card);border:1px solid var(--border);border-radius:6px}
+.csub{text-align:right;font-size:14px;font-weight:700;color:var(--brand)}
+
+/* TOTALS */
+.tbar{background:var(--card2);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;margin-bottom:12px;display:none}
+.trow{display:flex;justify-content:space-between;margin-bottom:4px}
+.trow:last-child{margin-bottom:0}
+.tlbl{font-size:12px;color:var(--ink-soft)}
+.tval{font-size:14px;font-weight:700}
+.tval.big{font-size:18px;color:var(--brand)}
+.tval.red{color:var(--red)}
+
+/* PAYMENT */
+.pblock{background:var(--card2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;margin-bottom:8px;position:relative}
+.pdel{position:absolute;top:10px;right:10px;background:none;border:none;color:var(--red);cursor:pointer;font-size:16px}
+.addpbtn{width:100%;padding:10px;background:none;border:1.5px dashed var(--border);border-radius:var(--radius-sm);color:var(--ink-muted);font-size:13px;cursor:pointer;font-family:inherit;transition:border-color .15s}
+.addpbtn:hover{border-color:var(--brand);color:var(--brand)}
+.cominfo{font-size:11px;color:var(--ink-muted);margin-top:6px;padding:6px 8px;background:rgba(245,168,0,.08);border-radius:6px;border-left:2px solid var(--brand)}
+
+/* ALIADO */
+.togwrap{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border);margin-bottom:10px}
+.toglbl{font-size:13px;font-weight:600}
+.togsub{font-size:11px;color:var(--ink-muted);margin-top:2px}
+.tog{width:44px;height:24px;background:var(--border);border-radius:12px;cursor:pointer;position:relative;transition:background .2s;border:none;flex-shrink:0}
+.tog.on{background:var(--brand)}
+.tog::after{content:'';position:absolute;width:18px;height:18px;background:#fff;border-radius:50%;top:3px;left:3px;transition:left .2s}
+.tog.on::after{left:23px}
+.asel{display:none;margin-top:10px}
+.asel.open{display:block}
+.acard{background:var(--card2);border:1.5px solid var(--border);border-radius:var(--radius-sm);padding:12px;cursor:pointer;margin-bottom:8px;transition:border-color .15s}
+.acard.sel{border-color:var(--brand);background:var(--brand-soft)}
+.aname{font-size:13px;font-weight:700}
+.aneg{font-size:11px;color:var(--ink-muted)}
+.acom{font-size:11px;color:var(--brand);font-weight:600;float:right}
+.cprev{background:rgba(245,168,0,.1);border:1px solid rgba(245,168,0,.3);border-radius:var(--radius-sm);padding:10px 12px;margin-top:10px;font-size:12px;color:var(--ink-soft);display:none}
+.cprev.open{display:block}
+
+/* SUBMIT */
+.subbtn{width:100%;padding:16px;background:var(--brand);color:#111;border:none;border-radius:var(--radius);font-size:16px;font-weight:700;cursor:pointer;font-family:inherit;position:fixed;bottom:0;left:0;right:0;max-width:520px;margin:0 auto}
+.subbtn:disabled{opacity:.5}
+.botbar{position:fixed;bottom:0;left:0;right:0;display:flex;gap:8px;padding:10px 12px;background:var(--bg);border-top:1px solid var(--border);z-index:100;max-width:520px;margin:0 auto}
+.botbar .subbtn{position:static;flex:1;padding:14px}
+.botbar .cotbtn{flex:0 0 36%;background:var(--card2);color:var(--brand);border:1.5px solid var(--brand)}
+.nbtn-p:disabled{opacity:.5}
+
+/* MODALS */
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:200;display:none;align-items:flex-end}
+.overlay.open{display:flex}
+.sheet{background:var(--bg2);border-radius:20px 20px 0 0;border-top:2px solid var(--brand);padding:20px 16px 40px;width:100%;max-height:90vh;overflow-y:auto}
+.sheet-title{font-size:16px;font-weight:700;margin-bottom:4px}
+.sheet-sub{font-size:12px;color:var(--ink-muted);margin-bottom:16px}
+
+/* SUCCESS */
+.success{display:none;position:fixed;inset:0;background:var(--bg);z-index:300;flex-direction:column;align-items:center;justify-content:center;padding:24px;text-align:center}
+.success.open{display:flex}
+.sicon{font-size:64px;margin-bottom:16px}
+.success h2{font-size:22px;font-weight:700;margin-bottom:8px}
+.success p{font-size:14px;color:var(--ink-muted);margin-bottom:24px;line-height:1.6;white-space:pre-line}
+.sbtn{width:100%;padding:14px;border:none;border-radius:var(--radius);font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;margin-bottom:10px}
+.sbtn-y{background:var(--brand);color:#111}
+.sbtn-n{background:var(--card2);color:var(--ink-soft);border:1px solid var(--border)}
+
+/* NOTA BUTTONS */
+.nbtn{width:100%;padding:13px;border-radius:var(--radius);font-size:14px;font-weight:700;border:none;cursor:pointer;font-family:inherit;margin-bottom:8px}
+.nbtn-p{background:var(--brand);color:#111}
+.nbtn-w{background:#25D366;color:#fff;display:none}
+.nbtn-s{background:var(--card2);color:var(--ink-soft);border:1px solid var(--border)}
+
+/* CLIENTE CARD */
+.cli-result{background:var(--brand-soft);border:1.5px solid var(--brand);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between}
+.cli-info{font-size:13px;font-weight:600}
+.cli-sub{font-size:11px;color:var(--ink-muted)}
+.cli-clear{background:none;border:none;color:var(--ink-muted);cursor:pointer;font-size:18px}
+.cli-new-btn{width:100%;padding:10px;background:none;border:1.5px dashed var(--brand);border-radius:var(--radius-sm);color:var(--brand);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;margin-top:8px}
+
+/* TOAST */
+.toast{position:fixed;bottom:90px;left:50%;transform:translateX(-50%) translateY(40px);opacity:0;visibility:hidden;background:#222;color:#fff;padding:12px 20px;border-radius:18px;font-size:13px;font-weight:600;transition:transform .3s,opacity .3s,visibility .3s;z-index:999;max-width:92vw;text-align:center;line-height:1.4;cursor:pointer;border:1px solid var(--border);pointer-events:none}
+.toast.show{transform:translateX(-50%) translateY(0);opacity:1;visibility:visible}
+.toast.ok{border-color:var(--green);color:var(--green)}
+.toast.err{border-color:var(--red);color:var(--red);white-space:pre-line}
+
+/* NAV */
+.fab{position:fixed;bottom:70px;right:16px;z-index:90;width:48px;height:48px;background:var(--brand);border:none;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 16px rgba(245,168,0,.4)}
+.nav-ov{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:91;opacity:0;pointer-events:none;transition:opacity .2s}
+.nav-ov.open{opacity:1;pointer-events:auto}
+.nav-pan{position:fixed;bottom:0;left:0;right:0;z-index:92;background:var(--bg2);border-radius:20px 20px 0 0;border-top:2px solid var(--brand);padding:20px 16px 40px;transform:translateY(100%);transition:transform .3s}
+.nav-pan.open{transform:translateY(0)}
+.nav-t{font-size:12px;font-weight:700;color:var(--brand);text-transform:uppercase;letter-spacing:.5px;margin-bottom:16px;text-align:center}
+.nav-g{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.ncard{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px 12px;display:flex;flex-direction:column;align-items:center;gap:8px;text-decoration:none;-webkit-tap-highlight-color:transparent}
+.ncard.cur{border-color:var(--brand);background:var(--brand-soft)}
+.nicon{font-size:28px}
+.nlbl{font-size:12px;font-weight:700;color:var(--ink);text-align:center}
+.ndesc{font-size:10px;color:var(--ink-muted);text-align:center}
+
+/* GERENCIA */
+.tabs{display:flex;gap:6px;overflow-x:auto;padding:2px 0 8px;-webkit-overflow-scrolling:touch}
+.tab{flex:0 0 auto;padding:8px 14px;border-radius:20px;border:1.5px solid var(--border);background:var(--card2);color:var(--ink-soft);font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap}
+.tab.on{background:var(--brand);color:#111;border-color:var(--brand)}
+.kpis{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.kpi{background:var(--card2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px}
+.kpi .k{font-size:11px;color:var(--ink-muted);text-transform:uppercase;letter-spacing:.4px}
+.kpi .v{font-size:20px;font-weight:700;margin-top:2px}
+.kpi .s{font-size:11px;color:var(--ink-muted);margin-top:2px}
+.kpi.big{grid-column:1/-1}
+.kpi.big .v{font-size:28px;color:var(--brand)}
+.pos{color:var(--green)} .neg{color:var(--red)}
+.bars{margin-top:4px}
+.bar{display:flex;align-items:center;gap:8px;padding:5px 0;font-size:12px}
+.bar .bl{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar .bt{width:74px;text-align:right;font-weight:700}
+.bar .bm{width:52px;text-align:right;color:var(--ink-muted);font-size:11px}
+/* Era '.bar .bg', y .bg NUNCA esta dentro de .bar: va dentro de .bwrap, que es su hermano.
+   El selector no casaba con nada, asi que la barra naranja no se pintaba en NINGUNA seccion
+   (productos mas vendidos, por vendedor, por canal, como pagaron, gastos). Se veia solo el
+   riel gris y parecia que no habia datos. */
+.bwrap .bg{height:4px;border-radius:2px;background:var(--brand);opacity:.75}
+.bwrap{background:rgba(255,255,255,.06);border-radius:2px;height:4px;margin-top:3px}
+.dias{display:flex;align-items:flex-end;gap:3px;height:90px;margin:10px 0 4px}
+.dia{flex:1;background:var(--brand);border-radius:2px 2px 0 0;min-height:2px;opacity:.85}
+.dia.hoy{background:#fff}
+.diasx{display:flex;gap:3px;font-size:9px;color:var(--ink-muted)}
+.diasx span{flex:1;text-align:center;overflow:hidden}
+.tbl{width:100%;font-size:12px;border-collapse:collapse}
+.tbl th{text-align:left;color:var(--ink-muted);font-weight:600;font-size:10px;text-transform:uppercase;padding:6px 4px;border-bottom:1px solid var(--border)}
+.tbl td{padding:7px 4px;border-bottom:1px solid var(--border)}
+.tbl td.n{text-align:right;font-variant-numeric:tabular-nums}
+.rango{display:flex;gap:8px;align-items:center;margin-bottom:8px}
+.rango input{padding:8px}
+.aviso{font-size:11px;color:var(--ink-muted);line-height:1.5;margin-top:8px}
+.cli{background:var(--card2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:11px 12px;margin-bottom:8px}
+.cli .h{display:flex;justify-content:space-between;gap:8px;align-items:flex-start;cursor:pointer}
+.cli .nm{font-size:13px;font-weight:700;line-height:1.3}
+.cli .sb{font-size:11px;color:var(--ink-muted);margin-top:2px}
+.cli .rt{text-align:right;font-size:14px;font-weight:700;white-space:nowrap}
+.cli .rt small{display:block;font-size:10px;color:var(--ink-muted);font-weight:500}
+.cli .det{display:none;margin-top:10px;border-top:1px solid var(--border);padding-top:10px}
+.cli.open .det{display:block}
+.chip{display:inline-block;font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;margin-right:4px}
+.chip.ali{background:rgba(245,168,0,.18);color:var(--brand)}
+.liq{background:var(--card2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;margin-bottom:8px}
+.liqh{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.liqh .nm{font-size:14px;font-weight:600;color:var(--ink)}
+.liqh .sb{font-size:11px;color:var(--ink-muted);margin-top:2px}
+.liqh .rt{font-size:17px;font-weight:700;color:var(--green);text-align:right;white-space:nowrap}
+.liqh .rt.neg{color:var(--red)}
+.liqh .rt small{display:block;font-size:10px;font-weight:500;color:var(--ink-muted);text-transform:uppercase;letter-spacing:.3px;margin-top:1px}
+.liqd{margin-top:10px;border-top:1px solid var(--border);padding-top:8px}
+.liqd>div{display:flex;align-items:baseline;justify-content:space-between;gap:8px;padding:3px 0;font-size:12px}
+.liqd span{color:var(--ink-soft)}
+.liqd b{color:var(--ink);font-weight:600}
+.liqd b.neg{color:var(--red)}
+.liqd b.mut{color:var(--ink-muted)}
+.liqd small{color:var(--ink-muted);font-size:10px;flex-basis:100%;text-align:right;margin-top:-3px}
+.liqm{margin-top:8px;font-size:12px;color:var(--ink-muted)}
+/* TAREAS (v2.8) — los tres marcadores van separados a proposito, nunca promediados */
+.mk{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+.mk>div{flex:1;min-width:92px;background:var(--card);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px}
+.mk .et{font-size:9px;color:var(--ink-muted);text-transform:uppercase;letter-spacing:.4px}
+.mk .nu{font-size:20px;font-weight:700;color:var(--ink);margin-top:3px;line-height:1.1}
+.mk .nu small{font-size:11px;font-weight:500;color:var(--ink-muted)}
+.mk .nu.alto{color:var(--green)}
+.mk .nu.bajo{color:var(--red)}
+.mk .nu.nada{color:var(--ink-muted);font-size:14px}
+.mk .pie{font-size:10px;color:var(--ink-muted);margin-top:3px;line-height:1.4}
+.tdef{display:flex;align-items:flex-start;gap:10px;padding:9px 0;border-bottom:1px solid var(--border)}
+.tdef:last-child{border-bottom:none}
+.tdef .c1{flex:1;min-width:0}
+.tdef .tt{font-size:13px;font-weight:600;color:var(--ink);line-height:1.3}
+.tdef .mm{font-size:10px;color:var(--ink-muted);margin-top:3px}
+.tdef button{background:none;border:1px solid var(--border);color:var(--ink-muted);border-radius:6px;
+  font-size:11px;font-family:inherit;padding:4px 9px;cursor:pointer;white-space:nowrap}
+.tdef button:hover{border-color:var(--red);color:var(--red)}
+.ttipo{display:inline-block;font-size:9px;font-weight:700;letter-spacing:.3px;padding:2px 6px;border-radius:4px;
+  background:rgba(255,255,255,.07);color:var(--ink-muted);text-transform:uppercase;margin-right:5px}
+.ttipo.auto{background:rgba(34,197,94,.15);color:var(--green)}
+.ttipo.enlace{background:rgba(245,168,0,.18);color:var(--brand)}
+.per{background:var(--card2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;margin-bottom:8px}
+.perh{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:10px}
+.perh .nm{font-size:14px;font-weight:600;color:var(--ink)}
+.perh .rt{font-size:17px;font-weight:700;color:var(--ink);text-align:right;white-space:nowrap}
+.perh .rt small{display:block;font-size:10px;font-weight:500;color:var(--ink-muted);text-transform:uppercase;letter-spacing:.3px}
+.perg{display:flex;flex-wrap:wrap;gap:8px 16px;border-top:1px solid var(--border);padding-top:8px}
+.perg>div{min-width:72px}
+.perg span{display:block;font-size:10px;color:var(--ink-muted);text-transform:uppercase;letter-spacing:.3px}
+.perg b{font-size:14px;color:var(--ink);font-weight:600}
+.perg b.flo{color:var(--brand)}
+.perc{margin-top:9px;font-size:11px;color:var(--ink-soft);border-top:1px solid var(--border);padding-top:8px;line-height:1.5}
+.perc b{color:var(--ink)}
+.chip.cr{background:var(--brand-soft);color:var(--brand)}
+.chip.no{background:rgba(255,255,255,.07);color:var(--ink-muted)}
+.chip.al{background:rgba(239,68,68,.15);color:var(--red)}
+.cli .gr{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px}
+.cli .gr div{font-size:11px;color:var(--ink-muted)}
+.cli .gr b{display:block;font-size:14px;color:var(--ink);font-weight:700}
+.cfg{display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end}
+.cfg input,.cfg select{padding:8px}
+.cfgpan{display:none;position:sticky;top:0;z-index:50;background:var(--card);border-bottom:1.5px solid var(--brand);padding:14px 16px}
+.cfgpan.open{display:block}
+.pinov{position:fixed;inset:0;z-index:9998;background:#111;display:flex;align-items:center;justify-content:center;padding:24px}
+.pinov.off{display:none}
+.pinbox{width:100%;max-width:320px;text-align:center}
+.pintit{font-size:20px;font-weight:700;margin-top:8px}
+.pinsub{font-size:12px;color:var(--ink-muted);margin:6px 0 18px;line-height:1.5}
+.pinbox input{width:100%;text-align:center;font-size:22px;letter-spacing:8px;padding:14px;margin-bottom:10px}
+.pinerr{color:var(--red);font-size:12px;min-height:18px;margin-bottom:6px}
+.pinsalir{display:block;margin-top:14px;color:var(--ink-muted);font-size:12px;text-decoration:none}
+</style>
+</head>
+<body>
+<header>
+  <img src="logo-header.png" alt="BoParts" class="logo">
+  <div class="hdr"><h1>Documentos</h1><p id="fechaHdr"></p></div>
+</header>
+
+<div class="container">
+  <div class="section">
+    <input type="search" id="q" placeholder="N° de nota, cliente, cedula/RIF, producto o factura..." autocomplete="off" style="margin-bottom:8px">
+    <div class="tabs" id="tabs">
+      <button class="tab" data-p="hoy">Hoy</button>
+      <button class="tab" data-p="7">7 dias</button>
+      <button class="tab on" data-p="30">30 dias</button>
+      <button class="tab" data-p="todo">Todo</button>
+    </div>
+    <div id="lbl" style="font-size:12px;color:var(--ink-muted)"></div>
+  </div>
+  <div id="lista"><div class="cart-empty">Cargando...</div></div>
+</div>
+
+<div class="toast" id="toast" onclick="this.className='toast'"></div>
+<!-- FAB NAV -->
+<button class="fab" onclick="toggleNav()">
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#111" stroke-width="2.5" stroke-linecap="round">
+    <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
+  </svg>
+</button>
+<div class="nav-ov" id="navOv" onclick="closeNav()"></div>
+<div class="nav-pan" id="navPan">
+  <div class="nav-t">Repuesto BoParts</div>
+  <div id="verTag" style="font-size:10px;color:var(--ink-muted);margin:-6px 0 10px;letter-spacing:0.3px">app v1.0 · script ?</div>
+  <div class="nav-g">
+    <a class="ncard" href="index.html">
+      <span class="nicon">📋</span>
+      <span class="nlbl">Lista de Precios</span>
+      <span class="ndesc">Consulta y busqueda</span>
+    </a>
+    <a class="ncard" href="boparts_ventas.html">
+      <span class="nicon">💰</span>
+      <span class="nlbl">Registrar Venta</span>
+      <span class="ndesc">Nueva venta</span>
+    </a>
+    <a class="ncard" href="boparts_fotos.html">
+      <span class="nicon">📷</span>
+      <span class="nlbl">Cargar Fotos</span>
+      <span class="ndesc">Catalogo imagenes</span>
+    </a>
+    <a class="ncard" href="boparts_demanda.html">
+      <span class="nicon">📝</span>
+      <span class="nlbl">Demanda</span>
+      <span class="ndesc">No atendida</span>
+    </a>
+    <a class="ncard" href="boparts_compras.html">
+      <span class="nicon">📦</span>
+      <span class="nlbl">Compras</span>
+      <span class="ndesc">Recibir mercancia</span>
+    </a>
+    <a class="ncard" href="boparts_gastos.html">
+      <span class="nicon">💸</span>
+      <span class="nlbl">Gastos</span>
+      <span class="ndesc">Registrar gasto</span>
+    </a>
+    <a class="ncard" href="boparts_cobros.html">
+      <span class="nicon">🧾</span>
+      <span class="nlbl">Cobros</span>
+      <span class="ndesc">Cuentas por cobrar</span>
+    </a>
+    <a class="ncard" href="boparts_gerencia.html">
+      <span class="nicon">📊</span>
+      <span class="nlbl">Gerencia</span>
+      <span class="ndesc">Solo socios</span>
+    </a>
+    <a class="ncard" href="boparts_apartados.html">
+      <span class="nicon">🔖</span>
+      <span class="nlbl">Apartados</span>
+      <span class="ndesc">Y contra pedido</span>
+    </a>
+    <a class="ncard" href="boparts_devoluciones.html">
+      <span class="nicon">↩️</span>
+      <span class="nlbl">Devoluciones</span>
+      <span class="ndesc">Y cambios</span>
+    </a>
+    <a class="ncard" href="boparts_inventario.html">
+      <span class="nicon">🧮</span>
+      <span class="nlbl">Inventario</span>
+      <span class="ndesc">Conteo de stock</span>
+    </a>
+    <a class="ncard" href="boparts_tareas.html">
+      <span class="nicon">✅</span>
+      <span class="nlbl">Mi día</span>
+      <span class="ndesc">Tareas del día</span>
+    </a>
+  </div>
+</div>
+
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+<script src="boparts_pdf.js?v=2026-11-02.6"></script>
+<script src="boparts_sesion.js?v=2026-11-02.6"></script>
+<script>
+var SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
+var SCRIPT_URL_SESION = SCRIPT_URL;
+var APP_VERSION = 'v1.0', VER_SCRIPT = '?';
+var periodo = '30', DOCS = [], LOGO = '', tBusca = null, pedido = 0;
+cargarLogoPDF(function(d) { LOGO = d; });
+
+function sellarVersion(d) {
+  if (d && d.v) VER_SCRIPT = d.v;
+  var t = document.getElementById('verTag'); if (t) t.textContent = 'app ' + APP_VERSION + ' · script ' + VER_SCRIPT;
+  return d;
+}
+document.getElementById('fechaHdr').textContent = APP_VERSION + ' · buscar y reimprimir notas y facturas';
+function p2(n) { return (n < 10 ? '0' : '') + n; }
+function iso(d) { return d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate()); }
+function fechaES(f) { var p = String(f || '').split('-'); return p.length === 3 ? p[2] + '/' + p[1] + '/' + p[0] : (f || ''); }
+function usd(n) { return '$' + (Math.round((Number(n) || 0) * 100) / 100).toFixed(2); }
+function bs(n) { return 'Bs ' + Math.round(Number(n) || 0).toLocaleString('es-VE'); }
+function escHtml(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function toast(msg, type) {
+  var el = document.getElementById('toast'); el.textContent = msg; el.className = 'toast show ' + (type || '');
+  clearTimeout(el._t); el._t = setTimeout(function() { el.className = 'toast'; }, type === 'err' ? 7000 : 3500);
+}
+function toggleNav() { document.getElementById('navPan').classList.toggle('open'); document.getElementById('navOv').classList.toggle('open'); }
+function closeNav() { document.getElementById('navPan').classList.remove('open'); document.getElementById('navOv').classList.remove('open'); }
+
+function rango() {
+  var h = new Date(), a = new Date(h);
+  if (periodo === 'hoy') return {d1:iso(h), d2:iso(h)};
+  if (periodo === 'todo') return {d1:'2026-01-01', d2:iso(h)};
+  a.setDate(a.getDate() - Number(periodo)); return {d1:iso(a), d2:iso(h)};
+}
+document.getElementById('tabs').addEventListener('click', function(e) {
+  var b = e.target.closest('.tab'); if (!b) return;
+  [].forEach.call(document.querySelectorAll('#tabs .tab'), function(t) { t.classList.remove('on'); });
+  b.classList.add('on'); periodo = b.dataset.p; cargar();
+});
+document.getElementById('q').addEventListener('input', function() { clearTimeout(tBusca); tBusca = setTimeout(cargar, 450); });
+
+function cargar() {
+  var q = document.getElementById('q').value.trim(), r = rango(), mio = ++pedido;
+  // Con algo escrito se busca en todo el historico (el periodo solo filtra la lista sin busqueda)
+  var url = SCRIPT_URL + '?action=documentos&q=' + encodeURIComponent(q) + (q ? '' : '&desde=' + r.d1 + '&hasta=' + r.d2) + '&t=' + Date.now();
+  document.getElementById('lbl').textContent = q ? 'Buscando "' + q + '" en todo el historico...' : 'Del ' + fechaES(r.d1) + ' al ' + fechaES(r.d2);
+  fetch(url).then(leerJSON).then(function(d) {
+    if (mio !== pedido) return;          // llego tarde: ya se pidio otra busqueda
+    sellarVersion(d);
+    if (!d || !d.ok) throw new Error(d && d.error ? d.error : 'sin datos');
+    DOCS = d.documentos || [];
+    document.getElementById('lbl').textContent = (q ? 'Resultados de "' + q + '"' : 'Del ' + fechaES(r.d1) + ' al ' + fechaES(r.d2)) +
+      ' · ' + d.total + ' nota' + (d.total === 1 ? '' : 's') + (d.total > DOCS.length ? ' (se muestran las ' + DOCS.length + ' mas recientes)' : '');
+    pintar();
+  }).catch(function(e) {
+    if (e && e.message === 'SESION') return;
+    document.getElementById('lista').innerHTML = '<div class="section"><div class="cart-empty" style="color:var(--red)">No se pudo cargar: ' + escHtml(e.message) +
+      '<br><span style="font-size:12px">Si dice "Esa pantalla es solo..." o no trae datos, falta desplegar Apps Script v28.6.</span></div></div>';
+  });
+}
+
+function pintar() {
+  if (!DOCS.length) { document.getElementById('lista').innerHTML = '<div class="section"><div class="cart-empty">No hay notas con esa busqueda.</div></div>'; return; }
+  var socio = !sesionActual() || soySocio();
+  document.getElementById('lista').innerHTML = DOCS.map(function(x, i) {
+    var pag = (x.pagos || []).filter(function(p) { return p.monto; }).map(function(p) { return p.metodo + (p.banco ? ' ' + p.banco : ''); }).join(' + ');
+    return '<div class="cli"><div class="h" style="cursor:default"><div style="min-width:0">' +
+      '<div class="nm">NE-' + ('000' + x.nota).slice(-4) + ' · ' + escHtml(x.cliente || 'Sin cliente') + '</div>' +
+      '<div class="sb">' + fechaES(x.fecha) + (x.hora ? ' ' + escHtml(x.hora) : '') + ' · ' + escHtml(x.vendedor) + (pag ? ' · ' + escHtml(pag) : '') + '</div>' +
+      '<div class="sb" style="margin-top:3px">' +
+        (x.credito ? '<span class="chip cr">credito</span>' : '') +
+        (x.factura ? '<span class="chip ali">Factura ' + escHtml(x.factura.numero) + (x.factura.modo === 'PRUEBA' ? ' (prueba)' : '') + '</span>' : '') +
+        (x.devoluciones ? '<span class="chip al">' + x.devoluciones + ' devolucion' + (x.devoluciones === 1 ? '' : 'es') + '</span>' : '') + '</div>' +
+      '</div><div class="rt">' + usd(x.totalUSD) + '<small>' + bs(x.totalBS) + '</small></div></div>' +
+      '<div class="det" style="display:block"><div style="font-size:11px;color:var(--ink-soft);line-height:1.45">' + escHtml(x.productos) + '</div>' +
+      '<div style="display:flex;gap:8px;margin-top:9px">' +
+        '<button class="tab on" style="flex:1" onclick="reimprimir(' + i + ',\'nota\')">Nota</button>' +
+        (x.factura ? '<button class="tab" style="flex:1" onclick="reimprimir(' + i + ',\'factura\')">Factura</button>' : '') +
+        (socio ? '<a class="tab" style="flex:1;text-align:center;text-decoration:none" href="boparts_devoluciones.html?nota=' + x.nota + '">Devolucion / cambio</a>' : '') +
+      '</div></div></div>';
+  }).join('');
+}
+
+function reimprimir(i, que) {
+  var x = DOCS[i]; if (!x) return;
+  toast('Preparando ' + (que === 'nota' ? 'la nota NE-' + ('000' + x.nota).slice(-4) : 'la factura') + '...');
+  fetch(SCRIPT_URL + '?action=documento&nota=' + x.nota + '&t=' + Date.now()).then(leerJSON).then(function(d) {
+    if (!d || !d.ok) throw new Error(d && d.error ? d.error : 'no se encontro');
+    if (que === 'factura') {
+      if (!d.factura || !d.factura.doc) throw new Error('Esa factura no tiene el documento guardado (es anterior a la factura digital)');
+      return pdfFactura(d.factura.doc, {logo:LOGO, reimpresion:true});
+    }
+    return pdfNota(d, {logo:LOGO, reimpresion:true});
+  }).then(entregar).catch(function(e) { if (e && e.message !== 'SESION') toast('No se pudo: ' + e.message, 'err'); });
+}
+
+// Compartir (WhatsApp, correo...) si el telefono lo permite; si no, descargar.
+function entregar(pdf) {
+  var file = null;
+  try { file = new File([pdf.blob], pdf.nombre, {type:'application/pdf'}); } catch (e) {}
+  if (file && navigator.canShare && navigator.canShare({files:[file]})) {
+    navigator.share({files:[file], title:pdf.num}).catch(function() { descargar(pdf); });
+    return;
+  }
+  descargar(pdf);
+}
+function descargar(pdf) {
+  var url = URL.createObjectURL(pdf.blob), a = document.createElement('a');
+  a.href = url; a.download = pdf.nombre; document.body.appendChild(a); a.click();
+  setTimeout(function() { URL.revokeObjectURL(url); a.remove(); }, 4000);
+  toast('Descargado ' + pdf.nombre, 'ok');
+}
+
+function alEntrar() { cargar(); }
+revisarSesion(cargar);
+</script>
+</body>
+</html>

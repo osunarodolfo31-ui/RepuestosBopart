@@ -1,5 +1,34 @@
 # CHANGELOG — Repuesto BoParts
 
+## Apps Script v28.6 + documentos v1.0 + boparts_pdf.js — build 2026-11-02.6 — buscar y reimprimir
+
+- boparts_documentos.html (nueva, grupo Clientes del menu, tambien para el vendedor): busca notas por numero,
+  cliente, cedula/RIF, producto o factura; reimprime NOTA y FACTURA desde el servidor; boton Devolucion / cambio
+  (socios) que abre Devoluciones con la nota ya cargada.
+- boparts_pdf.js (nuevo): datos del emisor y dibujo de factura digital y nota de entrega, compartidos por Ventas y
+  Documentos. Domicilio fiscal nuevo (RIF 13/10/2026): Av. Florencio Jimenez Km 7, Local B-1, La Capilla, ZP 3001.
+- devoluciones v2.0: ?nota=N la carga sola; enlace a Documentos.
+- Apps Script: action=documentos y action=documento.
+
+## Apps Script v28.5 + ventas v15.1 — build 2026-11-02.5 — factura digital en modo preparacion
+
+Adecuacion a la Providencia SNAT/2026/00093 (Gaceta 43.484, 21/10/2026, vigente el 19/04/2027).
+- La factura anterior NO era valida: el numero de control lo generaba el sistema (CONFIG B13) y citaba la
+  Providencia 2011/0071. Las 3 emitidas fueron pruebas y no se entregaron.
+- tipo=factura_digital: el SERVIDOR arma el documento con la venta guardada (renglones, base, IVA, descuento,
+  tasa BCV de la venta, pagos) y lo guarda en FACTURAS (columnas Q-U: MODO, SERIE, CORREO, DIRECCION, DOC_JSON).
+  Una factura por venta. Valida RIF/cedula, exige domicilio fiscal con RIF J o G, guarda el correo en CLIENTES (M).
+- Hoja FISCAL (se crea sola): datos del emisor, actividad economica (pendiente), serie, MODO, IGTF.
+  MODO PRUEBA: numero PRUEBA-000001, control "POR ASIGNAR", marca "DOCUMENTO DE PRUEBA - SIN VALOR FISCAL", no
+  toca CONFIG ni marca la venta como facturada. MODO IMPRENTA: llama a imprentaEmitir_(), que hoy rechaza; ahi se
+  conecta la API de la imprenta que se contrate.
+- PDF nuevo con todos los campos de la factura digital (formato de referencia: factura Datanet B038428, imprenta
+  SERDIMPRE): serie, numero, fecha y hora de emision, control y fecha/hora de asignacion, actividad economica,
+  cliente con domicilio fiscal y correo, renglones con codigo/impuesto/alicuota/descuento, descuento, exento,
+  base imponible, IVA, total, metodo de pago, equivalente USD y tipo de cambio BCV, IGTF si aplica, imprenta.
+- BOSC es contribuyente ORDINARIO: no es agente de percepcion de IGTF (AGENTE_IGTF = NO).
+Pendiente para estar en regla: contratar la imprenta digital (API), notas de credito fiscales, libro de ventas.
+
 ## Apps Script v28.4 — LISTA DE PRODUCTOS limpia (02/11)
 
 Hecho directo en la hoja (respaldo completo antes de tocar: hoja RESPALDO_LISTA_2026-11-02):

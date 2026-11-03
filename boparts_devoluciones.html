@@ -1,7 +1,10 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_devoluciones.html
-  VERSION: v1.9 (2026-11-01) | build 2026-11-02.4 | requiere Apps Script v28
+  VERSION: v2.0 (2026-11-02) | build 2026-11-02.6 | requiere Apps Script v28.6
+  v2.0: se abre con la nota ya cargada desde Documentos (boparts_devoluciones.html?nota=379). Si no sabes el
+  numero, el enlace "Buscar la nota" lleva a Documentos (por cliente, cedula, producto o factura).
+  VERSION anterior: v1.9 (2026-11-01) | build 2026-11-02.5 | requiere Apps Script v28
   v1.9: si se le devuelve dinero al cliente, se elige POR DONDE sale (metodos habilitados para SALIR en la hoja
   CANALES). Antes "pago movil" no decia de que banco, y el flujo de caja no podia ponerlo en ninguna cuenta.
   El cobro de una diferencia usa los metodos habilitados para ENTRAR.
@@ -223,6 +226,7 @@ select option{background:#1E1E1E;color:var(--ink)}
       <div class="field"><label>Numero de nota *</label><input type="number" id="inNota" placeholder="22" inputmode="numeric"></div>
       <div class="field"><label>&nbsp;</label><button class="nbtn nbtn-p" style="margin:0" onclick="buscar()">Buscar</button></div>
     </div>
+    <div style="font-size:12px;margin-top:-4px"><a href="boparts_documentos.html" style="color:var(--brand)">¿No sabes el numero? Buscar la nota por cliente, producto o factura</a></div>
     <div id="notaInfo"></div>
   </div>
 
@@ -311,7 +315,7 @@ select option{background:#1E1E1E;color:var(--ink)}
   </div>
 </div>
 
-<script src="boparts_sesion.js?v=2026-11-02.4"></script>
+<script src="boparts_sesion.js?v=2026-11-02.6"></script>
 <script>
 
 
@@ -325,7 +329,7 @@ function sellarVersion(d) {
   return d;
 }
 function txt_(v) { return v == null ? '' : String(v); }
-var APP_VERSION = 'v1.9';
+var APP_VERSION = 'v2.0';
 var SALIDAS = [];
 var PIN_HASH_SOCIOS = 911136;      // mismo PIN de Gerencia
 var PLAZO_DIAS = 5;                // maximo acordado para aceptar un cambio
@@ -366,8 +370,15 @@ function cargarMetodosDev() {
   cargarCanales('entra', function(lista) { METODOS = lista.filter(function(m) { return !m.credito; }); if (NOTA) render(); });
   cargarCanales('sale', function(lista) { SALIDAS = lista.filter(function(m) { return !m.credito; }); if (NOTA) render(); });
 }
-function alEntrar() { cargarProductos(); cargarMetodosDev(); }
-revisarSesion(function() { cargarProductos(); cargarMetodosDev(); });
+// v2.0 — llega desde Documentos con ?nota=N: se carga sola
+function notaDeUrl() {
+  var m = /[?&]nota=(\d+)/.exec(location.search);
+  if (!m) return;
+  document.getElementById('inNota').value = m[1];
+  buscar();
+}
+function alEntrar() { cargarProductos(); cargarMetodosDev(); notaDeUrl(); }
+revisarSesion(function() { cargarProductos(); cargarMetodosDev(); notaDeUrl(); });
 
 function hashPin(t) { var h = 5381; for (var i = 0; i < t.length; i++) h = ((h * 33) ^ t.charCodeAt(i)) >>> 0; return h % 1000000; }
 function pedirPin() {
