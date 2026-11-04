@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_gerencia.html
-  VERSION: v3.6 (2026-11-04) | build 2026-11-04.3 | requiere Apps Script v28.11 y boparts_clientes.js
+  VERSION: v3.6 (2026-11-04) | build 2026-11-04.5 | requiere Apps Script v28.11 y boparts_clientes.js
   v3.6: la ficha del cliente edita cedula/RIF (validado), telefono y direccion por partes. Region predeterminada
   (estado y ciudad) editable arriba de la lista de clientes.
   VERSION anterior: v3.5 (2026-11-02) | build 2026-11-02.8 | requiere Apps Script v28.7
@@ -526,8 +526,8 @@ select option{background:#1E1E1E;color:var(--ink)}
   </div>
 </div>
 
-<script src="boparts_sesion.js?v=2026-11-04.3"></script>
-<script src="boparts_clientes.js?v=2026-11-04.3"></script>
+<script src="boparts_sesion.js?v=2026-11-04.5"></script>
+<script src="boparts_clientes.js?v=2026-11-04.5"></script>
 <script>
 
 
@@ -769,7 +769,7 @@ function cargarApartados() {
 // Cada factura se toca para abrirla: monto, lo pagado, sus pagos, sus productos y la foto. Desde ahi se paga
 // completa o se abona parcial. Lo que sobre de un pago pasa a la siguiente factura que vence (lo hace el
 // servidor). "Ver pagadas" muestra el historial. La cuenta de donde sale el pago va al flujo de caja.
-var CXP = [], FACT_ABIERTA = '', VER_PAGADAS = {}, CUENTAS_PAGO = ['Efectivo USD', 'Efectivo Bs', 'Banesco', 'Bancamiga', 'Bancrecer', 'Bancrecer Empresarial', 'Zelle', 'Binance'];
+var CXP = [], FACT_ABIERTA = '', VER_PAGADAS = {}, CUENTAS_PAGO = ['Efectivo USD', 'Efectivo Bs', 'Banesco', 'Bancamiga', 'Bancrecer', 'Zelle', 'Binance'];
 var PAGO_PEND = {};   // ID de cada pago en curso: se conserva si hay que reintentar, para no duplicar
 function cargarPagar() {
   if (!document.getElementById('pagarBox')) return;   // v3.4: las cuentas por pagar viven en Dinero

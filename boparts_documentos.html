@@ -1,7 +1,10 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_documentos.html
-  VERSION: v1.1 (2026-11-02) | build 2026-11-04.3 | requiere Apps Script v28.6 y boparts_pdf.js v1.1
+  VERSION: v1.2 (2026-11-04) | build 2026-11-04.5 | requiere Apps Script v28.13, boparts_pdf.js y boparts_clientes.js
+  v1.2: boton "Facturar" (solo socios) en las notas sin factura: pide los datos fiscales del cliente y emite la factura
+  digital desglosando el IVA que ya trae el precio. Lo confirmado se guarda en la ficha del cliente.
+  VERSION anterior: v1.1 (2026-11-02) | build 2026-11-02.8 | requiere Apps Script v28.6 y boparts_pdf.js v1.1
   v1.1: la nota reimpresa sale con el modelo profesional nuevo (igual a la de Ventas).
   VERSION anterior: v1.0 (2026-11-02) | build 2026-11-02.6
   v1.0: pantalla nueva. Busca notas de entrega por numero, cliente, cedula/RIF, producto o numero de factura (con
@@ -297,6 +300,24 @@ select option{background:#1E1E1E;color:var(--ink)}
   <div id="lista"><div class="cart-empty">Cargando...</div></div>
 </div>
 
+<!-- v1.2: facturar una nota ya hecha (solo socios) -->
+<div class="overlay" id="factOv" onclick="if(event.target===this)cerrarFact()">
+  <div class="sheet">
+    <div class="sheet-title" id="fdTit">Facturar nota</div>
+    <div class="cominfo" id="fdSub" style="margin-bottom:12px"></div>
+    <div class="field"><label>Cedula / RIF *</label><input type="text" id="fdRif" autocapitalize="characters" placeholder="V-12345678 o J-12345678-9"></div>
+    <div class="field"><label>Nombre o razon social *</label><input type="text" id="fdNombre"></div>
+    <div class="stitle" style="margin:6px 0 8px;font-size:11px">Domicilio fiscal <span style="color:var(--ink-muted);text-transform:none;font-weight:500">(obligatorio con RIF J o G: copialo del RIF del cliente)</span></div>
+    <div id="fdDirBox"></div>
+    <div class="row2">
+      <div class="field"><label>Correo</label><input type="email" id="fdCorreo" placeholder="cliente@correo.com"></div>
+      <div class="field"><label>Telefono</label><input type="tel" id="fdTel"></div>
+    </div>
+    <button class="tab on" id="fdBtn" style="width:100%;padding:12px;margin-top:8px" onclick="emitirFactura()">Emitir factura</button>
+    <button class="tab" style="width:100%;padding:12px;margin-top:8px" onclick="cerrarFact()">Cancelar</button>
+  </div>
+</div>
+
 <div class="toast" id="toast" onclick="this.className='toast'"></div>
 <!-- FAB NAV -->
 <button class="fab" onclick="toggleNav()">
@@ -375,12 +396,13 @@ select option{background:#1E1E1E;color:var(--ink)}
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
-<script src="boparts_pdf.js?v=2026-11-04.3"></script>
-<script src="boparts_sesion.js?v=2026-11-04.3"></script>
+<script src="boparts_pdf.js?v=2026-11-04.5"></script>
+<script src="boparts_sesion.js?v=2026-11-04.5"></script>
+<script src="boparts_clientes.js?v=2026-11-04.5"></script>
 <script>
 var SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
 var SCRIPT_URL_SESION = SCRIPT_URL;
-var APP_VERSION = 'v1.1', VER_SCRIPT = '?';
+var APP_VERSION = 'v1.2', VER_SCRIPT = '?';
 var periodo = '30', DOCS = [], LOGO = '', tBusca = null, pedido = 0;
 cargarLogoPDF(function(d) { LOGO = d; });
 
@@ -452,7 +474,8 @@ function pintar() {
       '<div class="det" style="display:block"><div style="font-size:11px;color:var(--ink-soft);line-height:1.45">' + escHtml(x.productos) + '</div>' +
       '<div style="display:flex;gap:8px;margin-top:9px">' +
         '<button class="tab on" style="flex:1" onclick="reimprimir(' + i + ',\'nota\')">Nota</button>' +
-        (x.factura ? '<button class="tab" style="flex:1" onclick="reimprimir(' + i + ',\'factura\')">Factura</button>' : '') +
+        (x.factura ? '<button class="tab" style="flex:1" onclick="reimprimir(' + i + ',\'factura\')">Factura</button>'
+                   : (socio && soySocio() ? '<button class="tab" style="flex:1" onclick="abrirFact(' + i + ')">Facturar</button>' : '')) +
         (socio ? '<a class="tab" style="flex:1;text-align:center;text-decoration:none" href="boparts_devoluciones.html?nota=' + x.nota + '">Devolucion / cambio</a>' : '') +
       '</div></div></div>';
   }).join('');
@@ -486,6 +509,61 @@ function descargar(pdf) {
   a.href = url; a.download = pdf.nombre; document.body.appendChild(a); a.click();
   setTimeout(function() { URL.revokeObjectURL(url); a.remove(); }, 4000);
   toast('Descargado ' + pdf.nombre, 'ok');
+}
+
+// ============================================================
+// v1.2 — FACTURAR UNA NOTA YA HECHA (solo socios). El precio incluye el IVA: el total no cambia, se desglosa.
+// ============================================================
+var FX = null;
+function abrirFact(i) {
+  var x = DOCS[i]; if (!x) return;
+  toast('Buscando los datos del cliente...');
+  fetch(SCRIPT_URL + '?action=documento&nota=' + x.nota + '&t=' + Date.now()).then(leerJSON).then(function(d) {
+    if (!d || !d.ok) throw new Error(d && d.error ? d.error : 'no se encontro');
+    FX = {x:x, d:d};
+    var c = d.cliente || {};
+    var tot = Number(x.totalBS) || 0, base = Math.round(tot / 1.16 * 100) / 100;
+    document.getElementById('fdTit').textContent = 'Facturar NE-' + ('000' + x.nota).slice(-4);
+    document.getElementById('fdSub').innerHTML = 'Total pagado <b>' + bsD(tot) + '</b> (IVA incluido): base <b>' + bsD(base) + '</b> + IVA 16% <b>' + bsD(tot - base) + '</b>. El total no cambia.';
+    var vr = validarRif(c.rif);
+    document.getElementById('fdRif').value = vr.ok ? vr.valor : (c.rif || '');
+    document.getElementById('fdNombre').value = /^particular$/i.test(c.nombre || '') ? '' : (c.nombre || '');
+    document.getElementById('fdCorreo').value = c.correo || '';
+    document.getElementById('fdTel').value = c.tel || '';
+    montarDireccion('fd', 'fdDirBox', c);
+    amarrarRif('fdRif');
+    document.getElementById('factOv').classList.add('open');
+  }).catch(function(e) { if (e && e.message !== 'SESION') toast('No se pudo: ' + e.message, 'err'); });
+}
+function bsD(n) { return 'Bs ' + (Math.round(n * 100) / 100).toLocaleString('es-VE', {minimumFractionDigits:2, maximumFractionDigits:2}); }
+function cerrarFact() { document.getElementById('factOv').classList.remove('open'); }
+function emitirFactura() {
+  if (!FX) return;
+  var vr = validarRif(document.getElementById('fdRif').value);
+  if (!vr.ok || !vr.valor) { toast('Cedula/RIF: ' + (vr.error || 'falta'), 'err'); return; }
+  var dd = leerDireccion('fd'), c0 = FX.d.cliente || {};
+  var cli = {rif:vr.valor, nombre:document.getElementById('fdNombre').value.trim(), dir:dd.dir || (hayPartes(c0) ? '' : (c0.dir || '')),
+             correo:document.getElementById('fdCorreo').value.trim(), tel:document.getElementById('fdTel').value.trim()};
+  if (!cli.nombre) { toast('Falta el nombre o razon social', 'err'); return; }
+  if (/^[JGC]/.test(cli.rif) && !dd.calle) { toast('Con RIF ' + cli.rif.charAt(0) + ' hace falta el domicilio fiscal: copialo de su RIF', 'err'); return; }
+  var btn = document.getElementById('fdBtn'); btn.disabled = true; btn.textContent = 'Emitiendo...';
+  function post(b) { return fetch(SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body:JSON.stringify(b)}).then(leerJSON); }
+  // La ficha del cliente queda con lo confirmado aqui
+  if (hayPartes(dd)) post({tipo:'cliente', nombre:cli.nombre, rif:cli.rif, rifAnterior:c0.rif || '', tel:cli.tel, correo:cli.correo,
+    estado:dd.estado, ciudad:dd.ciudad, sector:dd.sector, calle:dd.calle, local:dd.local, referencia:dd.referencia}).catch(function() {});
+  post({tipo:'factura_digital', idVenta:FX.x.idVenta, desglosar:true, cliente:cli}).then(function(r) {
+    if (!r || !r.ok || !r.doc) throw new Error(r && r.error ? r.error : 'no se emitio');
+    return pdfFactura(r.doc, {logo:LOGO}).then(function(pdf) { return {pdf:pdf, r:r}; });
+  }).then(function(o) {
+    btn.disabled = false; btn.textContent = 'Emitir factura';
+    cerrarFact();
+    toast((o.r.repetida ? 'Esa nota ya tenia factura: ' : 'Factura ') + o.pdf.num + (o.r.doc.modo === 'PRUEBA' ? ' (modo prueba, sin valor fiscal)' : ''), 'ok');
+    entregar(o.pdf);
+    cargar();
+  }).catch(function(e) {
+    btn.disabled = false; btn.textContent = 'Emitir factura';
+    if (e && e.message !== 'SESION') toast('No se emitio: ' + e.message, 'err');
+  });
 }
 
 function alEntrar() { cargar(); }

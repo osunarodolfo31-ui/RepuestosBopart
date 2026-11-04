@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_gastos.html
-  VERSION: v2.3 (2026-11-03) | build 2026-11-04.3 | requiere Apps Script v28.8
+  VERSION: v2.3 (2026-11-03) | build 2026-11-04.5 | requiere Apps Script v28.8
   v2.3: dos pestanas nuevas, solo para socios. (1) CONSUMO INTERNO: mercancia de la tienda usada en la tienda
   (tiner, aceite, bombillos). Sale del stock y queda como gasto al costo, sin tocar ninguna cuenta. Si el consumo
   es anterior al ultimo conteo del producto, no se descuenta otra vez. (2) ANULAR: lista de los ultimos gastos
@@ -410,7 +410,7 @@ select option{background:#1E1E1E;color:var(--ink)}
   </div>
 </div>
 
-<script src="boparts_sesion.js?v=2026-11-04.3"></script>
+<script src="boparts_sesion.js?v=2026-11-04.5"></script>
 <script>
 
 
@@ -433,8 +433,8 @@ var METODOS = [
   {label:'Pago Movil Banesco',  metodo:'Pago Movil',      banco:'Banesco',               moneda:'BS',  fijo:0,    pct:0  },
   {label:'Pago Movil Bancrecer',metodo:'Pago Movil',      banco:'Bancrecer',             moneda:'BS',  fijo:0,    pct:0  },
   {label:'Punto Bancamiga',     metodo:'Punto de Venta',  banco:'Bancamiga',             moneda:'BS',  fijo:1000, pct:1.5},
-  {label:'Punto Bancrecer Emp.',metodo:'Punto de Venta',  banco:'Bancrecer Empresarial', moneda:'BS',  fijo:0,    pct:0  },
-  {label:'Cashea Bancrecer',    metodo:'Cashea',          banco:'Bancrecer Empresarial', moneda:'BS',  fijo:0,    pct:0  },
+  {label:'Punto Bancrecer',     metodo:'Punto de Venta',  banco:'Bancrecer',             moneda:'BS',  fijo:0,    pct:0  },
+  {label:'Cashea',              metodo:'Cashea',          banco:'Cashea',                moneda:'BS',  fijo:0,    pct:0  },
   {label:'CREDITO (cuenta por cobrar)', metodo:'Credito', banco:'',                     moneda:'USD', fijo:0,    pct:0, credito:true }
 ];
 

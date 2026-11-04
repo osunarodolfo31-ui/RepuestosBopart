@@ -1,7 +1,9 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_dinero.html
-  VERSION: v1.4 (2026-11-02) | build 2026-11-02.9 | requiere Apps Script v28.3
+  VERSION: v1.5 (2026-11-04) | build 2026-11-04.4 | requiere Apps Script v28.12
+  v1.5: las cuentas POR COBRAR (Cashea) se muestran al final, marcadas, y no suman al total disponible.
+  VERSION anterior: v1.4 (2026-11-02) | build 2026-11-02.9 | requiere Apps Script v28.3
   v1.4: Montos en Bs con 2 decimales (antes se redondeaban a entero y el saldo no cuadraba a la vista con el banco).
   Los movimientos con comision muestran el neto que llega (entradas) o el total que sale (salidas).
   VERSION anterior: v1.3 (2026-11-02) | build 2026-11-02.8 | requiere Apps Script v28.3
@@ -464,11 +466,11 @@ select option{background:#1E1E1E;color:var(--ink)}
 </div>
 
 
-<script src="boparts_sesion.js?v=2026-11-04.3"></script>
+<script src="boparts_sesion.js?v=2026-11-04.5"></script>
 <script>
 var SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
 var SCRIPT_URL_SESION = SCRIPT_URL;
-var APP_VERSION = 'v1.4';
+var APP_VERSION = 'v1.5';
 var VER_SCRIPT = '?';
 var periodo = 'mes', DIN = null, CXP = [], LIQ = [], liqTasa = 0, SALIDAS = [], CUENTAS = [];
 var VER_PAGADAS = {}, FACT_ABIERTA = '', PAGO_PEND = {}, ID_MOV = '', ARQ = null, FILTRO_CTA = '';
@@ -610,11 +612,15 @@ function pintarTodo() {
 
   // Cuentas
   h = '<div class="section"><div class="stitle">Saldo por cuenta</div>';
-  var totUSD = 0, faltan = 0;
-  (d.cuentas || []).forEach(function(c) {
-    if (c.saldoUSD !== null && c.saldoUSD !== undefined) totUSD += c.saldoUSD; else if (c.activa) faltan++;
+  var totUSD = 0, faltan = 0, porCobrarUSD = 0;
+  // v1.5: las cuentas POR COBRAR (Cashea) van al final y NO suman al total: esa plata todavia no esta en ningun banco.
+  var ctas = (d.cuentas || []).slice().sort(function(a, b) { return (a.porCobrar ? 1 : 0) - (b.porCobrar ? 1 : 0); });
+  ctas.forEach(function(c) {
+    if (c.porCobrar) { if (c.saldoUSD) porCobrarUSD += c.saldoUSD; }
+    else if (c.saldoUSD !== null && c.saldoUSD !== undefined) totUSD += c.saldoUSD; else if (c.activa) faltan++;
     var tieneSaldo = c.saldo !== null && c.saldo !== undefined;
-    h += '<div class="cli"><div class="h" style="cursor:default"><div><div class="nm">' + escHtml(c.cuenta) + (c.ob ? ' <span class="chip cr">casa de cambio</span>' : '') +
+    h += '<div class="cli"' + (c.porCobrar ? ' style="border-style:dashed"' : '') + '><div class="h" style="cursor:default"><div><div class="nm">' + escHtml(c.cuenta) + (c.ob ? ' <span class="chip cr">casa de cambio</span>' : '') +
+      (c.porCobrar ? ' <span class="chip al">por cobrar</span>' : '') +
       (!c.activa ? ' <span class="chip no">desactivada</span>' : '') + '</div>' +
       '<div class="sb">' + (c.moneda === 'BS' ? 'Bolivares' : 'Dolares') + (c.partes && c.partes.length ? ' · incluye ' + escHtml(c.partes.join(', ')) : '') +
         (tieneSaldo ? ' · desde ' + fechaES(c.fechaInicial) : ' · sin saldo inicial') + '</div></div>' +
@@ -630,6 +636,7 @@ function pintarTodo() {
       '</div></div>';
   });
   h += '<div class="aviso">Total con saldo: <b>' + usd(totUSD) + '</b>' + (faltan ? ' · ' + faltan + ' cuenta(s) sin saldo inicial no suman.' : '') +
+       (porCobrarUSD ? ' · <b>Por cobrar (Cashea): ' + usd(porCobrarUSD) + '</b>, no suma: llega cuando Cashea liquide.' : '') +
        ' El saldo = saldo inicial + entradas - salidas - comisiones desde esa fecha. <b>Arqueo</b>: escribes lo que de verdad hay y la diferencia queda como ajuste.</div></div>';
   document.getElementById('cuentasBox').innerHTML = h;
 

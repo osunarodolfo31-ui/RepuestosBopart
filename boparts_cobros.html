@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_cobros.html
-  VERSION: v3.3 (2026-11-01) | build 2026-11-04.3 | requiere Apps Script v28
+  VERSION: v3.3 (2026-11-01) | build 2026-11-04.5 | requiere Apps Script v28
   v3.3: los metodos salen de la hoja CANALES (habilitados para ENTRAR) y la moneda del abono queda fija en la de
   la cuenta del metodo. El efectivo queda amarrado a su caja (Efectivo USD o Efectivo Bs).
   VERSION anterior: v3.2 (2026-09-22) | build 2026-10-31.1 | REQUIERE Apps Script v26
@@ -347,7 +347,7 @@ select option{background:#1E1E1E;color:var(--ink)}
   </div>
 </div>
 
-<script src="boparts_sesion.js?v=2026-11-04.3"></script>
+<script src="boparts_sesion.js?v=2026-11-04.5"></script>
 <script>
 
 
@@ -368,8 +368,8 @@ var METODOS = [
   {label:'Pago Movil Banesco',  metodo:'Pago Movil',      banco:'Banesco',               moneda:'BS',  fijo:0,    pct:0  },
   {label:'Pago Movil Bancrecer',metodo:'Pago Movil',      banco:'Bancrecer',             moneda:'BS',  fijo:0,    pct:0  },
   {label:'Punto Bancamiga',     metodo:'Punto de Venta',  banco:'Bancamiga',             moneda:'BS',  fijo:1000, pct:1.5},
-  {label:'Punto Bancrecer Emp.',metodo:'Punto de Venta',  banco:'Bancrecer Empresarial', moneda:'BS',  fijo:0,    pct:0  },
-  {label:'Cashea Bancrecer',    metodo:'Cashea',          banco:'Bancrecer Empresarial', moneda:'BS',  fijo:0,    pct:0  },
+  {label:'Punto Bancrecer',     metodo:'Punto de Venta',  banco:'Bancrecer',             moneda:'BS',  fijo:0,    pct:0  },
+  {label:'Cashea',              metodo:'Cashea',          banco:'Cashea',                moneda:'BS',  fijo:0,    pct:0  },
   {label:'CREDITO (cuenta por cobrar)', metodo:'Credito', banco:'',                     moneda:'USD', fijo:0,    pct:0, credito:true }
 ];
 

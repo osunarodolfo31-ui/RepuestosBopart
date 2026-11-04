@@ -1,6 +1,17 @@
 /**
  * Repuesto BoParts — Code.gs
- * VERSION: v28.11 (2026-11-04) | clientes: direccion por partes y RIF validado
+ * VERSION: v28.13 (2026-11-04) | facturar una venta ya hecha
+ *
+ * v28.13 — factura_digital con desglosar:true (solo socios, desde Documentos): una venta hecha sin "Facturar" se
+ *   factura despues; el total (IVA incluido) se desglosa en base e IVA y se guarda en VENTAS AF/AG/AH.
+ *
+ * VERSION anterior: v28.12 (2026-11-04) | Cashea como cuenta por cobrar
+ *
+ * v28.12 — CUENTAS columna E TIPO: BANCO o POR_COBRAR. "Bancrecer Empresarial" pasa a llamarse "Cashea" (POR_COBRAR):
+ *   lo financiado por Cashea queda ahi hasta que Cashea liquide a Bancrecer (la cuenta juridica). Dinero la muestra
+ *   aparte y no la suma al total disponible.
+ *
+ * VERSION anterior: v28.11 (2026-11-04) | clientes: direccion por partes y RIF validado
  *
  * v28.11 — CLIENTES: columnas nuevas N ESTADO, O CIUDAD, P SECTOR, Q CALLE, R LOCAL, S REFERENCIA (M es CORREO).
  *   D DIRECCION se arma de las partes (calle, local, sector, ciudad, Estado X) y es la que usan nota y factura.
@@ -766,7 +777,7 @@ function claveDePost_(data) {
 // OJO: esta constante es lo que ven las apps en el menu. Se habia quedado en v21.4 mientras el
 // encabezado ya decia v24, asi que el sello de version — que existe justamente para saber si lo
 // desplegado es lo que crees — estaba mintiendo. Cada version nueva se cambia AQUI tambien.
-var VERSION_SCRIPT = 'v28.11';
+var VERSION_SCRIPT = 'v28.13';
 
 function json_(obj) {
   // La version viaja en cada respuesta: es la forma rapida de saber si lo desplegado es lo que crees
@@ -3992,8 +4003,8 @@ var METODOS_DEFECTO = [
   ['Pago Movil Banesco',            'Pago Movil',     'Banesco',                     'BS',  0,    0,   'NO', 'SI'],
   ['Pago Movil Bancrecer',          'Pago Movil',     'Bancrecer',                   'BS',  0,    0,   'NO', 'SI'],
   ['Punto Bancamiga',               'Punto de Venta', 'Bancamiga',                   'BS',  1000, 1.5, 'NO', 'SI'],
-  ['Punto Bancrecer Emp.',          'Punto de Venta', 'Bancrecer Empresarial',       'BS',  0,    0,   'NO', 'SI'],
-  ['Cashea Bancrecer',              'Cashea',         'Bancrecer Empresarial',       'BS',  0,    0,   'NO', 'SI'],
+  ['Punto Bancrecer',               'Punto de Venta', 'Bancrecer',                   'BS',  0,    0,   'NO', 'SI'],
+  ['Cashea',                        'Cashea',         'Cashea',                      'BS',  0,    0,   'NO', 'SI'],
   ['CREDITO (cuenta por cobrar)',   'Credito',        '',                            'USD', 0,    0,   'SI', 'SI']
 ];
 var ALIADOS_DEFECTO = [
@@ -4468,7 +4479,7 @@ function consumoInterno_(ss, d, quien) {
 // CUENTAS es una hoja: agregar una cuenta nueva no requiere tocar codigo.
 var CUENTAS_DEFECTO = [
   ['Efectivo USD', 'USD', 'SI'], ['Efectivo Bs', 'BS', 'SI'], ['Banesco', 'BS', 'SI'], ['Bancamiga', 'BS', 'SI'],
-  ['Bancrecer', 'BS', 'SI'], ['Bancrecer Empresarial', 'BS', 'SI'], ['Zelle', 'USD', 'NO'], ['Binance', 'USD', 'NO'],
+  ['Bancrecer', 'BS', 'SI'], ['Cashea', 'BS', 'SI', '', 'POR_COBRAR'], ['Zelle', 'USD', 'NO'], ['Binance', 'USD', 'NO'],
   ['OB International', 'USD', 'SI']
 ];
 // v28 — Zelle y Binance son cuentas PERSONALES de Rodolfo que el pone a disposicion de la tienda a traves de su
@@ -4500,7 +4511,8 @@ function listaCuentas_(ss, conInactivas) {
   try { asegurarCuentaOB_(ss, sh); } catch (eOb) {}
   try { if (sh && !String(sh.getRange(1, 4).getValue() || '').trim()) sh.getRange(1, 4).setValue('DE'); } catch (eDe) {}
   var out = [];
-  var filas = (sh && sh.getLastRow() >= 2) ? sh.getRange(2, 1, sh.getLastRow() - 1, 4).getValues() : CUENTAS_DEFECTO;
+  try { if (sh && !String(sh.getRange(1, 5).getValue() || '').trim()) sh.getRange(1, 5).setValue('TIPO'); } catch (eTi) {}
+  var filas = (sh && sh.getLastRow() >= 2) ? sh.getRange(2, 1, sh.getLastRow() - 1, 5).getValues() : CUENTAS_DEFECTO;
   filas.forEach(function(r) {
     var n = String(r[0] || '').trim(), m = String(r[1] || '').trim().toUpperCase();
     if (!n || (m !== 'USD' && m !== 'BS')) return;
@@ -4509,7 +4521,9 @@ function listaCuentas_(ss, conInactivas) {
     // v28.1 — DE: la cuenta es de otra (hoy, Banesco es de OB International). Sin saldo propio para la tienda.
     var de = String(r[3] == null ? '' : r[3]).trim();
     if (de.toUpperCase() === n.toUpperCase()) de = '';
-    out.push({cuenta:n, moneda:m, activa:activa, ob:n.toUpperCase() === CUENTA_OB.toUpperCase(), de:de});
+    // v28.12 — TIPO: BANCO (por defecto) o POR_COBRAR (Cashea: plata que todavia no llego a ningun banco).
+    var porCobrar = String(r[4] == null ? '' : r[4]).trim().toUpperCase().replace(/\s+/g, '_') === 'POR_COBRAR';
+    out.push({cuenta:n, moneda:m, activa:activa, ob:n.toUpperCase() === CUENTA_OB.toUpperCase(), de:de, porCobrar:porCobrar});
   });
   return out;
 }
@@ -5217,12 +5231,11 @@ var CANALES_DEFECTO = [
   ['Bancamiga',             'Pago Movil',     'SALE',  'Pago Movil Bancamiga',  0, 0.3, 'SI', 14],
   // Punto Bancamiga (debito): 0,75% al liquidar + 1,5% de lo liquidado, cobrado aparte = 2,23875% de lo pasado.
   ['Bancamiga',             'Punto de Venta', 'ENTRA', 'Punto Bancamiga',       0, 2.23875, 'SI', 0],
-  ['Bancrecer Empresarial', 'Punto de Venta', 'ENTRA', 'Punto Bancrecer Emp.',  0, 0,   'NO', 0],   // hoy no tiene punto
-  ['Bancrecer Empresarial', 'Cashea',         'ENTRA', 'Cashea Bancrecer',      0, 0,   'SI', 0],
+  ['Bancrecer',             'Punto de Venta', 'ENTRA', 'Punto Bancrecer',       0, 0,   'NO', 0],   // hoy no tiene punto
+  ['Cashea',                'Cashea',         'ENTRA', 'Cashea',                0, 0,   'SI', 0],
   // Cargos del banco que no son por una operacion (mantenimiento, SMS, estado de cuenta): se registran como gasto.
   ['Bancamiga',             'Cargo del banco', 'SALE', 'Cargo del banco Bancamiga',      0, 0, 'SI', 0],
   ['Bancrecer',             'Cargo del banco', 'SALE', 'Cargo del banco Bancrecer',      0, 0, 'SI', 0],
-  ['Bancrecer Empresarial', 'Cargo del banco', 'SALE', 'Cargo del banco Bancrecer Emp.', 0, 0, 'SI', 0],
   // OB es UNA sola via: por donde mueve OB el dinero (Zelle, Binance, efectivo) lo maneja OB por dentro.
   ['OB International',      'OB',             'AMBOS', 'OB International',      0, 0,   'SI', 0]
 ];
@@ -5598,7 +5611,7 @@ function estadoDinero_(ss, desde, hasta) {
   var resumen = {};
   cuentas.forEach(function(c) {
     var ini = iniciales[c.cuenta.toUpperCase()];
-    resumen[c.cuenta] = {cuenta:c.cuenta, moneda:c.moneda, activa:c.activa, ob:c.ob, partes:cuentas.filter(function(k) { return k.de && k.activa && k.de.toUpperCase() === c.cuenta.toUpperCase(); }).map(function(k) { return k.cuenta; }),
+    resumen[c.cuenta] = {cuenta:c.cuenta, moneda:c.moneda, activa:c.activa, ob:c.ob, porCobrar:!!c.porCobrar, partes:cuentas.filter(function(k) { return k.de && k.activa && k.de.toUpperCase() === c.cuenta.toUpperCase(); }).map(function(k) { return k.cuenta; }),
                          saldoInicial:ini ? ini.monto : null, fechaInicial:ini ? ini.fecha : '',
                          saldo:ini ? ini.monto : null, entra:0, sale:0, comision:0, n:0, sinMovSaldo:0};
   });
@@ -5767,7 +5780,18 @@ function facturaDigital_(ss, d, quien) {
   if (!v) throw rechazo_('No se encontro la venta ' + idVenta);
   var rv = shV.getRange(v.fila, 1, 1, Math.max(shV.getLastColumn(), 41)).getValues()[0];
   var baseUSD = usdCelda_(rv[31]), ivaUSD = usdCelda_(rv[32]), tasaBCV = Number(rv[34]) || Number(leerConfig_(ss).bcv) || 0;
-  if (!(ivaUSD > 0)) throw rechazo_('Esa venta se registro SIN factura (sin IVA). Para facturarla hay que hacer la venta con "Factura" activado.');
+  // v28.13 — FACTURAR DESPUES. Como el precio ya incluye el IVA, una venta hecha sin "Facturar" se puede facturar
+  // luego: el total se desglosa (base = total / 1,16, IVA = diferencia) y se guarda en la venta. Solo socios.
+  if (!(ivaUSD > 0) && d.desglosar) {
+    if (quien && quien.rol && quien.rol !== 'SOCIO') throw rechazo_('Facturar una venta ya hecha es solo para socios');
+    var totV = usdCelda_(rv[5]);
+    if (!(totV > 0)) throw rechazo_('La venta no tiene total en USD');
+    var alicD = Number(leerFiscal_(ss).ALICUOTA_GENERAL) || 16;
+    baseUSD = round2_(totV / (1 + alicD / 100)); ivaUSD = round2_(totV - baseUSD);
+    shV.getRange(v.fila, 32, 1, 3).setValues([[baseUSD, ivaUSD, totV]]);       // AF BASE, AG IVA, AH TOTAL con IVA
+    rv[31] = baseUSD; rv[32] = ivaUSD; rv[33] = totV;
+  }
+  if (!(ivaUSD > 0)) throw rechazo_('Esa venta se registro SIN factura (sin IVA). Un socio la puede facturar desde Documentos.');
   if (!(tasaBCV > 0)) throw rechazo_('No hay tasa BCV para expresar la factura en bolivares. La carga un socio en Gerencia.');
 
   // ---- Cliente: lo que manda la pantalla, validado ----
@@ -6022,9 +6046,15 @@ function documentoNota_(ss, num) {
   var shC = ss.getSheetByName('CLIENTES');
   var dig = soloDigitos_(cli.rif);
   if (shC && shC.getLastRow() >= 2 && dig.length >= 5) {
-    var cv = shC.getRange(2, 1, shC.getLastRow() - 1, Math.max(shC.getLastColumn(), 13)).getValues();
+    var cv = shC.getRange(2, 1, shC.getLastRow() - 1, Math.max(shC.getLastColumn(), CLI_COLS)).getValues();
     for (var k = 0; k < cv.length; k++) {
-      if (soloDigitos_(cv[k][1]) === dig) { cli.tel = String(cv[k][2] || ''); cli.dir = String(cv[k][3] || ''); cli.correo = String(cv[k][12] || ''); break; }
+      if (soloDigitos_(cv[k][1]) === dig) {
+        cli.tel = String(cv[k][2] || ''); cli.dir = String(cv[k][3] || ''); cli.correo = String(cv[k][12] || '');
+        // v28.13: direccion por partes, para facturar desde Documentos
+        cli.estado = String(cv[k][13] || ''); cli.ciudad = String(cv[k][14] || ''); cli.sector = String(cv[k][15] || '');
+        cli.calle = String(cv[k][16] || ''); cli.local = String(cv[k][17] || ''); cli.referencia = String(cv[k][18] || '');
+        break;
+      }
     }
   }
   var fa = facturasPorVenta_(ss)[idV] || null, factDoc = null;

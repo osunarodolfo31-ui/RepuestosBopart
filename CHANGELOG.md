@@ -1,5 +1,22 @@
 # CHANGELOG — Repuesto BoParts
 
+## Apps Script v28.13 + documentos v1.2 — build 2026-11-04.5 — facturar una nota ya hecha
+
+- Documentos: boton "Facturar" (solo socios) en notas sin factura. Pide RIF, nombre, domicilio por partes, correo y
+  telefono; emite la factura digital con desglosar:true (base = total / 1,16, IVA = diferencia; se guarda en AF/AG/AH).
+- action=documento devuelve la direccion por partes del cliente.
+- Hoja (hecho directo): nota 194 sin enlace a la factura de prueba F-000003 (AJ/AK) y FACTURAS fila 2 borrada, para
+  poder anularla. CONFIG B12/B13 (contadores de factura y control) en 0.
+
+## Apps Script v28.12 + dinero v1.5 — build 2026-11-04.4 — Cashea como cuenta por cobrar
+
+- CUENTAS columna E TIPO (BANCO / POR_COBRAR). "Bancrecer Empresarial" ahora es "Cashea" (POR_COBRAR); "Bancrecer" es
+  la cuenta juridica. Dinero muestra Cashea aparte, marcada "por cobrar", y no la suma al total disponible.
+- Hoja (hecho directo): CUENTAS fila 7, CANALES filas 11-12 (punto inactivo pasa a Bancrecer; canal Cashea) y fila 18
+  borrada, MOV_CUENTAS fila 6 (saldo inicial Cashea 0), VENTAS nota 398 (inicial a Pago Movil Bancrecer, financiado a
+  Cashea) y nota 194 (financiado a Cashea).
+- Listas de respaldo de las pantallas sin "Bancrecer Empresarial".
+
 ## Apps Script v28.11 + ventas v15.6 + gerencia v3.6 + boparts_clientes.js v1.0 — build 2026-11-04.3 — clientes
 
 - ARCHIVO NUEVO boparts_clientes.js: estados de Venezuela con sus ciudades, region predeterminada, validacion de
