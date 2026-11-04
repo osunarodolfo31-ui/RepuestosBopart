@@ -1,6 +1,19 @@
 /**
  * Repuesto BoParts — Code.gs
- * VERSION: v28.8 (2026-11-03) | anular gasto y consumo interno
+ * VERSION: v28.10 (2026-11-04) | factura con IVA incluido
+ *
+ * v28.10 — IVA INCLUIDO en el precio. La factura parte de lo que pago el cliente (Bs 2.000) y lo desglosa: base =
+ *   total / 1,16 (1.724,14) e IVA = total - base (275,86). Los renglones se muestran sin IVA; los centimos de
+ *   redondeo se absorben en el ultimo renglon. Antes el IVA se sumaba encima del precio.
+ *
+ * VERSION anterior: v28.9 (2026-11-04) | documentos al publico: solo tasa BCV
+ *
+ * v28.9 — La tasa de TRABAJO gobierna los precios y nunca se imprime; la tasa BCV es la publica.
+ *   factura_digital: los bolivares son los de la venta (USD de lista x tasa de trabajo), igual que la nota de
+ *   entrega; la referencia en USD es Bs / BCV. Antes hacia USD x BCV y la factura quedaba ~11% por debajo de lo
+ *   cobrado en Bs. action=documento devuelve tasaBCV (columna AI de VENTAS) para reimprimir con la misma tasa.
+ *
+ * VERSION anterior: v28.8 (2026-11-03) | anular gasto y consumo interno
  *
  * v28.8 — ANULAR GASTO (tipo=anular_gasto, solo socios): el gasto sale de GASTOS y queda copiado completo en
  *   GASTOS_ANULADOS (quien, cuando, por que). Si lo habia pagado un socio, el PRESTAMO que genero en SOCIOS_MOV
@@ -742,7 +755,7 @@ function claveDePost_(data) {
 // OJO: esta constante es lo que ven las apps en el menu. Se habia quedado en v21.4 mientras el
 // encabezado ya decia v24, asi que el sello de version — que existe justamente para saber si lo
 // desplegado es lo que crees — estaba mintiendo. Cada version nueva se cambia AQUI tambien.
-var VERSION_SCRIPT = 'v28.8';
+var VERSION_SCRIPT = 'v28.10';
 
 function json_(obj) {
   // La version viaja en cada respuesta: es la forma rapida de saber si lo desplegado es lo que crees
@@ -5706,24 +5719,42 @@ function facturaDigital_(ss, d, quien) {
       var cant = Number(r[7]) || 0, pre = Number(r[8]) || 0;
       if (!(cant > 0)) return;
       brutoUSD += cant * pre;
-      renglones.push({codigo:String(r[5] || ''), descripcion:String(r[6] || ''), cantidad:cant, precioUSD:pre});
+      renglones.push({codigo:String(r[5] || ''), descripcion:String(r[6] || ''), cantidad:cant, precioUSD:pre, tasa:Number(r[13]) || 0});
     });
   }
   if (!renglones.length) throw rechazo_('La venta no tiene renglones en VENTAS_DETALLE: no se puede facturar');
 
   var alic = Number(F.ALICUOTA_GENERAL) || 16;
+  // v28.9 — EL PRECIO LO GOBIERNA LA TASA DE TRABAJO: los bolivares de la factura son los mismos de la nota
+  // (USD de lista x tasa de trabajo de la venta). La tasa BCV solo da la referencia en USD (Bs / BCV) y es la
+  // unica que se imprime. Antes la factura hacia USD x BCV y declaraba ~11% menos de lo que se cobraba en Bs.
+  var tasaVenta = Number(renglones[0].tasa) || ((usdCelda_(rv[5]) > 0 && Number(rv[6]) > 0) ? Number(rv[6]) / usdCelda_(rv[5]) : 0) || tasaBCV;
+  // v28.10 — IVA INCLUIDO: el precio de lista (x tasa de trabajo) es lo que paga el cliente, con IVA adentro.
+  // Total Bs 2.000 -> base 2.000 / 1,16 = 1.724,14 e IVA = 275,86. Cada renglon se muestra SIN IVA.
+  var fIva = 1 + alic / 100;
+  var conIvaBs = 0;
   var items = renglones.map(function(x) {
-    var pu = round2_(x.precioUSD * tasaBCV);
+    var lineaConIva = round2_(x.precioUSD * (x.tasa || tasaVenta) * x.cantidad);
+    conIvaBs += lineaConIva;
+    var pu = round2_(x.precioUSD * (x.tasa || tasaVenta) / fIva);
     return {codigo:x.codigo, descripcion:x.descripcion, cantidad:x.cantidad, precioUnitBs:pu, impuesto:'G', alicuota:alic,
-            descuentoBs:0, montoBs:round2_(pu * x.cantidad), precioUnitUSD:x.precioUSD};
+            descuentoBs:0, montoBs:round2_(pu * x.cantidad), precioUnitUSD:round2_(pu / tasaBCV)};
   });
+  conIvaBs = round2_(conIvaBs);
+  // Lo que pago el cliente (con IVA). Si la venta tuvo un descuento, queda por debajo de la suma de renglones.
+  var totalVentaUSD = usdCelda_(rv[33]) || round2_(baseUSD + ivaUSD);
+  var totalBs = round2_(totalVentaUSD * tasaVenta);
+  if (!(totalBs > 0) || totalBs > conIvaBs + 0.05) totalBs = conIvaBs;
+  if (Math.abs(totalBs - conIvaBs) <= 0.05) totalBs = conIvaBs;
+  var baseBs = round2_(totalBs / fIva);
+  var ivaBs = round2_(totalBs - baseBs);
   var brutoBs = round2_(items.reduce(function(a, x) { return a + x.montoBs; }, 0));
-  // La base imponible es la que quedo en la venta: si hubo descuento, la diferencia sale como DESCUENTO.
-  var baseBs = round2_(baseUSD * tasaBCV);
-  if (!(baseBs > 0) || baseBs > brutoBs + 0.05) baseBs = brutoBs;
-  var descBs = round2_(Math.max(0, brutoBs - baseBs));
-  var ivaBs = round2_(baseBs * alic / 100);
-  var totalBs = round2_(baseBs + ivaBs);
+  // Centimos de redondeo entre renglones y base: se absorben en el ultimo renglon, no se inventa un descuento.
+  if (Math.abs(brutoBs - baseBs) <= 0.05 && totalBs === conIvaBs) {
+    items[items.length - 1].montoBs = round2_(items[items.length - 1].montoBs + baseBs - brutoBs);
+    brutoBs = baseBs;
+  }
+  var descBs = round2_(Math.max(0, brutoBs - baseBs));     // solo si la venta tuvo descuento de verdad
 
   // ---- Pagos ----
   var pagos = [], pagadoDivisasBs = 0;
@@ -5753,11 +5784,11 @@ function facturaDigital_(ss, d, quien) {
     moneda:'BS', tasaBCV:tasaBCV, items:items, pagos:pagos,
     totales:{descuentoBs:descBs, exentoBs:0, baseImponibleBs:baseBs, subtotalBs:baseBs, alicuota:alic, ivaBs:ivaBs, totalBs:totalBs,
              igtfAplica:agenteIgtf, igtfBaseBs:igtfBase, igtfBs:igtf, totalConIgtfBs:round2_(totalBs + igtf),
-             baseUSD:round2_(baseUSD), ivaUSD:round2_(ivaUSD), totalUSD:round2_(baseUSD + ivaUSD)},
+             baseUSD:round2_(baseBs / tasaBCV), ivaUSD:round2_(ivaBs / tasaBCV), totalUSD:round2_(totalBs / tasaBCV)},
     venta:{idVenta:idVenta, notaNum:Number(rv[24]) || 0, vendedor:String(rv[2] || '')},
     imprenta:{razonSocial:String(F.IMPRENTA_RAZON_SOCIAL || ''), rif:String(F.IMPRENTA_RIF || ''), providencia:String(F.IMPRENTA_PROVIDENCIA || '')},
-    leyendas:['Precios pactados en divisas: monto en USD, su equivalente en bolivares y el tipo de cambio BCV (Bs ' + tasaBCV +
-              ' por USD) segun el numeral 12 del articulo 8 de la Providencia SNAT/2026/00093.']
+    leyendas:['Montos expresados en bolivares. Equivalente en USD al tipo de cambio oficial del BCV (Bs ' + tasaBCV +
+              ' por USD) del dia de la operacion.']
   };
   if (agenteIgtf) doc.leyendas.push('Este pago esta sujeto al cobro adicional del 3% del Impuesto a las Grandes Transacciones Financieras ' +
     '(IGTF) en caso de ser cancelado en divisas. No aplica en pago en Bs.');
@@ -5927,7 +5958,7 @@ function documentoNota_(ss, num) {
   if (fa && fa.json) { try { factDoc = JSON.parse(fa.json); } catch (e) {} }
   return {ok:true, nota:n, idVenta:idV, fecha:iso_(rv[0]), hora:String(rv[1] || ''), vendedor:String(rv[2] || ''),
           canal:String(rv[3] || ''), credito:Number(rv[30]) > 0, creditoUSD:Number(rv[30]) || 0, cliente:cli, lineas:lineas,
-          totalUSD:usdCelda_(rv[5]), totalBS:Number(rv[6]) || 0, pagos:pagosDeVenta_(rv),
+          totalUSD:usdCelda_(rv[5]), totalBS:Number(rv[6]) || 0, tasaBCV:Number(rv[34]) || 0, pagos:pagosDeVenta_(rv),
           factura:fa ? {numero:fa.numero, control:fa.control, modo:fa.modo, doc:factDoc} : null,
           devoluciones:(devolucionesPorNota_(ss)[n] || [])};
 }

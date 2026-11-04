@@ -1,7 +1,13 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_ventas.html
-  VERSION: v15.3 (2026-11-02) | build 2026-11-03.1 | requiere boparts_pdf.js v1.1
+  VERSION: v15.5 (2026-11-04) | build 2026-11-04.2 | requiere boparts_pdf.js v1.2 y Apps Script v28.10
+  v15.5: IVA INCLUIDO. El precio de la lista es lo que paga el cliente, se facture o no. Al facturar el total se
+  desglosa: base = total / 1,16 e IVA = total - base (Bs 2.000 = 1.724,14 + 275,86). Antes el IVA se sumaba encima.
+  VERSION anterior: v15.4 (2026-11-04) | build 2026-11-04.1 | requiere boparts_pdf.js v1.2 y Apps Script v28.9
+  v15.4: nota y cotizacion en Bs muestran SOLO la tasa BCV y la referencia en USD a esa tasa (Bs / BCV). La tasa de
+  trabajo fija los bolivares pero no se imprime. El mensaje de WhatsApp igual: pagos en Bs y Ref. a tasa BCV.
+  VERSION anterior: v15.3 (2026-11-02) | build 2026-11-03.1 | requiere boparts_pdf.js v1.1
   v15.3: NOTA DE ENTREGA y COTIZACION con modelo profesional (el mismo que la reimpresion de Documentos): emisor
   completo, numero, fecha y hora, vendedor, condicion, cliente y datos de la operacion en recuadros, renglones con
   numero, codigo, cantidad, precio unitario y total en Bs y referencia en USD, forma de pago, saldo a credito,
@@ -240,7 +246,7 @@ select option{background:#1E1E1E;color:var(--ink)}
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
-<script src="boparts_pdf.js?v=2026-11-03.1"></script>
+<script src="boparts_pdf.js?v=2026-11-04.2"></script>
 </head>
 <body>
 
@@ -549,7 +555,7 @@ select option{background:#1E1E1E;color:var(--ink)}
   </div>
 </div>
 
-<script src="boparts_sesion.js?v=2026-11-03.1"></script>
+<script src="boparts_sesion.js?v=2026-11-04.2"></script>
 <script>
 
 
@@ -565,7 +571,7 @@ function sellarVersion(d) {
   if (t) t.textContent = 'app ' + APP_VERSION + ' \u00b7 script ' + VER_SCRIPT;
   return d;
 }
-var APP_VERSION = 'v15.3';
+var APP_VERSION = 'v15.5';
 var TASA        = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
 var TASA_ORIGEN = TASA ? 'guardada' : 'ninguna';
 
@@ -934,10 +940,11 @@ function renderCart() {
 // TOTALS
 // ============================================================
 function updateTotals() {
-  // Los precios de la lista son SIN IVA: la base es la suma del carrito y el IVA se agrega encima.
-  var base = baseCarritoUSD();
-  var iva = FACTURAR ? Math.round(base * IVA_PCT) / 100 : 0;
-  var usd = Math.round((base + iva) * 100) / 100;
+  // v15.5: el precio de la lista YA INCLUYE el IVA. Facturar no cambia lo que paga el cliente: el total se
+  // desglosa en base (total / 1,16) + IVA (la diferencia).
+  var usd = baseCarritoUSD();
+  var base = FACTURAR ? baseDeTotal(usd) : usd;
+  var iva = FACTURAR ? Math.round((usd - base) * 100) / 100 : 0;
   var bs = Math.round(usd * TASA);
   document.getElementById('tBase').textContent = fmtUSD(base);
   document.getElementById('tIVA').textContent  = fmtUSD(iva);
@@ -992,11 +999,9 @@ function baseCarritoUSD() {
   for (var i = 0; i < cart.length; i++) b += cart[i].precio * cart[i].cantidad;
   return Math.round(b * 100) / 100;
 }
-// Lo que el cliente paga: base, mas IVA solo si la venta se factura
-function totalCarritoUSD() {
-  var b = baseCarritoUSD();
-  return Math.round((b + (FACTURAR ? b * IVA_PCT / 100 : 0)) * 100) / 100;
-}
+// v15.5 — Lo que el cliente paga es el precio de la lista, se facture o no (el IVA va incluido).
+function totalCarritoUSD() { return baseCarritoUSD(); }
+function baseDeTotal(total) { return Math.round(total / (1 + IVA_PCT / 100) * 100) / 100; }
 
 function renderPagos() {
   var el = document.getElementById('pagosEl');
@@ -1164,7 +1169,7 @@ function toggleFacturar() {
   FACTURAR = !FACTURAR;
   document.getElementById('factTog').classList.toggle('on', FACTURAR);
   document.getElementById('factSub').textContent = FACTURAR
-    ? 'Se agrega IVA 16% y se puede emitir la factura'
+    ? 'IVA 16% incluido en el precio: el total no cambia'
     : 'Apagado: nota de entrega, sin IVA';
   updateTotals();
 }
@@ -1349,9 +1354,10 @@ function guardarVenta() {
   var now  = new Date();
   var fecha = now.toLocaleDateString('es-VE');
   var hora  = now.toLocaleTimeString('es-VE', {hour:'2-digit', minute:'2-digit'});
-  var baseUSD = baseCarritoUSD();
-  var ivaUSD  = FACTURAR ? Math.round(baseUSD * IVA_PCT) / 100 : 0;
-  var usd     = Math.round((baseUSD + ivaUSD) * 100) / 100;
+  // v15.5: IVA incluido. usd = lo que paga el cliente; base e IVA salen de ahi.
+  var usd     = baseCarritoUSD();
+  var baseUSD = FACTURAR ? baseDeTotal(usd) : usd;
+  var ivaUSD  = FACTURAR ? Math.round((usd - baseUSD) * 100) / 100 : 0;
   var bs    = Math.round(usd * TASA);
   var prods = cart.map(function(c) { return c.producto + ' x' + c.cantidad + ' (' + fmtUSD(c.precio) + ')'; }).join(' | ');
   var notas = document.getElementById('txtNotas').value;
@@ -1897,7 +1903,7 @@ function construirPDF(tipo, numero) {
     cliente:{nombre:c.nombre || '', rif:c.rif || '', tel:c.tel || '', dir:c.dir || ''},
     lineas:lastCart.map(function(l) { return {codigo:l.codigo, producto:l.producto, cantidad:l.cantidad, precio:l.precio, tasa:TASA,
                                               subBs:Math.round(l.precio * l.cantidad * TASA)}; }),
-    tasa:TASA, pagos:esCot ? [] : lastPagos.slice(),
+    tasa:TASA, tasaBCV:TASA_BCV, pagos:esCot ? [] : lastPagos.slice(),
     moneda:esCot && document.getElementById('selCotMon').value === 'USD' ? 'USD' : 'BS'
   };
   return pdfDocumento(d, {logo:LOGO_DATA});
@@ -2010,7 +2016,8 @@ function pagosTexto() {
     if (!p.monto) continue;
     var nombre = p.label || (p.metodo + (p.banco ? ' ' + p.banco : ''));
     if (p.metodo === 'Credito') nombre = 'Credito (pendiente de pago)';
-    t += '\n* ' + nombre + ': ' + (p.moneda === 'USD' ? fmtUSD(p.monto) : fmtBS(p.monto));
+    // v15.4: todo en Bs; lo cobrado en divisas se expresa en Bs al precio de la venta (la tasa de trabajo no se muestra)
+    t += '\n* ' + nombre + ': ' + (p.moneda === 'USD' ? fmtBS(Math.round(p.monto * TASA * 100) / 100) : fmtBS(p.monto));
   }
   return t;
 }
@@ -2030,7 +2037,7 @@ function abrirWA() {
   var enUSD = esCot && lastPDF && lastPDF.moneda === 'USD';
   if (enUSD) { lineas = ''; for (var k = 0; k < lastCart.length; k++) lineas += '\n* ' + lastCart[k].producto + ' x' + lastCart[k].cantidad + ' - ' + fmtUSD(lastCart[k].precio * lastCart[k].cantidad); }
   var msg = 'Repuesto BoParts\n' + (esCot ? 'Cotizacion ' : 'Nota de Entrega ') + num + '\nCliente: ' + cliSel.nombre + '\n' +
-    lineas + '\n\nTOTAL: ' + (enUSD ? fmtUSD(usd) : (esCot ? fmtBS(bs) : fmtBS(bs) + ' (Ref. ' + fmtUSD(usd) + ')')) +
+    lineas + '\n\nTOTAL: ' + (enUSD ? fmtUSD(usd) : fmtBS(bs) + (TASA_BCV > 0 ? ' (Ref. ' + fmtUSD(bs / TASA_BCV) + ' a tasa BCV ' + TASA_BCV + ')' : '')) +
     (esCot ? '\nValida por 24 horas.' : pagosTexto()) + '\n\n0412-3185778 / 0414-9536708';
   window.open('https://wa.me/?text=' + encodeURIComponent(msg), '_blank');
 }

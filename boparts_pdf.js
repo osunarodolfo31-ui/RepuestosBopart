@@ -1,5 +1,6 @@
 /* =============================================================================
-   boparts_pdf.js — DOCUMENTOS EN PDF COMPARTIDOS (v1.1, 2026-11-02: nota de entrega y cotizacion profesionales)
+   boparts_pdf.js — DOCUMENTOS EN PDF COMPARTIDOS (v1.2, 2026-11-04: solo tasa BCV; la de trabajo nunca se imprime)
+   v1.1 (2026-11-02): nota de entrega y cotizacion profesionales
    =============================================================================
    Una sola copia de los datos del emisor y de los dibujos de la factura digital y de la nota de entrega.
    Lo usan boparts_ventas.html (al vender) y boparts_documentos.html (al reimprimir), asi la reimpresion sale
@@ -170,7 +171,7 @@ function pdfFactura(f, opts) {
 // NOTA DE ENTREGA y COTIZACION (v1.1) — un solo modelo para vender, cotizar y reimprimir.
 // d = {tipo:'nota'|'cot', nota, fecha:'yyyy-mm-dd', hora, vendedor, credito, creditoUSD, cliente:{nombre,rif,tel,dir},
 //      lineas:[{codigo, producto, cantidad, precio(USD), tasa, subBs}], totalUSD, totalBS, tasa, pagos:[...],
-//      moneda:'BS'|'USD' (solo cotizacion)}
+//      moneda:'BS'|'USD' (solo cotizacion), tasaBCV (la que se imprime; la tasa de trabajo NO se imprime nunca)}
 // opts = {logo, reimpresion}
 // ============================================================================================
 function pdfDocumento(d, opts) {
@@ -237,10 +238,15 @@ function pdfDocumento(d, opts) {
         });
       }
       caja(M, 'CLIENTE', [['Nombre', String(c.nombre || '').toUpperCase(), true], ['C.I. / RIF', c.rif], ['Telefono', c.tel], ['Direccion', c.dir]]);
-      var tasa = Number(d.tasa) || 0;
-      var info = esCot
-        ? [['Tasa del dia', tasa ? 'Bs ' + fB(tasa) + ' por USD' : '-'], ['Moneda', enUSD ? 'Dolares (USD)' : 'Bolivares (Bs)'], ['Validez', '24 horas o hasta agotar existencia']]
-        : [['Tasa del dia', tasa ? 'Bs ' + fB(tasa) + ' por USD' : '-'], ['Moneda', 'Bolivares (referencia en USD)'], ['Condicion', d.credito ? 'Credito' : 'Contado']];
+      // v1.2 — La tasa de TRABAJO es interna: fija los bolivares y NUNCA se imprime. Lo que ve el cliente es la tasa
+      // oficial BCV y la referencia en dolares a esa tasa (Bs / BCV).
+      var tasa = Number(d.tasa) || 0;            // trabajo: solo para pasar USD de lista a Bs
+      var bcv = Number(d.tasaBCV) || 0;          // publica
+      function refU(bs) { return bcv ? fU(bs / bcv) : '-'; }
+      var info = enUSD
+        ? [['Moneda', 'Dolares (USD)'], ['Validez', '24 horas o hasta agotar existencia']]
+        : [['Tasa BCV', bcv ? 'Bs ' + fB(bcv) + ' por USD' : 'no registrada'], ['Moneda', 'Bolivares (ref. USD a tasa BCV)'],
+           esCot ? ['Validez', '24 horas o hasta agotar existencia'] : ['Condicion', d.credito ? 'Credito' : 'Contado']];
       caja(M + colW + 6, 'OPERACION', info);
       y += 30;
 
@@ -254,12 +260,12 @@ function pdfDocumento(d, opts) {
         var puBs = l.cantidad ? subBs / l.cantidad : 0;
         return enUSD
           ? [String(i + 1), l.codigo || '', l.producto, String(l.cantidad), fU(l.precio), fU(subUsd)]
-          : [String(i + 1), l.codigo || '', l.producto, String(l.cantidad), fB(puBs), fB(subBs), fU(subUsd)];
+          : [String(i + 1), l.codigo || '', l.producto, String(l.cantidad), fB(puBs), fB(subBs), refU(subBs)];
       });
       if (!esCot && d.totalBS && Math.abs(d.totalBS - totalBs) > 1) totalBs = d.totalBS;
       if (!esCot && d.totalUSD) totalUsd = d.totalUSD;
       var head = enUSD ? [['#', 'CODIGO', 'DESCRIPCION', 'CANT.', 'P. UNIT. $', 'TOTAL $']]
-                       : [['#', 'CODIGO', 'DESCRIPCION', 'CANT.', 'P. UNIT. Bs', 'TOTAL Bs', 'REF. $']];
+                       : [['#', 'CODIGO', 'DESCRIPCION', 'CANT.', 'P. UNIT. Bs', 'TOTAL Bs', 'REF. $ BCV']];
       var cs = enUSD ? {0:{cellWidth:8, halign:'center'}, 1:{cellWidth:27}, 3:{cellWidth:14, halign:'center'}, 4:{cellWidth:24, halign:'right'}, 5:{cellWidth:26, halign:'right', fontStyle:'bold'}}
                      : {0:{cellWidth:8, halign:'center'}, 1:{cellWidth:27}, 3:{cellWidth:13, halign:'center'}, 4:{cellWidth:24, halign:'right'}, 5:{cellWidth:26, halign:'right', fontStyle:'bold'}, 6:{cellWidth:18, halign:'right', textColor:[105,105,105]}};
       var paginas = 0;
@@ -281,15 +287,18 @@ function pdfDocumento(d, opts) {
         var hay = false;
         (d.pagos || []).forEach(function(pg) {
           if (!pg.monto) return; hay = true;
+          // v1.2 — todo en bolivares: lo cobrado en divisas (o a credito) se expresa en Bs al precio de la venta.
           var usdish = pg.moneda === 'USD' || /credito/i.test(pg.metodo);
+          var pgBs = usdish ? Math.round(pg.monto * tasa * 100) / 100 : Number(pg.monto) || 0;
           doc.setTextColor(gris[0],gris[1],gris[2]); doc.text(String(pg.label || (pg.metodo + (pg.banco ? ' ' + pg.banco : ''))).slice(0, 40), M, y);
-          doc.setTextColor(negro[0],negro[1],negro[2]); doc.text(usdish ? fU(pg.monto) : 'Bs ' + fB(pg.monto), M + 82, y, {align:'right'});
+          doc.setTextColor(negro[0],negro[1],negro[2]); doc.text('Bs ' + fB(pgBs), M + 82, y, {align:'right'});
           y += 4;
         });
         if (!hay) { doc.setTextColor(gris[0],gris[1],gris[2]); doc.text('-', M, y); y += 4; }
         if (d.credito && d.creditoUSD) {
           doc.setFont('helvetica','bold'); doc.setTextColor(negro[0],negro[1],negro[2]);
-          doc.text('Saldo a credito: ' + fU(d.creditoUSD), M, y + 1); y += 5;
+          var crBs = Math.round(d.creditoUSD * tasa * 100) / 100;
+          doc.text('Saldo a credito: Bs ' + fB(crBs) + (bcv ? '  (ref. ' + refU(crBs) + ')' : ''), M, y + 1); y += 5;
         }
       }
       var yPag = y; y = yIni;
@@ -307,7 +316,7 @@ function pdfDocumento(d, opts) {
       doc.text(enUSD ? fU(totalUsd) : 'Bs ' + fB(totalBs), W - M - 2, y + 3.2, {align:'right'});
       y += 11;
       if (!enUSD) { doc.setFont('helvetica','normal'); doc.setFontSize(7.2); doc.setTextColor(gris[0],gris[1],gris[2]);
-        doc.text('Equivalente: ' + fU(totalUsd) + (tasa ? '  ·  tasa Bs ' + fB(tasa) : ''), W - M, y, {align:'right'}); y += 4; }
+        doc.text(bcv ? 'Equivalente: ' + refU(totalBs) + '  ·  tasa BCV Bs ' + fB(bcv) : 'Sin tasa BCV registrada para esta fecha', W - M, y, {align:'right'}); y += 4; }
       y = Math.max(y, yPag) + 6;
 
       // ---------- Condiciones ----------
@@ -316,7 +325,7 @@ function pdfDocumento(d, opts) {
            'Esta cotizacion no constituye compromiso de venta ni reserva de mercancia.']
         : ['Revise su mercancia al recibirla: una vez firmada esta nota se entiende recibida conforme.',
            'Cambios y devoluciones dentro de los 5 dias siguientes, presentando esta nota y el producto sin uso y en su empaque original.',
-           'Montos en bolivares a la tasa del dia de la venta; la referencia en dolares es informativa.'];
+           'Montos en bolivares. La referencia en dolares se calcula a la tasa oficial del BCV del dia de la venta y es informativa.'];
       doc.setDrawColor(linea[0],linea[1],linea[2]); doc.setFillColor(252,252,252);
       var lns = [];
       cond.forEach(function(t) { lns = lns.concat(doc.splitTextToSize('• ' + t, W - 2 * M - 6)); });
@@ -352,7 +361,8 @@ function pdfDocumento(d, opts) {
       }
 
       var nombre = num + '_' + String(c.nombre || 'cliente').replace(/[^a-zA-Z0-9]+/g, '_').slice(0, 30) + '.pdf';
-      resolve({blob:doc.output('blob'), nombre:nombre, num:num, totalBs:Math.round(totalBs), totalUsd:totalUsd, moneda:enUSD ? 'USD' : 'BS'});
+      resolve({blob:doc.output('blob'), nombre:nombre, num:num, totalBs:Math.round(totalBs), totalUsd:totalUsd,
+               refBcv:bcv ? Math.round(totalBs / bcv * 100) / 100 : 0, moneda:enUSD ? 'USD' : 'BS'});
     } catch (e) { reject(e); }
   });
 }

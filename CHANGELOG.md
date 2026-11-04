@@ -1,5 +1,25 @@
 # CHANGELOG — Repuesto BoParts
 
+## Apps Script v28.10 + ventas v15.5 — build 2026-11-04.2 — IVA incluido en el precio
+
+- El precio de la lista (x tasa de trabajo) es lo que paga el cliente, se facture o no. Facturar ya no suma 16%:
+  desglosa el total. Bs 2.000 = base 1.724,14 + IVA 275,86.
+- ventas: total = carrito; baseUSD = total / 1,16; ivaUSD = total - base (VENTAS AF/AG/AH).
+- factura_digital: parte del total pagado, base = total / 1,16, IVA = diferencia; renglones sin IVA; centimos de
+  redondeo al ultimo renglon (no se inventa descuento).
+
+## Apps Script v28.9 + ventas v15.4 + boparts_pdf.js v1.2 — build 2026-11-04.1 — al publico solo la tasa BCV
+
+- Regla: la tasa de TRABAJO gobierna los precios (USD de lista x trabajo = Bs) y NUNCA se imprime. La tasa BCV es la
+  publica: todo documento muestra Bs, la tasa BCV y la referencia en USD = Bs / BCV.
+- Nota de entrega y cotizacion en Bs: caja "Tasa BCV", columna REF. $ BCV, "Equivalente: $X · tasa BCV". Los pagos en
+  divisas y el saldo a credito se muestran en Bs. La cotizacion en USD no muestra tasa.
+- WhatsApp: total con Ref. a tasa BCV; pagos en Bs.
+- Reimpresion (Documentos): usa la tasa BCV guardada en la venta (VENTAS col AI).
+- Factura digital (modo prueba): los Bs son los de la venta (antes USD x BCV, ~11% menos de lo cobrado). Referencia en
+  USD = Bs / BCV. Los pagos en divisas se expresan en Bs a tasa BCV (regla legal): ver con el contador.
+- Sin descuento por pago en divisas en ningun documento.
+
 ## Apps Script v28.8 + gastos v2.3 + inventario v2.5 — build 2026-11-03.1 — anular gasto y consumo interno
 
 - Code.gs v28.8 (HAY QUE PUBLICAR NUEVA VERSION):
