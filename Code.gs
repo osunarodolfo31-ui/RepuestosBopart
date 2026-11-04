@@ -1,6 +1,17 @@
 /**
  * Repuesto BoParts — Code.gs
- * VERSION: v28.7 (2026-11-02) | tasa BCV automatica
+ * VERSION: v28.8 (2026-11-03) | anular gasto y consumo interno
+ *
+ * v28.8 — ANULAR GASTO (tipo=anular_gasto, solo socios): el gasto sale de GASTOS y queda copiado completo en
+ *   GASTOS_ANULADOS (quien, cuando, por que). Si lo habia pagado un socio, el PRESTAMO que genero en SOCIOS_MOV
+ *   tambien se va (copiado). Si era un consumo interno, el consumo queda ANULADO y la mercancia vuelve al stock.
+ *   Dinero se corrige solo: recalcula al leer. action=gastos (solo socios): ultimos gastos con su ID.
+ *   CONSUMO INTERNO (tipo=consumo_interno, solo socios): mercancia de la tienda que se usa en la tienda (tiner
+ *   para pintar, aceite para la moto del local). Hoja CONSUMO_INTERNO, una fila por producto. Sale del stock
+ *   y entra como gasto AL COSTO, con PAGADO_POR = INVENTARIO: no sale dinero de ninguna cuenta. Si el consumo
+ *   es ANTERIOR al ultimo conteo del producto, el conteo ya lo vio en el estante y no se descuenta otra vez.
+ *
+ * VERSION anterior: v28.7 (2026-11-02) | tasa BCV automatica
  *
  * v28.7 — actualizarTasaBCV(): trae la tasa oficial del BCV (USD) de DolarAPI (https://ve.dolarapi.com/v1/dolares/oficial)
  *   y, si no responde, de la pagina del BCV (https://www.bcv.org.ve/). La guarda en CONFIG (B10/B11) y en TASAS con
@@ -491,7 +502,7 @@ var PERMISOS_GET = {
   tareas:'VENDEDOR',
   producto:'SOCIO',
   ventas:'SOCIO', socios:'SOCIO', cxp:'SOCIO', cliente_stats:'SOCIO', compras:'SOCIO', diag:'SOCIO',
-  liquidacion:'SOCIO', rendimiento:'SOCIO', dinero:'SOCIO',
+  liquidacion:'SOCIO', rendimiento:'SOCIO', dinero:'SOCIO', gastos:'SOCIO',
   documentos:'VENDEDOR', documento:'VENDEDOR'
 };
 var PERMISOS_POST = {
@@ -501,7 +512,7 @@ var PERMISOS_POST = {
   tarea_marcar:'VENDEDOR', tarea_propia:'VENDEDOR',
   costeo:'SOCIO', cxp_abono:'SOCIO', conteo_revision:'SOCIO', devolucion:'SOCIO', apartado_cerrar:'SOCIO',
   tasa:'SOCIO', bcv_auto:'SOCIO', socio:'SOCIO', liquidar_aliado:'SOCIO', precio:'SOCIO', tarea_def:'SOCIO',
-  anular_venta:'SOCIO', mov_cuenta:'SOCIO'
+  anular_venta:'SOCIO', mov_cuenta:'SOCIO', anular_gasto:'SOCIO', consumo_interno:'SOCIO'
 };
 
 // v27 — FALLA CERRADO (auditoria #5). Antes, si CONFIG no se podia leer o B15 traia cualquier cosa
@@ -731,7 +742,7 @@ function claveDePost_(data) {
 // OJO: esta constante es lo que ven las apps en el menu. Se habia quedado en v21.4 mientras el
 // encabezado ya decia v24, asi que el sello de version — que existe justamente para saber si lo
 // desplegado es lo que crees — estaba mintiendo. Cada version nueva se cambia AQUI tambien.
-var VERSION_SCRIPT = 'v28.7';
+var VERSION_SCRIPT = 'v28.8';
 
 function json_(obj) {
   // La version viaja en cada respuesta: es la forma rapida de saber si lo desplegado es lo que crees
@@ -797,6 +808,10 @@ function rutearGet_(e) {
   }
   if (accion === 'cuentas') {
     return json_({ok:true, cuentas:listaCuentas_(ssA)});
+  }
+  // v28.8 — ultimos gastos con su ID, para poder anularlos desde la pantalla de Gastos.
+  if (accion === 'gastos') {
+    return json_(listaGastos_(ssA, e.parameter.desde || '', e.parameter.hasta || ''));
   }
   if (accion === 'catalogo') {
     return json_(catalogoProveedores_(ssA));
@@ -1233,6 +1248,18 @@ function doPost(e) {
       var lockG = LockService.getScriptLock(); lockG.waitLock(10000);
       try { return json_(guardarGasto_(ss, data)); }
       finally { SpreadsheetApp.flush(); lockG.releaseLock(); }
+    }
+
+    // ---- ANULAR GASTO y CONSUMO INTERNO (v28.8) ----
+    if (data.tipo === 'anular_gasto') {
+      var lockAG = LockService.getScriptLock(); lockAG.waitLock(20000);
+      try { return json_(anularGasto_(ss, data, quien)); }
+      finally { SpreadsheetApp.flush(); lockAG.releaseLock(); }
+    }
+    if (data.tipo === 'consumo_interno') {
+      var lockCI = LockService.getScriptLock(); lockCI.waitLock(20000);
+      try { return json_(consumoInterno_(ss, data, quien)); }
+      finally { SpreadsheetApp.flush(); lockCI.releaseLock(); }
     }
 
     // ---- PROVEEDOR NUEVO (v11) ----
@@ -2748,6 +2775,19 @@ function movimientosDesde_(ss, desdePorCodigo) {
       mov[cod].vendido += Number(r[7]) || 0;     // las devoluciones ya vienen con cantidad negativa
     });
   }
+  // v28.8 — consumo interno: sale del estante igual que una venta. El ANULADO no cuenta.
+  var ci = ss.getSheetByName('CONSUMO_INTERNO');
+  if (ci && ci.getLastRow() >= 2) {
+    ci.getRange(2, 1, ci.getLastRow() - 1, CI_COLS.length).getValues().forEach(function(r) {
+      if (String(r[CI.ESTADO] || '').trim().toUpperCase() === 'ANULADO') return;
+      var cod = String(r[CI.CODIGO] || '').trim().toUpperCase();
+      if (!cod || !desdePorCodigo[cod]) return;
+      var t = instante_(r[CI.FECHA], r[CI.HORA]);
+      if (!t || t <= desdePorCodigo[cod]) return;
+      mov[cod] = mov[cod] || {vendido:0, comprado:0};
+      mov[cod].consumido = (mov[cod].consumido || 0) + (Number(r[CI.CANTIDAD]) || 0);
+    });
+  }
   var com = ss.getSheetByName('COMPRAS_DETALLE');
   if (com && com.getLastRow() >= 2) {
     com.getRange(2, 1, com.getLastRow() - 1, 10).getValues().forEach(function(r) {
@@ -2854,12 +2894,12 @@ function calcularStock_(ss, codigo, excluirApartado) {
     var corte = desde[cod] || '';
     var tiene = fecha && contado !== '' && contado !== null;
     var m = mov[cod] || {vendido:0, comprado:0};
-    var stk = tiene ? (Number(contado) || 0) + m.comprado - m.vendido : null;
+    var stk = tiene ? (Number(contado) || 0) + m.comprado - m.vendido - (m.consumido || 0) : null;
     var ap = apartado[cod] || 0;
     out.push({codigo:String(r[0] || '').trim(), producto:String(r[2] || '').trim(), categoria:String(r[3] || '').trim(),
               costo:Number(r[7]) || 0, precio:Number(r[8]) || 0,
               contado:tiene ? Number(contado) || 0 : null, fechaConteo:tiene ? fecha : '', corteConteo:tiene ? corte : '',
-              vendido:m.vendido, comprado:m.comprado,
+              vendido:m.vendido, comprado:m.comprado, consumido:m.consumido || 0,
               stock:stk,
               apartado:ap,                                         // v27
               disponible:stk === null ? null : stk - ap});         // v27: sin conteo no se sabe, no se inventa
@@ -4159,6 +4199,177 @@ function guardarGasto_(ss, data) {
 }
 
 // ============================================================
+// v28.8 — ANULAR GASTO Y CONSUMO INTERNO
+// ============================================================
+var CI_COLS = ['ID_CONSUMO','FECHA','HORA','CODIGO','PRODUCTO','CANTIDAD','COSTO_UNIT_USD','COSTO_TOTAL_USD','MOTIVO',
+               'CATEGORIA','ID_GASTO','REGISTRADO_POR','ESTADO','DESCONTADO_DEL_STOCK'];
+var CI = {ID:0, FECHA:1, HORA:2, CODIGO:3, PRODUCTO:4, CANTIDAD:5, UNIT:6, TOTAL:7, MOTIVO:8, CATEGORIA:9, ID_GASTO:10,
+          QUIEN:11, ESTADO:12, DESCONTADO:13};
+function hojaConsumo_(ss) {
+  var sh = hojaAp_(ss, 'CONSUMO_INTERNO', CI_COLS);
+  return sh;
+}
+
+// Ultimos gastos (por defecto 31 dias), del mas nuevo al mas viejo, con su ID.
+function listaGastos_(ss, desde, hasta) {
+  var hoy = Utilities.formatDate(new Date(), TZ_VE, 'yyyy-MM-dd');
+  var d2 = hasta || hoy;
+  var d1 = desde || Utilities.formatDate(new Date(new Date().getTime() - 31 * 86400000), TZ_VE, 'yyyy-MM-dd');
+  var sh = ss.getSheetByName('GASTOS'), out = [];
+  if (sh && sh.getLastRow() >= 2) {
+    sh.getRange(2, 1, sh.getLastRow() - 1, 16).getValues().forEach(function(r, i) {
+      var f = iso_(r[1]); if (!f || f < d1 || f > d2) return;
+      out.push({id:String(r[0] || '').trim(), fila:i + 2, fecha:f, hora:esFecha_(r[2]) ? horaTexto_(r[2]) : String(r[2] || ''),
+                categoria:String(r[3] || ''), descripcion:String(r[4] || ''), monto:Number(r[5]) || 0,
+                moneda:String(r[6] || ''), tasa:Number(r[7]) || 0, usd:Number(r[8]) || 0, bs:Number(r[9]) || 0,
+                metodo:String(r[10] || ''), banco:String(r[11] || ''), pagadoPor:String(r[12] || ''),
+                registradoPor:String(r[13] || ''), comprobante:String(r[14] || ''), notas:String(r[15] || '')});
+    });
+  }
+  out.sort(function(a, b) { return a.fecha === b.fecha ? b.fila - a.fila : (a.fecha < b.fecha ? 1 : -1); });
+  return {ok:true, desde:d1, hasta:d2, gastos:out};
+}
+
+function anularGasto_(ss, d, quien) {
+  var motivo = String(d.motivo || '').trim();
+  if (motivo.length < 5) throw rechazo_('Escribe el motivo de la anulacion (minimo 5 letras)');
+  var idG = String(d.idGasto || '').trim();
+  if (!idG) throw rechazo_('Falta el ID del gasto');
+  var por = (quien && quien.nombre) || d.quien || '';
+  var reg = hojaAp_(ss, 'GASTOS_ANULADOS', ['FECHA_ANULACION','ANULADO_POR','MOTIVO','ID_GASTO','HOJA','FILA_ORIGINAL','DATOS']);
+  var shG = ss.getSheetByName('GASTOS');
+  var filas = [];
+  if (shG && shG.getLastRow() >= 2) {
+    var ids = shG.getRange(2, 1, shG.getLastRow() - 1, 1).getValues();
+    for (var i = 0; i < ids.length; i++) if (String(ids[i][0]).trim() === idG) filas.push(i + 2);
+  }
+  if (!filas.length) {
+    // Reintento: si ya se anulo, no es error.
+    if (reg.getLastRow() >= 2) {
+      var hechos = reg.getRange(2, 4, reg.getLastRow() - 1, 2).getValues();
+      for (var h = 0; h < hechos.length; h++) {
+        if (String(hechos[h][0]).trim() === idG && String(hechos[h][1]) === 'GASTOS') return {ok:true, tipo:'anular_gasto', idGasto:idG, repetido:true};
+      }
+    }
+    throw rechazo_('No se encontro el gasto ' + idG + '. Recarga la lista.');
+  }
+  if (filas.length > 1) throw rechazo_('Ese ID aparece ' + filas.length + ' veces en GASTOS. Revisalo en la hoja antes de anular.');
+  var fila = filas[0];
+  var row = shG.getRange(fila, 1, 1, Math.max(shG.getLastColumn(), 16)).getValues()[0];
+  var ahora = new Date();
+  function copia(hoja, f, valores) {
+    reg.appendRow([ahora, por, motivo, idG, hoja, f,
+                   JSON.stringify(valores.map(function(v) { return esFecha_(v) ? Utilities.formatDate(v, TZ_VE, 'yyyy-MM-dd HH:mm') : v; }))]);
+    formatoFecha_(reg, reg.getLastRow(), 1);
+  }
+
+  // 1) Prestamo de socio que genero el gasto (ORIGEN = ID del gasto)
+  var socioBorrar = [], shS = ss.getSheetByName('SOCIOS_MOV');
+  if (shS && shS.getLastRow() >= 2) {
+    var vs = shS.getRange(2, 1, shS.getLastRow() - 1, 10).getValues();
+    vs.forEach(function(r, k) {
+      if (String(r[7]).trim() === idG && String(r[2]).trim().toUpperCase() === 'PRESTAMO') {
+        copia('SOCIOS_MOV', k + 2, r); socioBorrar.push(k + 2);
+      }
+    });
+  }
+  // 2) Consumo interno: queda ANULADO (no se borra) y la mercancia vuelve al stock
+  var consumos = 0, shC = ss.getSheetByName('CONSUMO_INTERNO');
+  if (shC && shC.getLastRow() >= 2) {
+    var vc = shC.getRange(2, 1, shC.getLastRow() - 1, CI_COLS.length).getValues();
+    vc.forEach(function(r, k) {
+      if (String(r[CI.ID_GASTO]).trim() === idG && String(r[CI.ESTADO]).trim().toUpperCase() !== 'ANULADO') {
+        shC.getRange(k + 2, CI.ESTADO + 1).setValue('ANULADO');
+        consumos++;
+      }
+    });
+  }
+  // 3) El gasto
+  copia('GASTOS', fila, row);
+  SpreadsheetApp.flush();
+  socioBorrar.sort(function(a, b) { return b - a; }).forEach(function(f) { shS.deleteRow(f); });
+  shG.deleteRow(fila);
+
+  return {ok:true, tipo:'anular_gasto', idGasto:idG, repetido:false,
+          gasto:{fecha:iso_(row[1]), categoria:String(row[3] || ''), descripcion:String(row[4] || ''), monto:Number(row[5]) || 0, moneda:String(row[6] || '')},
+          prestamoSocio:socioBorrar.length, consumos:consumos,
+          saldosSocios:socioBorrar.length ? saldosSocios_(ss) : null};
+}
+
+// d: {idConsumo, fecha 'd/m/yyyy', hora, lineas:[{codigo, cantidad}], motivo, categoria}
+function consumoInterno_(ss, d, quien) {
+  var idC = String(d.idConsumo || '').trim();
+  if (!/^CI[\w-]{6,}$/.test(idC)) throw rechazo_('Falta el ID del consumo. Recarga la pantalla.');
+  var motivo = String(d.motivo || '').trim();
+  if (motivo.length < 3) throw rechazo_('Escribe para que se uso (ej: pintura de la fachada)');
+  var lineas = (d.lineas || []).filter(function(l) { return l && String(l.codigo || '').trim() && Number(l.cantidad) > 0; });
+  if (!lineas.length) throw rechazo_('Agrega al menos un producto con cantidad');
+  var iso = iso_(d.fecha);
+  if (!iso) throw rechazo_('Fecha invalida');
+  var hoy = Utilities.formatDate(new Date(), TZ_VE, 'yyyy-MM-dd');
+  if (iso > hoy) throw rechazo_('La fecha no puede ser futura');
+  var por = (quien && quien.nombre) || d.registradoPor || '';
+  var categoria = String(d.categoria || 'MANTENIMIENTO Y EQUIPOS').trim();
+  var sh = hojaConsumo_(ss);
+
+  // Reintento: si el ID ya esta, no se duplica
+  if (sh.getLastRow() >= 2) {
+    var ya = sh.getRange(2, 1, sh.getLastRow() - 1, 1).getValues();
+    for (var y = 0; y < ya.length; y++) if (String(ya[y][0]).trim() === idC) return {ok:true, tipo:'consumo_interno', idConsumo:idC, repetido:true};
+  }
+
+  // Producto, costo y stock de cada linea
+  var codigos = lineas.map(function(l) { return String(l.codigo).trim().toUpperCase(); });
+  var costos = costosPorCodigo_(ss, codigos);
+  var stock = {};
+  (calcularStock_(ss, codigos).productos || []).forEach(function(p) { stock[p.codigo.toUpperCase()] = p; });
+  var hora = String(d.hora || '').trim();
+  var instante = instante_(fechaVE_(d.fecha), hora);
+  var filas = [], totalUSD = 0, avisos = [], nombres = [];
+  lineas.forEach(function(l) {
+    var cod = String(l.codigo).trim().toUpperCase(), cant = Number(l.cantidad);
+    var p = stock[cod];
+    if (!p) throw rechazo_('No existe el producto ' + cod);
+    var cu = Number(costos[cod]) || 0;
+    if (!(cu > 0)) throw rechazo_(p.producto + ' no tiene costo cargado. Corrigelo en la lista antes de registrar el consumo.');
+    // Antes del ultimo conteo = el conteo ya lo vio fuera del estante: no se descuenta otra vez.
+    var descuenta = !(p.corteConteo && instante && instante <= p.corteConteo);
+    if (descuenta && p.stock !== null && p.stock < cant) {
+      avisos.push(p.producto + ': el sistema tenia ' + p.stock + ' y salen ' + cant + '. Cuenta ese producto.');
+    }
+    if (!descuenta) avisos.push(p.producto + ': el consumo es anterior al conteo del ' + p.corteConteo + ', el stock no cambia (el conteo ya lo desconto).');
+    var tot = round2_(cu * cant);
+    totalUSD += tot;
+    nombres.push(cant + ' ' + p.producto);
+    filas.push([idC, fechaVE_(d.fecha), hora, p.codigo, p.producto, cant, round2_(cu), tot, motivo, categoria, '', por, 'ACTIVO',
+                descuenta ? 'SI' : 'NO (anterior al conteo)']);
+  });
+  totalUSD = round2_(totalUSD);
+  var idG = 'G' + idC;
+  filas.forEach(function(f) { f[CI.ID_GASTO] = idG; });
+
+  var ini = sh.getLastRow() + 1;
+  asegurarFilas_(sh, ini + filas.length - 1);
+  sh.getRange(ini, 1, filas.length, CI_COLS.length).setValues(filas);
+  sh.getRange(ini, 2, filas.length, 1).setNumberFormat('dd/MM/yyyy');
+
+  // Gasto al costo, sin cuenta: PAGADO_POR = INVENTARIO
+  var tasa = leerTasa_(ss) || 0;
+  var shG = ss.getSheetByName('GASTOS');
+  if (!shG) { shG = ss.insertSheet('GASTOS');
+    shG.appendRow(['ID_GASTO','FECHA','HORA','CATEGORIA','DESCRIPCION','MONTO','MONEDA','TASA','MONTO_USD','MONTO_BS','METODO','BANCO','PAGADO_POR','REGISTRADO_POR','COMPROBANTE','NOTAS']); }
+  var nG = shG.getLastRow() + 1;
+  asegurarFilas_(shG, nG);
+  shG.getRange(nG, 1, 1, 16).setValues([[idG, fechaVE_(d.fecha), hora, categoria, 'Consumo interno: ' + nombres.join(', ') + ' — ' + motivo,
+    totalUSD, 'USD', tasa, totalUSD, Math.round(totalUSD * tasa), 'Consumo interno', '', 'INVENTARIO', por, '', 'CONSUMO ' + idC]]);
+  formatoFecha_(shG, nG, 2);
+
+  return {ok:true, tipo:'consumo_interno', idConsumo:idC, idGasto:idG, repetido:false, totalUSD:totalUSD,
+          lineas:filas.map(function(f) { return {codigo:f[3], producto:f[4], cantidad:f[5], costoUnit:f[6], total:f[7], descuenta:f[13] === 'SI'}; }),
+          avisos:avisos};
+}
+
+// ============================================================
 // CUENTAS Y MOVIMIENTOS ENTRE CUENTAS (v27) — la base del flujo de caja
 // ============================================================
 // El flujo de caja necesita saber DONDE esta el dinero, no solo cuanto entro y salio. Hasta v26 las
@@ -5213,6 +5424,7 @@ function estadoDinero_(ss, desde, hasta) {
   filas('GASTOS', 16).forEach(function(r) {
     var pp = String(r[12] || '').toUpperCase();
     if (pp === 'RODOLFO' || pp === 'JAVIER') return;
+    if (pp === 'INVENTARIO') return;     // v28.8: consumo interno, salio mercancia, no dinero
     var f = iso_(r[1]); if (!f) return;
     var met = String(r[10] || '').trim(), mon = String(r[6] || '').trim().toUpperCase();
     var cta = resolverCuenta_(porNombre, met, r[11], mon);

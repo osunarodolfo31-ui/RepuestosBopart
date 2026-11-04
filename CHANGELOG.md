@@ -1,5 +1,19 @@
 # CHANGELOG — Repuesto BoParts
 
+## Apps Script v28.8 + gastos v2.3 + inventario v2.5 — build 2026-11-03.1 — anular gasto y consumo interno
+
+- Code.gs v28.8 (HAY QUE PUBLICAR NUEVA VERSION):
+  - tipo=anular_gasto (solo socios): el gasto sale de GASTOS y queda copiado en GASTOS_ANULADOS con quien, cuando y motivo.
+    Si lo pago un socio, el PRESTAMO que genero en SOCIOS_MOV tambien se va (copiado). Si era consumo interno, el consumo queda
+    ANULADO y la mercancia vuelve al stock. Reintentar no duplica.
+  - action=gastos (solo socios): gastos de los ultimos 31 dias con su ID.
+  - tipo=consumo_interno (solo socios): hoja CONSUMO_INTERNO (se crea sola), una fila por producto. Gasto al costo con
+    PAGADO_POR = INVENTARIO y METODO = Consumo interno: Dinero lo ignora (no sale dinero). Si el consumo es anterior al ultimo
+    conteo del producto no se descuenta del stock (el conteo ya lo vio). Producto sin costo = rechazo.
+  - calcularStock_: stock = conteo + compras - ventas - consumo interno (campo nuevo `consumido`).
+- boparts_gastos.html v2.3: pestanas Registrar / Consumo interno / Anular (solo socios). Bs con 2 decimales.
+- boparts_inventario.html v2.5: el stock explica "uso interno -N".
+
 ## build 2026-11-02.9 — Dinero v1.4
 - Montos en Bs con 2 decimales (antes redondeaba a entero: 52.499,87 se veia 52.500).
 - Movimientos con comision muestran el neto que llega (entradas) o el total que sale (salidas).

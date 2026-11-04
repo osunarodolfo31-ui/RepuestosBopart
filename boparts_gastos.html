@@ -1,7 +1,13 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_gastos.html
-  VERSION: v2.2 (2026-11-01) | build 2026-11-02.9 | requiere Apps Script v28
+  VERSION: v2.3 (2026-11-03) | build 2026-11-03.1 | requiere Apps Script v28.8
+  v2.3: dos pestanas nuevas, solo para socios. (1) CONSUMO INTERNO: mercancia de la tienda usada en la tienda
+  (tiner, aceite, bombillos). Sale del stock y queda como gasto al costo, sin tocar ninguna cuenta. Si el consumo
+  es anterior al ultimo conteo del producto, no se descuenta otra vez. (2) ANULAR: lista de los ultimos gastos
+  con boton Anular y motivo. El gasto se guarda en GASTOS_ANULADOS; si lo pago un socio, su prestamo se va;
+  si era consumo interno, la mercancia vuelve al stock.
+  VERSION anterior: v2.2 (2026-11-01) | build 2026-11-02.9 | requiere Apps Script v28
   v2.2: los metodos salen de la hoja CANALES (solo los habilitados para SALIR) y la moneda queda fija en la de
   la cuenta: ya no se puede registrar un Pago Movil Banesco en dolares. "Mover dinero" se fue a la pantalla
   Dinero (saldos, arqueo, cambios con OB). Si el servidor rechaza el gasto, la pantalla dice por que.
@@ -187,6 +193,17 @@ select option{background:#1E1E1E;color:var(--ink)}
 .fotobox input{position:absolute;inset:0;opacity:0;cursor:pointer}
 .fotobox.ok{border-color:var(--green);color:var(--green)}
 .resumen{display:flex;justify-content:space-between;font-size:13px;color:var(--ink-soft);padding:8px 0}
+/* v2.3 pestanas, consumo interno y anular */
+.tabs3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:12px}
+.tabs3 .tabm{font-size:12px;padding:10px 4px}
+.grow{display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--border)}
+.grow:last-child{border-bottom:none}
+.gizq{flex:1;min-width:0}
+.gdesc{font-size:13px;line-height:1.35;word-break:break-word}
+.gmeta{font-size:11px;color:var(--ink-muted);margin-top:3px;line-height:1.4}
+.gder{text-align:right;font-size:13px;font-weight:700;white-space:nowrap}
+.anbtn{margin-top:6px;background:none;border:1px solid var(--red);color:var(--red);border-radius:6px;padding:4px 10px;font-size:11px;font-weight:700;font-family:inherit;cursor:pointer}
+.aviso2{font-size:12px;color:var(--ink-soft);background:rgba(239,68,68,.08);border-left:2px solid var(--red);border-radius:6px;padding:8px 10px;margin-top:8px;line-height:1.45}
 </style>
 </head>
 <body>
@@ -203,6 +220,11 @@ select option{background:#1E1E1E;color:var(--ink)}
 <div class="container">
   <div id="avisoMov" class="cominfo" style="display:none;margin-bottom:12px">Mover dinero, saldos de las cuentas, arqueo y cambios con OB ahora estan en
     <a href="boparts_dinero.html" style="color:var(--brand);font-weight:700">Dinero</a>.</div>
+  <div id="tabsSocio" class="tabs3" style="display:none">
+    <button class="tabm on" id="tabG" onclick="modo('gasto')">Registrar</button>
+    <button class="tabm" id="tabC" onclick="modo('consumo')">Consumo interno</button>
+    <button class="tabm" id="tabL" onclick="modo('lista')">Anular</button>
+  </div>
   <div id="modoGasto">
   <div class="section">
     <div class="stitle">Gasto</div>
@@ -248,9 +270,57 @@ select option{background:#1E1E1E;color:var(--ink)}
     <div class="field" style="margin-top:10px"><label>Notas</label><input type="text" id="inNotas" placeholder="Opcional"></div>
   </div>
   </div>
+
+  <!-- v2.3 CONSUMO INTERNO -->
+  <div id="modoConsumo" style="display:none">
+    <div class="section">
+      <div class="stitle">Consumo interno</div>
+      <div class="cominfo" style="margin-bottom:10px">Mercancia de la tienda que se usa en la tienda. Sale del inventario y queda como
+        gasto <b>al costo</b>. No sale dinero de ninguna cuenta.</div>
+      <div class="row2">
+        <div class="field"><label>Fecha del uso</label><input type="date" id="ciFecha" onchange="pintarCI()"></div>
+        <div class="field"><label>Categoria</label>
+          <select id="ciCat">
+            <option>MANTENIMIENTO Y EQUIPOS</option>
+            <option>PAPELERIA Y LIMPIEZA</option>
+            <option>PUBLICIDAD</option>
+            <option>OTROS</option>
+          </select>
+        </div>
+      </div>
+      <div class="field wrap"><label>Producto</label>
+        <input type="text" id="ciBuscar" placeholder="Buscar por nombre o codigo..." oninput="buscarCI()" autocomplete="off">
+        <div class="drop" id="ciDrop"></div>
+      </div>
+      <div id="ciLineas"><div class="cart-empty">Sin productos todavia.</div></div>
+      <div class="field" style="margin-top:6px"><label>Para que se uso *</label><input type="text" id="ciMotivo" placeholder="Ej: pintura de la fachada"></div>
+      <div id="ciResumen"></div>
+    </div>
+  </div>
+
+  <!-- v2.3 ANULAR GASTO -->
+  <div id="modoLista" style="display:none">
+    <div class="section">
+      <div class="stitle">Ultimos 31 dias <button class="anbtn" style="float:right;margin:0;border-color:var(--border);color:var(--ink-soft)" onclick="cargarLista()">Recargar</button></div>
+      <div id="listaBox"><div class="cart-empty">Cargando...</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- v2.3 confirmar anulacion -->
+<div class="overlay" id="anOv" onclick="if(event.target===this)cerrarAnular()">
+  <div class="sheet">
+    <div class="sheet-title">Anular gasto</div>
+    <div class="sheet-sub" id="anSub"></div>
+    <div id="anAviso"></div>
+    <div class="field" style="margin-top:10px"><label>Motivo *</label><input type="text" id="anMotivo" placeholder="Ej: se cargo con el monto equivocado"></div>
+    <button class="nbtn nbtn-p" id="anBtn" style="background:var(--red);color:#fff" onclick="confirmarAnular()">Anular gasto</button>
+    <button class="nbtn nbtn-s" onclick="cerrarAnular()">Cancelar</button>
+  </div>
 </div>
 
 <button class="subbtn" id="btnGuardar" onclick="guardar()">Registrar Gasto</button>
+<button class="subbtn" id="btnConsumo" onclick="guardarConsumo()" style="display:none">Registrar consumo</button>
 
 <div class="success" id="success">
   <div class="sicon">💸</div>
@@ -340,7 +410,7 @@ select option{background:#1E1E1E;color:var(--ink)}
   </div>
 </div>
 
-<script src="boparts_sesion.js?v=2026-11-02.9"></script>
+<script src="boparts_sesion.js?v=2026-11-03.1"></script>
 <script>
 
 
@@ -354,7 +424,7 @@ function sellarVersion(d) {
   return d;
 }
 var CLOUD = 'c7jufi9v', PRESET = 'boparts_productos';
-var APP_VERSION = 'v2.2';
+var APP_VERSION = 'v2.3';
 var TASA = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
 var comprobante = '';
 var METODOS = [
@@ -462,7 +532,7 @@ function nuevo() {
   var box = document.getElementById('fotoBox'); box.className = 'fotobox'; box.innerHTML = 'Tocar para fotografiar o elegir de galeria<input type="file" accept="image/*" onchange="subirFoto(this)">';
 }
 function fmtUSD(n) { return '$' + (Math.round(n * 100) / 100).toFixed(2); }
-function fmtBS(n) { return 'Bs ' + Math.round(n).toLocaleString('es-VE'); }
+function fmtBS(n) { var a = (Math.round(Math.abs(n || 0) * 100) / 100).toFixed(2).split('.'); return (n < 0 ? '-' : '') + 'Bs ' + a[0].replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ',' + a[1]; }
 function pad2(n) { return (n < 10 ? '0' : '') + n; }
 function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -501,7 +571,7 @@ function sincronizarTasa(despues) {
 // Bloque D: esta era la UNICA de las 12 pantallas que no pedia sesion al abrir. Se colaba porque
 // igual aparecia el login en cuanto fallaba la primera peticion — pero despues de un viaje al
 // servidor, sin fijar el nombre de quien entro en los desplegables y sin recargar la tasa al entrar.
-function alEntrar() { sincronizarTasa(preview); prepararMov(); cargarMetodosGasto(); }
+function alEntrar() { sincronizarTasa(preview); prepararMov(); cargarMetodosGasto(); prepararTabs(); }
 
 // v2.2 — "Mover dinero" vive ahora en boparts_dinero.html. Aqui solo se avisa a los socios donde esta.
 var ID_GASTO = '';
@@ -526,8 +596,175 @@ function cargarMetodosGasto() {
 // leerJSON vive ahora en el modulo de sesion: mismo nombre, y ademas manda al login cuando la sesion vence.
 
 
+// ============================================================
+// v2.3 — PESTANAS (solo socios): Consumo interno y Anular
+// ============================================================
+var MODO = 'gasto', PRODS = null, CI_LINEAS = [], ID_CONSUMO = '', LISTA = [], AN_ID = '';
+function prepararTabs() {
+  if (!soySocio()) return;
+  document.getElementById('tabsSocio').style.display = 'grid';
+  var d = new Date(); document.getElementById('ciFecha').value = d.getFullYear() + '-' + pad2(d.getMonth()+1) + '-' + pad2(d.getDate());
+}
+function modo(m) {
+  MODO = m;
+  document.getElementById('modoGasto').style.display = m === 'gasto' ? '' : 'none';
+  document.getElementById('modoConsumo').style.display = m === 'consumo' ? '' : 'none';
+  document.getElementById('modoLista').style.display = m === 'lista' ? '' : 'none';
+  document.getElementById('btnGuardar').style.display = m === 'gasto' ? '' : 'none';
+  document.getElementById('btnConsumo').style.display = m === 'consumo' ? '' : 'none';
+  document.getElementById('tabG').classList.toggle('on', m === 'gasto');
+  document.getElementById('tabC').classList.toggle('on', m === 'consumo');
+  document.getElementById('tabL').classList.toggle('on', m === 'lista');
+  if (m === 'consumo' && !PRODS) cargarProductosCI();
+  if (m === 'lista') cargarLista();
+}
+
+// ---- Consumo interno ----
+function cargarProductosCI() {
+  document.getElementById('ciBuscar').placeholder = 'Cargando productos...';
+  fetch(SCRIPT_URL + '?action=stock&t=' + Date.now()).then(leerJSON).then(function(d) {
+    if (!d || !d.ok) throw new Error(d && d.error ? d.error : 'sin datos');
+    PRODS = d.productos || [];
+    document.getElementById('ciBuscar').placeholder = 'Buscar por nombre o codigo...';
+  }).catch(function(e) {
+    if (e && e.message === 'SESION') return;
+    document.getElementById('ciBuscar').placeholder = 'No se pudo cargar la lista. Toca la pestana otra vez.';
+    PRODS = null;
+  });
+}
+function normal(t) { return String(t || '').toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g, ''); }
+function buscarCI() {
+  var q = normal(document.getElementById('ciBuscar').value).trim(), dr = document.getElementById('ciDrop');
+  if (!PRODS || q.length < 2) { dr.classList.remove('open'); return; }
+  var pal = q.split(/\s+/);
+  var r = PRODS.filter(function(p) { var t = normal(p.codigo + ' ' + p.producto); return pal.every(function(w) { return t.indexOf(w) >= 0; }); }).slice(0, 25);
+  dr.innerHTML = r.length ? r.map(function(p) {
+    return '<div class="ditem" onclick="agregarCI(\'' + String(p.codigo).replace(/'/g, "\\'") + '\')">' +
+      '<span class="ditem-price">' + fmtUSD(p.costo) + '</span>' + escHtml(p.producto) +
+      '<div class="ditem-meta">' + escHtml(p.codigo) + ' · ' + (p.stock === null ? 'sin conteo' : 'stock ' + p.stock) + '</div></div>';
+  }).join('') : '<div class="ditem" style="color:var(--ink-muted)">Sin resultados</div>';
+  dr.classList.add('open');
+}
+function agregarCI(cod) {
+  var p = PRODS.filter(function(x) { return x.codigo === cod; })[0]; if (!p) return;
+  var ya = CI_LINEAS.filter(function(l) { return l.codigo === cod; })[0];
+  if (ya) ya.cantidad++; else CI_LINEAS.push({codigo:p.codigo, producto:p.producto, costo:p.costo, stock:p.stock, corte:p.corteConteo || '', cantidad:1});
+  document.getElementById('ciBuscar').value = ''; document.getElementById('ciDrop').classList.remove('open');
+  pintarCI();
+}
+function cantCI(i, v) { var n = parseFloat(v); CI_LINEAS[i].cantidad = n > 0 ? n : 0; pintarCI(true); }
+function masCI(i, d) { CI_LINEAS[i].cantidad = Math.max(0, (CI_LINEAS[i].cantidad || 0) + d); pintarCI(); }
+function quitarCI(i) { CI_LINEAS.splice(i, 1); pintarCI(); }
+// El instante del consumo: con fecha de hoy, la hora actual; con fecha pasada, el final de ese dia.
+function instanteCI() {
+  var f = document.getElementById('ciFecha').value; if (!f) return '';
+  var d = new Date(), hoy = d.getFullYear() + '-' + pad2(d.getMonth()+1) + '-' + pad2(d.getDate());
+  return f === hoy ? f + ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes()) : f + ' 23:59';
+}
+function pintarCI(soloResumen) {
+  var inst = instanteCI(), tot = 0;
+  if (!soloResumen) {
+    document.getElementById('ciLineas').innerHTML = CI_LINEAS.length ? CI_LINEAS.map(function(l, i) {
+      var antes = l.corte && inst && inst <= l.corte;
+      return '<div class="linea"><div class="ltop"><div class="lname">' + escHtml(l.producto) +
+        '<div class="lmeta">' + escHtml(l.codigo) + ' · costo ' + fmtUSD(l.costo) + ' · ' + (l.stock === null ? 'sin conteo' : 'stock ' + l.stock) + '</div>' +
+        (antes ? '<div class="lmeta" style="color:var(--brand)">Contado el ' + escHtml(fechaES(l.corte.slice(0, 10)) + ' ' + l.corte.slice(11)) + ', despues de esta fecha: el stock NO cambia, solo se registra el costo.</div>' : '') +
+        '</div><button class="cdel" onclick="quitarCI(' + i + ')">×</button></div>' +
+        '<div class="lbot"><div class="qwrap"><button class="qbtn" onclick="masCI(' + i + ',-1)">−</button>' +
+        '<input class="qin" type="number" step="0.01" value="' + l.cantidad + '" oninput="cantCI(' + i + ',this.value)">' +
+        '<button class="qbtn" onclick="masCI(' + i + ',1)">+</button></div></div></div>';
+    }).join('') : '<div class="cart-empty">Sin productos todavia.</div>';
+  }
+  CI_LINEAS.forEach(function(l) { tot += (l.costo || 0) * (l.cantidad || 0); });
+  document.getElementById('ciResumen').innerHTML = CI_LINEAS.length ? '<div class="cominfo">Gasto al costo: <b>' + fmtUSD(tot) + '</b>' +
+    (TASA ? ' (' + fmtBS(tot * TASA) + ')' : '') + '. No sale dinero de ninguna cuenta.</div>' : '';
+}
+function guardarConsumo() {
+  var f = document.getElementById('ciFecha').value, motivo = document.getElementById('ciMotivo').value.trim();
+  var lineas = CI_LINEAS.filter(function(l) { return l.cantidad > 0; });
+  if (!f) { toast('Indica la fecha', 'err'); return; }
+  if (!lineas.length) { toast('Agrega al menos un producto con cantidad', 'err'); return; }
+  if (lineas.some(function(l) { return !(l.costo > 0); })) { toast('Hay un producto sin costo cargado. Corrigelo en la lista primero.', 'err'); return; }
+  if (motivo.length < 3) { toast('Escribe para que se uso', 'err'); return; }
+  var fp = f.split('-'), now = new Date(), hoy = now.getFullYear() + '-' + pad2(now.getMonth()+1) + '-' + pad2(now.getDate());
+  if (!ID_CONSUMO) ID_CONSUMO = 'CI' + now.getFullYear() + pad2(now.getMonth()+1) + pad2(now.getDate()) + '-' + pad2(now.getHours()) + pad2(now.getMinutes()) + pad2(now.getSeconds()) + '-' + Math.random().toString(36).slice(2, 6).toUpperCase();
+  var payload = {tipo:'consumo_interno', idConsumo:ID_CONSUMO, fecha:parseInt(fp[2]) + '/' + parseInt(fp[1]) + '/' + fp[0],
+    hora:f === hoy ? pad2(now.getHours()) + ':' + pad2(now.getMinutes()) : '', motivo:motivo, categoria:document.getElementById('ciCat').value,
+    lineas:lineas.map(function(l) { return {codigo:l.codigo, cantidad:l.cantidad}; })};
+  var btn = document.getElementById('btnConsumo'); btn.disabled = true; btn.textContent = 'Guardando...';
+  fetch(SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body:JSON.stringify(payload)})
+    .then(leerJSON).then(function(d) {
+      btn.disabled = false; btn.textContent = 'Registrar consumo';
+      if (!d || d.ok !== true) { var er = new Error(d && d.error ? d.error : 'Respuesta inesperada'); er.rechazo = !!(d && d.rechazada); throw er; }
+      ID_CONSUMO = ''; CI_LINEAS = []; PRODS = null; document.getElementById('ciMotivo').value = ''; pintarCI();
+      document.getElementById('successTit').textContent = 'Consumo Registrado';
+      document.getElementById('successMsg').textContent = d.repetido ? 'Ese consumo YA estaba registrado. NO se duplico.' :
+        (d.lineas || []).map(function(l) { return l.cantidad + ' × ' + l.producto + (l.descuenta ? '' : ' (stock sin cambio)'); }).join('\n') +
+        '\nGasto al costo: ' + fmtUSD(d.totalUSD) + ((d.avisos && d.avisos.length) ? '\n\n' + d.avisos.join('\n') : '');
+      document.getElementById('success').classList.add('open');
+    }).catch(function(e) {
+      btn.disabled = false; btn.textContent = 'Registrar consumo';
+      if (e && e.message === 'SESION') return;
+      if (e && e.rechazo) { ID_CONSUMO = ''; toast('No se registro: ' + e.message, 'err'); return; }
+      toast('No se pudo confirmar (' + (e && e.message ? e.message : 'sin conexion') + '). Toca Registrar otra vez: si ya habia quedado, no se duplica.', 'err');
+    });
+}
+
+// ---- Anular ----
+function fechaES(f) { var p = String(f).split('-'); return p.length === 3 ? p[2] + '/' + p[1] + '/' + p[0] : f; }
+function cargarLista() {
+  var box = document.getElementById('listaBox'); box.innerHTML = '<div class="cart-empty">Cargando...</div>';
+  fetch(SCRIPT_URL + '?action=gastos&t=' + Date.now()).then(leerJSON).then(function(d) {
+    if (!d || !d.ok) throw new Error(d && d.error ? d.error : 'sin datos');
+    LISTA = d.gastos || [];
+    if (!LISTA.length) { box.innerHTML = '<div class="cart-empty">No hay gastos en los ultimos 31 dias.</div>'; return; }
+    box.innerHTML = LISTA.map(function(g, i) {
+      var pago = g.pagadoPor === 'INVENTARIO' ? 'consumo interno (inventario)' : (g.pagadoPor === 'RODOLFO' || g.pagadoPor === 'JAVIER' ? 'pago ' + g.pagadoPor : (g.metodo + (g.banco ? ' ' + g.banco : '')));
+      return '<div class="grow"><div class="gizq"><div class="gdesc">' + escHtml(g.categoria) + ' - ' + escHtml(g.descripcion) + '</div>' +
+        '<div class="gmeta">' + fechaES(g.fecha) + (g.hora ? ' ' + escHtml(g.hora) : '') + ' · ' + escHtml(pago) + ' · ' + escHtml(g.registradoPor) + '</div>' +
+        (g.id ? '<button class="anbtn" onclick="abrirAnular(' + i + ')">Anular</button>' : '<div class="gmeta" style="color:var(--red)">Sin ID: se corrige en la hoja</div>') +
+        '</div><div class="gder">' + (g.moneda === 'BS' ? fmtBS(g.monto) : fmtUSD(g.monto)) +
+        (g.moneda === 'BS' && g.usd ? '<div class="gmeta">' + fmtUSD(g.usd) + '</div>' : '') + '</div></div>';
+    }).join('');
+  }).catch(function(e) {
+    if (e && e.message === 'SESION') return;
+    box.innerHTML = '<div class="cart-empty">No se pudo cargar (' + escHtml(e && e.message ? e.message : 'sin conexion') + ').</div>';
+  });
+}
+function abrirAnular(i) {
+  var g = LISTA[i]; if (!g) return;
+  AN_ID = g.id;
+  document.getElementById('anSub').textContent = fechaES(g.fecha) + ' · ' + g.categoria + ' - ' + g.descripcion + ' · ' + (g.moneda === 'BS' ? fmtBS(g.monto) : fmtUSD(g.monto));
+  var av = 'Sale de GASTOS y queda copiado en GASTOS_ANULADOS con tu nombre y el motivo.';
+  if (g.pagadoPor === 'RODOLFO' || g.pagadoPor === 'JAVIER') av += ' Lo pago ' + g.pagadoPor + ': el prestamo que genero en su cuenta de socio tambien se anula.';
+  else if (g.pagadoPor === 'INVENTARIO') av += ' Es un consumo interno: la mercancia vuelve al stock.';
+  else av += ' El saldo de ' + (g.banco || g.metodo) + ' en Dinero sube otra vez.';
+  document.getElementById('anAviso').innerHTML = '<div class="aviso2">' + escHtml(av) + '</div>';
+  document.getElementById('anMotivo').value = '';
+  document.getElementById('anOv').classList.add('open');
+}
+function cerrarAnular() { document.getElementById('anOv').classList.remove('open'); AN_ID = ''; }
+function confirmarAnular() {
+  var motivo = document.getElementById('anMotivo').value.trim();
+  if (motivo.length < 5) { toast('Escribe el motivo (minimo 5 letras)', 'err'); return; }
+  var btn = document.getElementById('anBtn'); btn.disabled = true; btn.textContent = 'Anulando...';
+  fetch(SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body:JSON.stringify({tipo:'anular_gasto', idGasto:AN_ID, motivo:motivo})})
+    .then(leerJSON).then(function(d) {
+      btn.disabled = false; btn.textContent = 'Anular gasto';
+      if (!d || d.ok !== true) throw new Error(d && d.error ? d.error : 'Respuesta inesperada');
+      cerrarAnular();
+      toast(d.repetido ? 'Ese gasto ya estaba anulado.' : 'Gasto anulado' + (d.prestamoSocio ? ' · prestamo de socio revertido' : '') + (d.consumos ? ' · mercancia devuelta al stock' : ''), 'ok');
+      cargarLista();
+    }).catch(function(e) {
+      btn.disabled = false; btn.textContent = 'Anular gasto';
+      if (e && e.message === 'SESION') return;
+      toast('No se anulo: ' + (e && e.message ? e.message : 'sin conexion'), 'err');
+    });
+}
+document.addEventListener('click', function(e) { if (!e.target.closest || !e.target.closest('.wrap')) { var d = document.getElementById('ciDrop'); if (d) d.classList.remove('open'); } });
+
 // Se llama al FINAL del script: prepararMov usa variables que se definen mas arriba.
-revisarSesion(function() { sincronizarTasa(preview); prepararMov(); cargarMetodosGasto(); });
+revisarSesion(function() { sincronizarTasa(preview); prepararMov(); cargarMetodosGasto(); prepararTabs(); });
 </script>
 </body>
 </html>

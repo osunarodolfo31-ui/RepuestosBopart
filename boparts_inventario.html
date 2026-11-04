@@ -1,7 +1,9 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_inventario.html
-  VERSION: v2.4 (2026-10-30) | build 2026-11-02.9 | requiere Apps Script v27
+  VERSION: v2.5 (2026-11-03) | build 2026-11-03.1 | requiere Apps Script v28.8
+  v2.5: el stock explica tambien lo que salio por consumo interno ("uso interno -3").
+  VERSION anterior: v2.4 (2026-10-30) | build 2026-11-02.9 | requiere Apps Script v27
   v2.4: la lista tiene PAGINAS (40 por pagina, Anterior/Siguiente arriba y abajo) y filtro por CATEGORIA con
   cuantos productos hay en cada una. Antes mostraba los primeros 80 y el resto solo con el buscador.
   VERSION anterior: v2.3 (2026-09-24) | build 2026-09-24.1 | requiere Apps Script v27
@@ -373,7 +375,7 @@ select option{background:#1E1E1E;color:var(--ink)}
   </div>
 </div>
 
-<script src="boparts_sesion.js?v=2026-11-02.9"></script>
+<script src="boparts_sesion.js?v=2026-11-03.1"></script>
 <script>
 
 
@@ -386,7 +388,7 @@ function sellarVersion(d) {
   if (t) t.textContent = 'app ' + APP_VERSION + ' \u00b7 script ' + VER_SCRIPT;
   return d;
 }
-var APP_VERSION = 'v2.4';
+var APP_VERSION = 'v2.5';
 var STOCK = [], filtro = 'sin', actual = null;
 
 document.getElementById('fechaHdr').textContent = APP_VERSION + ' · ' + new Date().toLocaleDateString('es-VE', {weekday:'long', day:'numeric', month:'long'});
@@ -441,7 +443,8 @@ function pintar() {
         (tieneStock
           ? '<div><span class="stk' + (p.stock <= 0 ? ' bajo' : '') + '">' + p.stock + '</span>' +
             '<span class="mt"> en stock · contado ' + p.contado + ' el ' + fechaES(p.fechaConteo) +
-            (p.vendido || p.comprado ? ' · +' + p.comprado + ' / -' + p.vendido : '') + '</span>' +
+            (p.vendido || p.comprado ? ' · +' + p.comprado + ' / -' + p.vendido : '') +
+            (p.consumido ? ' · uso interno -' + p.consumido : '') + '</span>' +
             (p.apartado ? '<div class="mt" style="color:var(--brand)">' + p.apartado + ' apartado · disponible <b>' + p.disponible + '</b></div>' : '') +
             '</div>'
           : '<div><span class="stk sin">Sin conteo</span>' + (p.vendido ? '<span class="mt"> · se vendieron ' + p.vendido + '</span>' : '') + '</div>') +
@@ -633,7 +636,8 @@ function pintarFicha() {
        (tieneStock
          ? '<div class="big' + (p.stock <= 0 ? ' bajo' : '') + '">' + p.stock + '<small>en stock</small></div>' +
            '<div class="expl">contado <b>' + p.contado + '</b> el ' + fechaES(p.fechaConteo) +
-           '<br>recibidas <b>+' + p.comprado + '</b> · vendidas <b>-' + p.vendido + '</b> desde entonces</div>'
+           '<br>recibidas <b>+' + p.comprado + '</b> · vendidas <b>-' + p.vendido + '</b>' +
+           (p.consumido ? ' · uso interno <b>-' + p.consumido + '</b>' : '') + ' desde entonces</div>'
          : '<div class="big sin">?<small>sin conteo</small></div>' +
            '<div class="expl">Nadie lo ha contado todavia, asi que no hay stock que mostrar.' +
            (p.vendido ? '<br>Se han vendido ' + p.vendido + ' unidades.' : '') + '</div>') +
