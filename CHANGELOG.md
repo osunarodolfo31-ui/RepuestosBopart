@@ -1,5 +1,16 @@
 # CHANGELOG — Repuesto BoParts
 
+## Apps Script v28.11 + ventas v15.6 + gerencia v3.6 + boparts_clientes.js v1.0 — build 2026-11-04.3 — clientes
+
+- ARCHIVO NUEVO boparts_clientes.js: estados de Venezuela con sus ciudades, region predeterminada, validacion de
+  cedula/RIF con digito verificador SENIAT, formulario de direccion por partes.
+- CLIENTES: columnas nuevas N ESTADO, O CIUDAD, P SECTOR, Q CALLE, R LOCAL, S REFERENCIA. D DIRECCION se arma de
+  las partes ("Calle, Local, Sector, Ciudad, Estado X"); la referencia no entra (no es domicilio fiscal).
+- La cedula/RIF se valida en pantalla y en el servidor y se guarda normalizada. RIF J/G/C exige direccion (calle).
+- CONFIG B16/B17: region predeterminada (Lara / Barquisimeto), editable en Gerencia > Clientes.
+- Ventas: "Nuevo cliente" y la factura digital piden la direccion por partes; lo confirmado en la factura se guarda
+  en la ficha. Gerencia: la ficha del cliente edita cedula/RIF, telefono y direccion.
+
 ## Apps Script v28.10 + ventas v15.5 — build 2026-11-04.2 — IVA incluido en el precio
 
 - El precio de la lista (x tasa de trabajo) es lo que paga el cliente, se facture o no. Facturar ya no suma 16%:

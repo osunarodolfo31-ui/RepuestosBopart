@@ -1,7 +1,10 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_ventas.html
-  VERSION: v15.5 (2026-11-04) | build 2026-11-04.2 | requiere boparts_pdf.js v1.2 y Apps Script v28.10
+  VERSION: v15.6 (2026-11-04) | build 2026-11-04.3 | requiere boparts_clientes.js v1.0 y Apps Script v28.11
+  v15.6: cliente con direccion por partes (estado y ciudad con predeterminado, calle, local, sector, referencia) y
+  cedula/RIF validada con su digito verificador. La factura pide el domicilio por partes y lo guarda en la ficha.
+  VERSION anterior: v15.5 (2026-11-04) | build 2026-11-04.2 | requiere boparts_pdf.js v1.2 y Apps Script v28.10
   v15.5: IVA INCLUIDO. El precio de la lista es lo que paga el cliente, se facture o no. Al facturar el total se
   desglosa: base = total / 1,16 e IVA = total - base (Bs 2.000 = 1.724,14 + 275,86). Antes el IVA se sumaba encima.
   VERSION anterior: v15.4 (2026-11-04) | build 2026-11-04.1 | requiere boparts_pdf.js v1.2 y Apps Script v28.9
@@ -246,7 +249,7 @@ select option{background:#1E1E1E;color:var(--ink)}
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
-<script src="boparts_pdf.js?v=2026-11-04.2"></script>
+<script src="boparts_pdf.js?v=2026-11-04.3"></script>
 </head>
 <body>
 
@@ -425,7 +428,7 @@ select option{background:#1E1E1E;color:var(--ink)}
         <div class="field"><label>Cedula / RIF</label><input type="text" id="cliRif" placeholder="J-12345678-9"></div>
         <div class="field"><label>Telefono</label><input type="tel" id="cliTel" placeholder="0414-1234567"></div>
       </div>
-      <div class="field"><label>Direccion</label><input type="text" id="cliDir" placeholder="Av. Principal..."></div>
+      <div id="cliDirBox"></div>
       <div class="field"><label>Notas del cliente</label><textarea id="cliNota" rows="2" placeholder="Descuento especial, preferencias..."></textarea></div>
       <button class="nbtn nbtn-p" onclick="guardarCliente()">Guardar cliente y continuar</button>
       <button class="nbtn nbtn-s" onclick="ocultarFormCliente()" style="margin-top:0">Cancelar</button>
@@ -463,7 +466,8 @@ select option{background:#1E1E1E;color:var(--ink)}
     <div class="sheet-sub" id="fdSub">Confirma los datos fiscales del cliente. Asi saldran en la factura.</div>
     <div class="field"><label>Cedula / RIF *</label><input type="text" id="fdRif" placeholder="V-12345678 o J-12345678-9" autocapitalize="characters"></div>
     <div class="field"><label>Nombre o razon social *</label><input type="text" id="fdNombre"></div>
-    <div class="field"><label>Domicilio fiscal <span id="fdDirReq" style="color:var(--ink-muted)">(obligatorio con RIF J o G)</span></label><input type="text" id="fdDir" placeholder="Calle, edificio, sector, ciudad, estado"></div>
+    <div class="stitle" style="margin:6px 0 8px;font-size:11px">Domicilio fiscal <span style="color:var(--ink-muted);text-transform:none;font-weight:500">(obligatorio con RIF J o G: copialo del RIF del cliente)</span></div>
+    <div id="fdDirBox"></div>
     <div class="row2">
       <div class="field"><label>Correo</label><input type="email" id="fdCorreo" placeholder="cliente@correo.com"></div>
       <div class="field"><label>Telefono</label><input type="tel" id="fdTel"></div>
@@ -555,7 +559,8 @@ select option{background:#1E1E1E;color:var(--ink)}
   </div>
 </div>
 
-<script src="boparts_sesion.js?v=2026-11-04.2"></script>
+<script src="boparts_sesion.js?v=2026-11-04.3"></script>
+<script src="boparts_clientes.js?v=2026-11-04.3"></script>
 <script>
 
 
@@ -571,7 +576,7 @@ function sellarVersion(d) {
   if (t) t.textContent = 'app ' + APP_VERSION + ' \u00b7 script ' + VER_SCRIPT;
   return d;
 }
-var APP_VERSION = 'v15.5';
+var APP_VERSION = 'v15.6';
 var TASA        = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
 var TASA_ORIGEN = TASA ? 'guardada' : 'ninguna';
 
@@ -585,6 +590,7 @@ function sincronizarTasa() {
     .then(leerJSON)
     .then(function(d) {
       if (!d || !d.ok) return;
+      fijarRegionDesdeConfig(d);      // v15.6: estado y ciudad predeterminados de los clientes
       if (d.bcv > 0) {
         TASA_BCV = d.bcv; BCV_FECHA = d.bcvFecha || '';
         try { localStorage.setItem('boparts_bcv', String(TASA_BCV)); localStorage.setItem('boparts_bcv_fecha', BCV_FECHA); } catch (e) {}
@@ -766,7 +772,10 @@ function filaCliente(r) {
     nombre: (r[0] || '').trim(), rif: (r[1] || '').trim(), tel: (r[2] || '').trim(), dir: (r[3] || '').trim(), nota: (r[4] || '').trim(),
     credito: (r[6] || '').trim().toUpperCase() === 'SI',  // col G de CLIENTES, la marcan Rodolfo/Javier
     limite:  parseNum(r[7]),                              // col H: tope de deuda en USD (0 = sin tope definido)
-    dias:    parseNum(r[8])                               // col I: plazo acordado
+    dias:    parseNum(r[8]),                              // col I: plazo acordado
+    // v15.6: M correo y la direccion por partes (N..S)
+    correo:(r[12] || '').trim(), estado:(r[13] || '').trim(), ciudad:(r[14] || '').trim(), sector:(r[15] || '').trim(),
+    calle:(r[16] || '').trim(), local:(r[17] || '').trim(), referencia:(r[18] || '').trim()
   };
 }
 function clientesCargados(loaded, origen) {
@@ -1145,6 +1154,8 @@ function crearClienteVenta() {
            tel:document.getElementById('nvTel').value.trim(), dir:'', nota:'', credito:false, limite:0, dias:0};
   if (!c.nombre) { toast('Escribe el nombre y apellido', 'err'); return; }
   if (!c.rif && !c.tel) { toast('Hace falta la cedula o el telefono', 'err'); return; }
+  var vrq = validarRif(c.rif); if (!vrq.ok) { toast('Cedula/RIF: ' + vrq.error, 'err'); return; }
+  c.rif = vrq.valor; document.getElementById('nvCed').value = c.rif;
   var dupe = CLIENTES.filter(function(x) {
     var a = (x.tel || '').replace(/[^0-9]/g, ''), b = (c.tel || '').replace(/[^0-9]/g, '');
     var e = (x.rif || '').replace(/[^0-9]/g, ''), f = (c.rif || '').replace(/[^0-9]/g, '');
@@ -1155,7 +1166,7 @@ function crearClienteVenta() {
   document.getElementById('cliVtaForm').style.display = 'none';
   pintarClienteVenta();
   postScript({tipo:'cliente', nombre:c.nombre, rif:c.rif, tel:c.tel, fecha:new Date().toLocaleDateString('es-VE')})
-    .then(function(d) { toast(d && d.ok ? 'Cliente guardado' : 'Cliente NO guardado en la hoja', d && d.ok ? 'ok' : 'err'); })
+    .then(function(d) { toast(d && d.ok ? 'Cliente guardado' : 'Cliente NO guardado: ' + (d && d.error ? d.error : 'error en la hoja'), d && d.ok ? 'ok' : 'err'); })
     .catch(function() { toast('Cliente NO guardado (sin conexion)', 'err'); });
 }
 
@@ -1722,6 +1733,8 @@ function limpiarCliente() {
 
 function mostrarFormCliente() {
   document.getElementById('formCliente').style.display = 'block';
+  montarDireccion('cd', 'cliDirBox', {});      // v15.6: direccion por partes, con la region predeterminada
+  amarrarRif('cliRif');
   document.getElementById('cliDrop').classList.remove('open');
   document.getElementById('cliNewBtn').style.display = 'none';
   document.getElementById('skipNota').style.display = 'none';
@@ -1736,22 +1749,29 @@ function ocultarFormCliente() {
 function guardarCliente() {
   var nombre = document.getElementById('cliNombre').value.trim();
   if (!nombre) { toast('Ingresa el nombre del cliente', 'err'); return; }
+  var vr = validarRif(document.getElementById('cliRif').value);
+  if (!vr.ok) { toast('Cedula/RIF: ' + vr.error, 'err'); return; }
+  var dd = leerDireccion('cd');
   var c = {
     nombre: nombre,
-    rif:    document.getElementById('cliRif').value.trim(),
+    rif:    vr.valor,
     tel:    document.getElementById('cliTel').value.trim(),
-    dir:    document.getElementById('cliDir').value.trim(),
-    nota:   document.getElementById('cliNota').value.trim()
+    dir:    dd.dir,
+    nota:   document.getElementById('cliNota').value.trim(),
+    estado:dd.estado, ciudad:dd.ciudad, sector:dd.sector, calle:dd.calle, local:dd.local, referencia:dd.referencia
   };
+  if (!c.rif && !c.tel) { toast('Hace falta la cedula/RIF o el telefono', 'err'); return; }
+  if ((vr.tipo === 'J' || vr.tipo === 'G' || vr.tipo === 'C') && !dd.calle) { toast('Empresa (RIF ' + vr.tipo + '): copia la direccion de su RIF, al menos la calle', 'err'); return; }
   CLIENTES.push(c);
   cliSel = c;
   // Save to sheet
-  var payload = {tipo:'cliente', nombre:c.nombre, rif:c.rif, tel:c.tel, dir:c.dir, nota:c.nota, fecha:new Date().toLocaleDateString('es-VE')};
+  var payload = {tipo:'cliente', nombre:c.nombre, rif:c.rif, tel:c.tel, dir:c.dir, nota:c.nota, fecha:new Date().toLocaleDateString('es-VE'),
+                 estado:c.estado, ciudad:c.ciudad, sector:c.sector, calle:c.calle, local:c.local, referencia:c.referencia};
   document.getElementById('formCliente').style.display = 'none';
   mostrarCliSelected(c);
   mostrarBotonesNota();
   postScript(payload)
-    .then(function(d) { toast(d && d.ok ? 'Cliente guardado' : 'Cliente NO guardado en la hoja', d && d.ok ? 'ok' : 'err'); })
+    .then(function(d) { toast(d && d.ok ? 'Cliente guardado' : 'Cliente NO guardado: ' + (d && d.error ? d.error : 'error en la hoja'), d && d.ok ? 'ok' : 'err'); })
     .catch(function() { toast('Cliente NO guardado en la hoja (sin conexion)', 'err'); });
 }
 
@@ -1930,18 +1950,25 @@ function generarFactura() {
   var c = cliSel || {};
   document.getElementById('fdRif').value = c.rif || '';
   document.getElementById('fdNombre').value = c.nombre && c.nombre !== 'CLIENTE OCASIONAL' ? c.nombre : '';
-  document.getElementById('fdDir').value = c.dir || '';
+  montarDireccion('fd', 'fdDirBox', c);    // v15.6: domicilio por partes
+  amarrarRif('fdRif');
   document.getElementById('fdCorreo').value = c.correo || '';
   document.getElementById('fdTel').value = c.tel || '';
   document.getElementById('factOv').classList.add('open');
 }
 function cerrarFactOv() { document.getElementById('factOv').classList.remove('open'); }
 function emitirFactura() {
-  var cli = {rif:document.getElementById('fdRif').value.trim(), nombre:document.getElementById('fdNombre').value.trim(),
-             dir:document.getElementById('fdDir').value.trim(), correo:document.getElementById('fdCorreo').value.trim(),
+  var vr = validarRif(document.getElementById('fdRif').value);
+  if (!vr.ok) { toast('Cedula/RIF: ' + vr.error, 'err'); return; }
+  var dd = leerDireccion('fd'), previo = cliSel || {};
+  var cli = {rif:vr.valor, nombre:document.getElementById('fdNombre').value.trim(),
+             dir:dd.dir || (hayPartes(previo) ? '' : (previo.dir || '')), correo:document.getElementById('fdCorreo').value.trim(),
              tel:document.getElementById('fdTel').value.trim()};
   if (!cli.rif || !cli.nombre) { toast('Falta la cedula/RIF o el nombre', 'err'); return; }
-  if (/^[JjGg]/.test(cli.rif) && !cli.dir) { toast('Con RIF J o G hace falta el domicilio fiscal', 'err'); return; }
+  if (/^[JGC]/.test(cli.rif) && !dd.calle) { toast('Con RIF ' + cli.rif.charAt(0) + ' hace falta el domicilio fiscal: copialo de su RIF', 'err'); return; }
+  // Lo confirmado aqui se guarda en la ficha del cliente (asi la proxima factura ya lo trae).
+  if (hayPartes(dd)) postScript({tipo:'cliente', nombre:cli.nombre, rif:cli.rif, rifAnterior:previo.rif || '', tel:cli.tel, correo:cli.correo,
+    estado:dd.estado, ciudad:dd.ciudad, sector:dd.sector, calle:dd.calle, local:dd.local, referencia:dd.referencia}).catch(function() {});
   var btn = document.getElementById('fdBtn'), btnF = document.getElementById('btnFactura');
   btn.disabled = true; btn.textContent = 'Emitiendo...';
   postScript({tipo:'factura_digital', idVenta:lastIdVenta, cliente:cli})

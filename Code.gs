@@ -1,6 +1,14 @@
 /**
  * Repuesto BoParts — Code.gs
- * VERSION: v28.10 (2026-11-04) | factura con IVA incluido
+ * VERSION: v28.11 (2026-11-04) | clientes: direccion por partes y RIF validado
+ *
+ * v28.11 — CLIENTES: columnas nuevas N ESTADO, O CIUDAD, P SECTOR, Q CALLE, R LOCAL, S REFERENCIA (M es CORREO).
+ *   D DIRECCION se arma de las partes (calle, local, sector, ciudad, Estado X) y es la que usan nota y factura.
+ *   La cedula/RIF se valida al guardar: formato y, en RIF, el digito verificador del SENIAT; se guarda normalizada
+ *   (J-50828177-2, V-12345678). rifAnterior permite corregir una cedula sin duplicar al cliente.
+ *   CONFIG B16/B17: estado y ciudad predeterminados (Lara / Barquisimeto); tipo=region (socios) los cambia.
+ *
+ * VERSION anterior: v28.10 (2026-11-04) | factura con IVA incluido
  *
  * v28.10 — IVA INCLUIDO en el precio. La factura parte de lo que pago el cliente (Bs 2.000) y lo desglosa: base =
  *   total / 1,16 (1.724,14) e IVA = total - base (275,86). Los renglones se muestran sin IVA; los centimos de
@@ -459,13 +467,16 @@ var U_NOMBRE = 1, U_ROL = 2, U_ACTIVO = 3, U_PIN_NUEVO = 4, U_HASH = 5, U_TOKEN 
 
 // CLIENTES: A NOMBRE, B RIF, C TEL, D DIR, E NOTA, F CREADO, G CREDITO, H LIMITE, I DIAS,
 //           J ALIADO (SI/NO), K COMISION_PCT, L NEGOCIO     <- las tres ultimas, v22
-var CLI_COLS = 12, CLI_ALIADO = 10, CLI_PCT = 11, CLI_NEGOCIO = 12;
+var CLI_COLS = 19, CLI_ALIADO = 10, CLI_PCT = 11, CLI_NEGOCIO = 12;
+// v28.11 — M CORREO (v28.5) y la direccion por partes. D DIRECCION queda como la direccion COMPLETA, armada de las
+// partes: es la que leen la nota, la factura y todo lo viejo. La referencia no entra en D (no es domicilio fiscal).
+var CLI_CORREO = 13, CLI_ESTADO = 14, CLI_CIUDAD = 15, CLI_SECTOR = 16, CLI_CALLE = 17, CLI_LOCAL = 18, CLI_REF = 19;
 
 // Se asegura de que CLIENTES tenga las tres columnas nuevas, con su encabezado.
 function prepararClientes_(ss) {
   var sh = ss.getSheetByName('CLIENTES');
   if (!sh) return null;
-  var cab = ['ALIADO', 'COMISION_PCT', 'NEGOCIO'];
+  var cab = ['ALIADO', 'COMISION_PCT', 'NEGOCIO', 'CORREO', 'ESTADO', 'CIUDAD', 'SECTOR', 'CALLE', 'LOCAL', 'REFERENCIA'];
   for (var i = 0; i < cab.length; i++) {
     var col = CLI_ALIADO + i;
     if (!String(sh.getRange(1, col).getValue() || '').trim()) sh.getRange(1, col).setValue(cab[i]);
@@ -525,7 +536,7 @@ var PERMISOS_POST = {
   tarea_marcar:'VENDEDOR', tarea_propia:'VENDEDOR',
   costeo:'SOCIO', cxp_abono:'SOCIO', conteo_revision:'SOCIO', devolucion:'SOCIO', apartado_cerrar:'SOCIO',
   tasa:'SOCIO', bcv_auto:'SOCIO', socio:'SOCIO', liquidar_aliado:'SOCIO', precio:'SOCIO', tarea_def:'SOCIO',
-  anular_venta:'SOCIO', mov_cuenta:'SOCIO', anular_gasto:'SOCIO', consumo_interno:'SOCIO'
+  anular_venta:'SOCIO', mov_cuenta:'SOCIO', anular_gasto:'SOCIO', consumo_interno:'SOCIO', region:'SOCIO'
 };
 
 // v27 — FALLA CERRADO (auditoria #5). Antes, si CONFIG no se podia leer o B15 traia cualquier cosa
@@ -755,7 +766,7 @@ function claveDePost_(data) {
 // OJO: esta constante es lo que ven las apps en el menu. Se habia quedado en v21.4 mientras el
 // encabezado ya decia v24, asi que el sello de version — que existe justamente para saber si lo
 // desplegado es lo que crees — estaba mintiendo. Cada version nueva se cambia AQUI tambien.
-var VERSION_SCRIPT = 'v28.10';
+var VERSION_SCRIPT = 'v28.11';
 
 function json_(obj) {
   // La version viaja en cada respuesta: es la forma rapida de saber si lo desplegado es lo que crees
@@ -1261,6 +1272,16 @@ function doPost(e) {
       var lockG = LockService.getScriptLock(); lockG.waitLock(10000);
       try { return json_(guardarGasto_(ss, data)); }
       finally { SpreadsheetApp.flush(); lockG.releaseLock(); }
+    }
+
+    // ---- REGION PREDETERMINADA de los clientes (v28.11) ----
+    if (data.tipo === 'region') {
+      var est = String(data.estado || '').trim(), ciu = String(data.ciudad || '').trim();
+      if (!est) throw rechazo_('Falta el estado');
+      var cfgR = ss.getSheetByName('CONFIG');
+      cfgR.getRange('A16').setValue('ESTADO_DEFECTO'); cfgR.getRange('B16').setValue(est);
+      cfgR.getRange('A17').setValue('CIUDAD_DEFECTO'); cfgR.getRange('B17').setValue(ciu);
+      return json_({ok:true, tipo:'region', estado:est, ciudad:ciu});
     }
 
     // ---- ANULAR GASTO y CONSUMO INTERNO (v28.8) ----
@@ -2103,7 +2124,11 @@ function leerConfig_(ss) {
     controlHasta = Number(cfg.getRange('B14').getValue()) || 0;
   }
   // (v28.4: ya no hay respaldo en LISTA DE PRODUCTOS!E1: esa celda es un encabezado.)
+  // v28.11 — region predeterminada para la direccion de los clientes (CONFIG B16 / B17)
+  var estadoDef = cfg ? String(cfg.getRange('B16').getValue() || '').trim() : '';
+  var ciudadDef = cfg ? String(cfg.getRange('B17').getValue() || '').trim() : '';
   return {ok:true, tasa:tasa, fecha:fecha, quien:quien, bcv:bcv, bcvFecha:bcvFecha,
+          estadoDefecto:estadoDef || 'Lara', ciudadDefecto:estadoDef ? ciudadDef : 'Barquisimeto',
           factura:factura, control:control, controlHasta:controlHasta,
           controlRestantes:(controlHasta && control) ? (controlHasta - control) : 0};
 }
@@ -2639,8 +2664,16 @@ function guardarCliente_(ss, d) {
   var sh = prepararClientes_(ss);
   if (!sh) throw new Error('No existe la hoja CLIENTES');
   if (!d.nombre) throw new Error('Falta el nombre');
+  // v28.11 — cedula/RIF con formato valido y, si es RIF, con su digito verificador.
+  if (d.rif !== undefined && d.rif !== null && String(d.rif).trim() !== '') {
+    var vr = validarRif_(d.rif);
+    if (!vr.ok) throw rechazo_('Cedula/RIF: ' + vr.error);
+    d.rif = vr.valor;
+  }
   var ced = soloDigitos_(d.rif), tel = soloDigitos_(d.tel);
   if (!ced && !tel) throw new Error('Indica cedula o telefono');
+  // Si se corrigio la cedula, se busca al cliente por la anterior (asi no se crea otro).
+  var cedAnt = soloDigitos_(d.rifAnterior);
 
   var n = sh.getLastRow() - 1;
   var fila = 0;
@@ -2648,7 +2681,7 @@ function guardarCliente_(ss, d) {
     var vals = sh.getRange(2, 1, n, 3).getValues();
     for (var i = 0; i < vals.length; i++) {
       var c2 = soloDigitos_(vals[i][1]), t2 = soloDigitos_(vals[i][2]);
-      if ((ced && c2 && c2 === ced) || (tel && t2 && t2 === tel)) { fila = i + 2; break; }
+      if ((ced && c2 && c2 === ced) || (cedAnt && c2 && c2 === cedAnt) || (tel && t2 && t2 === tel)) { fila = i + 2; break; }
     }
   }
   var creado = fila ? sh.getRange(fila, 6).getValue() : fechaVE_(d.fecha || '');
@@ -2663,7 +2696,14 @@ function guardarCliente_(ss, d) {
                // v22: aliado, su porcentaje y el nombre de su negocio
                (d.aliado === undefined ? (fila ? String(sh.getRange(fila, CLI_ALIADO).getValue() || '') : '') : (d.aliado ? 'SI' : 'NO')),
                (d.comisionPct === undefined || d.comisionPct === '') ? (fila ? sh.getRange(fila, CLI_PCT).getValue() : '') : Number(d.comisionPct) || 0,
-               conserva(d.negocio, CLI_NEGOCIO)];
+               conserva(d.negocio, CLI_NEGOCIO),
+               conserva(d.correo, CLI_CORREO),
+               conserva(d.estado, CLI_ESTADO), conserva(d.ciudad, CLI_CIUDAD), conserva(d.sector, CLI_SECTOR),
+               conserva(d.calle, CLI_CALLE), conserva(d.local, CLI_LOCAL), conserva(d.referencia, CLI_REF)];
+  // La direccion completa (D) se arma de las partes cuando las hay; si no, queda la que vino o la que habia.
+  var partes = {estado:datos[CLI_ESTADO - 1], ciudad:datos[CLI_CIUDAD - 1], sector:datos[CLI_SECTOR - 1],
+                calle:datos[CLI_CALLE - 1], local:datos[CLI_LOCAL - 1]};
+  if (String(partes.calle || partes.local || partes.sector || '').trim()) datos[3] = componerDireccion_(partes);
   var eraNuevo = !fila;
   if (fila) sh.getRange(fila, 1, 1, CLI_COLS).setValues([datos]);
   else { sh.appendRow(datos); fila = sh.getLastRow(); }
@@ -2674,7 +2714,40 @@ function guardarCliente_(ss, d) {
                    credito:String(final[6]||'').toUpperCase() === 'SI',
                    limite:Number(final[7]) || 0, dias:Number(final[8]) || 0,
                    aliado:String(final[CLI_ALIADO-1]||'').toUpperCase() === 'SI',
-                   comisionPct:Number(final[CLI_PCT-1]) || 0, negocio:String(final[CLI_NEGOCIO-1]||'')}};
+                   comisionPct:Number(final[CLI_PCT-1]) || 0, negocio:String(final[CLI_NEGOCIO-1]||''),
+                   dir:String(final[3]||''), correo:String(final[CLI_CORREO-1]||''),
+                   estado:String(final[CLI_ESTADO-1]||''), ciudad:String(final[CLI_CIUDAD-1]||''), sector:String(final[CLI_SECTOR-1]||''),
+                   calle:String(final[CLI_CALLE-1]||''), local:String(final[CLI_LOCAL-1]||''), referencia:String(final[CLI_REF-1]||'')}};
+}
+
+// v28.11 — Cedula / RIF. Misma regla que boparts_clientes.js (validarRif). Digito verificador SENIAT:
+// letra (V1 E2 J3 P4 G5 C3) x4 + 8 digitos x (3,2,7,6,5,4,3,2); 11 - (suma % 11); 10 u 11 -> 0.
+// Probado con J-50828177-2 (BOSC), J-50214181-2 (Datanet) y J-41283151-8 (Serdimpre).
+function validarRif_(txt) {
+  var t = String(txt || '').toUpperCase().replace(/[\s.\-\/]/g, '');
+  if (!t) return {ok:true, valor:''};
+  var m = /^([VEJGPC])(\d+)$/.exec(t);
+  if (!m) return {ok:false, error:'debe empezar con V, E, J, G, P o C seguido de numeros'};
+  var L = m[1], n = m[2];
+  if (/^0+$/.test(n)) return {ok:false, error:'ese numero es todo ceros'};
+  var jur = L === 'J' || L === 'G' || L === 'C';
+  if (L === 'P') return n.length >= 5 ? {ok:true, valor:'P-' + n} : {ok:false, error:'pasaporte muy corto'};
+  if (jur && n.length !== 9) return {ok:false, error:'un RIF ' + L + ' lleva 9 digitos (8 + el verificador)'};
+  if (!jur && n.length < 6) return {ok:false, error:'cedula muy corta'};
+  if (!jur && n.length <= 8) return {ok:true, valor:L + '-' + n};
+  if (n.length !== 9) return {ok:false, error:'demasiados digitos'};
+  var letra = {V:1, E:2, J:3, P:4, G:5, C:3}[L], pesos = [3, 2, 7, 6, 5, 4, 3, 2], sum = letra * 4;
+  for (var i = 0; i < 8; i++) sum += Number(n.charAt(i)) * pesos[i];
+  var dv = 11 - (sum % 11); if (dv >= 10) dv = 0;
+  if (Number(n.charAt(8)) !== dv) return {ok:false, error:'el digito verificador no cuadra (' + L + '-' + n.slice(0, 8) + '-' + n.charAt(8) + ')'};
+  return {ok:true, valor:L + '-' + n.slice(0, 8) + '-' + dv};
+}
+// Misma regla que componerDireccion() de boparts_clientes.js.
+function componerDireccion_(d) {
+  var p = [d.calle, d.local, d.sector].map(function(x) { return String(x || '').trim(); }).filter(function(x) { return x; });
+  if (String(d.ciudad || '').trim()) p.push(String(d.ciudad).trim());
+  if (String(d.estado || '').trim()) p.push('Estado ' + String(d.estado).trim());
+  return p.join(', ');
 }
 
 // Metricas por cliente, calculadas de VENTAS (monto y fecha) y VENTAS_DETALLE (margen y productos).

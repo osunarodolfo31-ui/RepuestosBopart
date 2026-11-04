@@ -1,7 +1,10 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_gerencia.html
-  VERSION: v3.5 (2026-11-02) | build 2026-11-04.2 | requiere Apps Script v28.7
+  VERSION: v3.6 (2026-11-04) | build 2026-11-04.3 | requiere Apps Script v28.11 y boparts_clientes.js
+  v3.6: la ficha del cliente edita cedula/RIF (validado), telefono y direccion por partes. Region predeterminada
+  (estado y ciudad) editable arriba de la lista de clientes.
+  VERSION anterior: v3.5 (2026-11-02) | build 2026-11-02.8 | requiere Apps Script v28.7
   v3.5: boton "Traer del BCV" junto a la tasa BCV (la trae el script; ademas se actualiza sola cada 2 horas).
   VERSION anterior: v3.4 (2026-11-01) | build 2026-11-02.7 | requiere Apps Script v28
   v3.4: Cuentas por pagar y Liquidacion de aliados se mudan a la pantalla Dinero (boparts_dinero.html), junto al
@@ -413,6 +416,14 @@ select option{background:#1E1E1E;color:var(--ink)}
       <button class="tab" data-o="credito">Con credito</button>
       <button class="tab" data-o="margen">Mejor margen</button>
     </div>
+    <div class="cominfo" style="margin:0 0 10px" id="regInfo">Region predeterminada de los clientes: ... <a href="#" onclick="abrirRegion();return false" style="color:var(--brand);font-weight:700">cambiar</a></div>
+    <div id="regBox" style="display:none;margin-bottom:10px">
+      <div class="row2">
+        <div class="field"><label>Estado</label><select id="regEst" onchange="regCiudades()"></select></div>
+        <div class="field"><label>Ciudad</label><input type="text" id="regCiu" list="regCiuL"><datalist id="regCiuL"></datalist></div>
+      </div>
+      <button class="tab on" style="width:100%;padding:10px" onclick="guardarRegion()">Guardar region predeterminada</button>
+    </div>
     <input type="search" id="cliBuscar" placeholder="Buscar por nombre, cedula o telefono..." oninput="pintarClientes()" style="margin-bottom:8px">
     <div id="clientesBox"><div class="cart-empty">Cargando...</div></div>
   </div>
@@ -515,7 +526,8 @@ select option{background:#1E1E1E;color:var(--ink)}
   </div>
 </div>
 
-<script src="boparts_sesion.js?v=2026-11-04.2"></script>
+<script src="boparts_sesion.js?v=2026-11-04.3"></script>
+<script src="boparts_clientes.js?v=2026-11-04.3"></script>
 <script>
 
 
@@ -528,7 +540,7 @@ function sellarVersion(d) {
   if (t) t.textContent = 'app ' + APP_VERSION + ' \u00b7 script ' + VER_SCRIPT;
   return d;
 }
-var APP_VERSION = 'v3.5';
+var APP_VERSION = 'v3.6';
 var TASA = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
 var periodo = 'hoy', DATA = null;
 
@@ -560,7 +572,7 @@ function abrirGerencia() {
   cargarCategorias();
   cargarApartados();
   cargarConteos();
-  cargarClientes();
+  cargarClientes(); cargarRegion();
   cargarTareas();
   cargar();
 }
@@ -965,7 +977,10 @@ function cargarClientes() {
     CLIENTES = (c && c.clientes ? c.clientes : []).map(function(r) {
       return {nombre:r[0] || '', ced:r[1] || '', tel:r[2] || '', credito:String(r[6] || '').toUpperCase() === 'SI',
               limite:num(r[7]), dias:num(r[8]),
-              aliado:String(r[9] || '').toUpperCase() === 'SI', pct:num(r[10]), negocio:r[11] || ''};
+              aliado:String(r[9] || '').toUpperCase() === 'SI', pct:num(r[10]), negocio:r[11] || '',
+              // v3.6: direccion por partes
+              dir:r[3] || '', correo:r[12] || '', estado:r[13] || '', ciudad:r[14] || '', sector:r[15] || '',
+              calle:r[16] || '', local:r[17] || '', referencia:r[18] || ''};
     }).filter(function(x) { return x.nombre; });
     STATS = {};
     (st && st.clientes ? st.clientes : []).forEach(function(s) { STATS[s.cliente.trim().toUpperCase()] = s; });
@@ -1017,6 +1032,11 @@ function pintarClientes() {
         '<div>Margen que deja<b>' + (s.margen ? s.margen.toFixed(0) + '%' : '-') + '</b></div>' +
         '<div>Ultima compra<b style="font-size:12px">' + (s.ultima ? fechaES(s.ultima) : 'nunca') + '</b></div></div>' +
         (s.top && s.top.length ? '<div class="aviso" style="margin:0 0 10px">Se lleva: ' + s.top.map(function(t) { return escHtml(t.producto) + ' (' + t.unidades + ')'; }).join(' · ') + '</div>' : '') +
+        // v3.6: cedula/RIF (se valida con su digito verificador), telefono y direccion por partes
+        (validarRif(c.ced).ok ? '' : '<div class="aviso" style="margin:0 0 8px;color:var(--red)">Cedula/RIF invalido: ' + escHtml(validarRif(c.ced).error) + '</div>') +
+        '<div class="row2"><div class="field"><label style="font-size:11px">Cedula / RIF</label><input type="text" id="rf-' + idSafe(c.nombre) + '" value="' + escAttr(c.ced) + '" autocapitalize="characters"></div>' +
+        '<div class="field"><label style="font-size:11px">Telefono</label><input type="tel" id="tf-' + idSafe(c.nombre) + '" value="' + escAttr(c.tel) + '"></div></div>' +
+        '<div id="dz-' + idSafe(c.nombre) + '"></div>' +
         '<div class="cfg">' +
           '<div><label style="font-size:11px">Credito</label><select id="cr-' + idSafe(c.nombre) + '"><option value="NO"' + (c.credito ? '' : ' selected') + '>No</option><option value="SI"' + (c.credito ? ' selected' : '') + '>Si</option></select></div>' +
           '<div><label style="font-size:11px">Limite USD</label><input type="number" step="1" id="lm-' + idSafe(c.nombre) + '" value="' + (c.limite || '') + '" placeholder="0"></div>' +
@@ -1032,6 +1052,42 @@ function pintarClientes() {
       '</div></div>';
   });
   document.getElementById('clientesBox').innerHTML = h;
+  // v3.6: el formulario de direccion se monta solo en la ficha abierta
+  if (cliAbierto) {
+    var ca = CLIENTES.filter(function(x) { return x.nombre === cliAbierto; })[0], idA = idSafe(cliAbierto);
+    if (ca && document.getElementById('dz-' + idA)) { montarDireccion('dx' + idA, 'dz-' + idA, ca); amarrarRif('rf-' + idA); }
+  }
+}
+
+// v3.6 — Region predeterminada (CONFIG B16/B17). La usan Ventas y la ficha del cliente.
+function pintarRegion() {
+  document.getElementById('regInfo').innerHTML = 'Region predeterminada de los clientes: <b>' + escHtml(REGION_DEF.ciudad || '-') + ', ' + escHtml(REGION_DEF.estado) + '</b> · ' +
+    '<a href="#" onclick="abrirRegion();return false" style="color:var(--brand);font-weight:700">cambiar</a>';
+}
+function abrirRegion() {
+  var b = document.getElementById('regBox'), e = document.getElementById('regEst');
+  b.style.display = b.style.display === 'none' ? 'block' : 'none';
+  e.innerHTML = Object.keys(ESTADOS_VE).map(function(x) { return '<option>' + x + '</option>'; }).join('');
+  e.value = REGION_DEF.estado; regCiudades(); document.getElementById('regCiu').value = REGION_DEF.ciudad || '';
+}
+function regCiudades() {
+  var e = document.getElementById('regEst').value;
+  document.getElementById('regCiuL').innerHTML = (ESTADOS_VE[e] || []).map(function(c) { return '<option value="' + c + '">'; }).join('');
+  document.getElementById('regCiu').value = (ESTADOS_VE[e] || [''])[0];
+}
+function guardarRegion() {
+  var est = document.getElementById('regEst').value, ciu = document.getElementById('regCiu').value.trim();
+  fetch(SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body:JSON.stringify({tipo:'region', estado:est, ciudad:ciu})})
+    .then(leerJSON).then(function(d) {
+      if (!d || !d.ok) throw new Error(d && d.error ? d.error : 'no se guardo');
+      fijarRegionDesdeConfig({estadoDefecto:est, ciudadDefecto:ciu}); pintarRegion();
+      document.getElementById('regBox').style.display = 'none';
+      toast('Region predeterminada: ' + ciu + ', ' + est, 'ok');
+    }).catch(function(e) { if (e && e.message === 'SESION') return; toast('No se guardo: ' + e.message, 'err'); });
+}
+function cargarRegion() {
+  pintarRegion();
+  fetch(SCRIPT_URL + '?action=config&t=' + Date.now()).then(leerJSON).then(function(d) { fijarRegionDesdeConfig(d); pintarRegion(); }).catch(function() {});
 }
 
 function idSafe(n) { return String(n).replace(/[^a-zA-Z0-9]/g, ''); }
@@ -1047,19 +1103,30 @@ function guardarCli(nombre) {
   var ali = document.getElementById('al-' + id).value === 'SI';
   var pct = num(document.getElementById('pc-' + id).value);
   var neg = document.getElementById('ng-' + id).value.trim();
+  // v3.6: cedula/RIF, telefono y direccion
+  var vr = validarRif(document.getElementById('rf-' + id).value);
+  if (!vr.ok) { toast('Cedula/RIF: ' + vr.error, 'err'); return; }
+  var telN = document.getElementById('tf-' + id).value.trim();
+  var dd = document.getElementById('dx' + id + 'Est') ? leerDireccion('dx' + id) : {};
+  var rifAnt = c.ced;
+  c = {nombre:c.nombre, ced:vr.valor, tel:telN, _ref:c};
+  if ((vr.tipo === 'J' || vr.tipo === 'G' || vr.tipo === 'C') && !dd.calle) { toast('Empresa (RIF ' + vr.tipo + '): copia la direccion de su RIF, al menos la calle', 'err'); return; }
   if (cred && !c.ced && !c.tel) { toast('Este cliente no tiene cedula ni telefono: completalos en la hoja antes de darle credito', 'err'); return; }
   if (cred && !lim) { toast('Ponle un limite: sin tope, el credito no tiene freno', 'err'); return; }
   // La cedula es lo que une su comision con su deuda. Un aliado sin cedula no se puede liquidar.
   if (ali && !c.ced) { toast('Para marcarlo como aliado necesita cedula: es lo que une su comision con lo que debe', 'err'); return; }
   if (ali && !pct) { toast('Ponle el porcentaje de comision', 'err'); return; }
   fetch(SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'},
-    body:JSON.stringify({tipo:'cliente', nombre:c.nombre, rif:c.ced, tel:c.tel, credito:cred, limite:lim, dias:dias,
-                         aliado:ali, comisionPct:pct, negocio:neg, fecha:new Date().toLocaleDateString('es-VE')})})
+    body:JSON.stringify({tipo:'cliente', nombre:c.nombre, rif:c.ced, rifAnterior:rifAnt, tel:c.tel, credito:cred, limite:lim, dias:dias,
+                         aliado:ali, comisionPct:pct, negocio:neg, fecha:new Date().toLocaleDateString('es-VE'),
+                         estado:dd.estado, ciudad:dd.ciudad, sector:dd.sector, calle:dd.calle, local:dd.local, referencia:dd.referencia})})
     .then(function(r) { return r.text(); })
     .then(function(t) { var d; try { d = JSON.parse(t); } catch (e) { throw new Error('respuesta rara'); }
       if (!d || !d.ok) throw new Error(d && d.error ? d.error : 'no se guardo');
       // Se refleja lo que quedo guardado en la hoja, no lo que se envio
       var srv = d.cliente || {};
+      c = c._ref; c.ced = srv.rif || vr.valor; c.tel = srv.tel || telN;
+      ['dir','estado','ciudad','sector','calle','local','referencia'].forEach(function(k) { if (srv[k] !== undefined) c[k] = srv[k]; });
       c.credito = (srv.credito !== undefined) ? srv.credito : cred;
       c.limite = (srv.limite !== undefined) ? srv.limite : lim;
       c.dias = (srv.dias !== undefined) ? srv.dias : dias;
