@@ -1,6 +1,13 @@
 /**
  * Repuesto BoParts — Code.gs
- * VERSION: v28.13 (2026-11-04) | facturar una venta ya hecha
+ * VERSION: v28.14 (2026-11-05) | cobros: abono a una nota en particular
+ *
+ * v28.14 — CXC_MOV columna R APLICA_A. Un abono puede ir a una nota en particular (tipo=abono con aplicaA = ID_VENTA):
+ *   se valida que la nota sea del cliente, que tenga saldo y que el abono no pase de lo que falta. En el estado de
+ *   cuenta, primero cada abono dirigido va a su nota (y una devolucion con saldo a favor, a la nota devuelta) y lo
+ *   demas se reparte como siempre, a las notas mas viejas primero.
+ *
+ * VERSION anterior: v28.13 (2026-11-04) | facturar una venta ya hecha
  *
  * v28.13 — factura_digital con desglosar:true (solo socios, desde Documentos): una venta hecha sin "Facturar" se
  *   factura despues; el total (IVA incluido) se desglosa en base e IVA y se guarda en VENTAS AF/AG/AH.
@@ -777,7 +784,7 @@ function claveDePost_(data) {
 // OJO: esta constante es lo que ven las apps en el menu. Se habia quedado en v21.4 mientras el
 // encabezado ya decia v24, asi que el sello de version — que existe justamente para saber si lo
 // desplegado es lo que crees — estaba mintiendo. Cada version nueva se cambia AQUI tambien.
-var VERSION_SCRIPT = 'v28.13';
+var VERSION_SCRIPT = 'v28.14';
 
 function json_(obj) {
   // La version viaja en cada respuesta: es la forma rapida de saber si lo desplegado es lo que crees
@@ -1646,9 +1653,11 @@ function hojaCxc_(ss) {
   if (!sh) {
     sh = ss.insertSheet(SH_CXC);
     sh.appendRow(['FECHA','HORA','CLIENTE','RIF','TIPO','ID_VENTA','NOTA_NUM','MONTO_USD','MONEDA_PAGO','MONTO_PAGADO',
-                  'TASA','METODO','BANCO','COMISION_BS','REGISTRADO_POR','NOTAS','PRODUCTOS']);
+                  'TASA','METODO','BANCO','COMISION_BS','REGISTRADO_POR','NOTAS','PRODUCTOS','APLICA_A']);
     sh.setFrozenRows(1);
   }
+  // v28.14 — R APLICA_A: el ID_VENTA de la nota a la que va un abono dirigido
+  try { if (!String(sh.getRange(1, 18).getValue() || '').trim()) sh.getRange(1, 18).setValue('APLICA_A'); } catch (eR) {}
   return sh;
 }
 
@@ -1688,10 +1697,23 @@ function guardarAbono_(ss, d) {
     return {saldoUSD:saldoDeCuenta_(estR, d.rif), repetido:true};
   }
 
+  // v28.14 — ABONO DIRIGIDO: el cliente paga una nota en particular. Tiene que ser una nota de ese cliente con
+  // saldo, y el abono no puede pasar de lo que falta de esa nota.
+  var aplicaA = String(d.aplicaA || '').trim(), notaDest = '';
+  if (aplicaA) {
+    var nd = null;
+    (estadoCxc_(ss, d.cliente) || []).forEach(function(c) {
+      (c.notas || []).forEach(function(n) { if (String(n.idVenta).trim() === aplicaA) nd = n; });
+    });
+    if (!nd) throw rechazo_('Esa nota no esta en la cuenta de ' + d.cliente);
+    if (nd.pendienteUSD <= 0.009) throw rechazo_('La nota ' + nd.nota + ' ya esta pagada');
+    if (montoUSD > nd.pendienteUSD + 0.05) throw rechazo_('El abono ($' + montoUSD + ') pasa de lo que falta de la nota ' + nd.nota + ' ($' + nd.pendienteUSD + ')');
+    notaDest = nd.nota || '';
+  }
   cx.appendRow([
-    fechaVE_(d.fecha), d.hora, d.cliente, d.rif||'', 'ABONO', d.idAbono||'', '',
+    fechaVE_(d.fecha), d.hora, d.cliente, d.rif||'', 'ABONO', d.idAbono||'', notaDest,
     montoUSD, d.moneda||'USD', Number(d.montoPagado)||0, Number(d.tasa)||0,
-    d.metodo||'', d.banco||'', Number(d.comision)||0, d.registradoPor||'', d.notas||''
+    d.metodo||'', d.banco||'', Number(d.comision)||0, d.registradoPor||'', d.notas||'', '', aplicaA
   ]);
   formatoFecha_(cx, cx.getLastRow(), 1);
   var est = estadoCxc_(ss, d.cliente);
@@ -1738,7 +1760,7 @@ function liberarComisionesCobradas_(ss, notas) {
 function estadoCxc_(ss, soloCliente) {
   var sh = ss.getSheetByName(SH_CXC);
   if (!sh || sh.getLastRow() < 2) return [];
-  var rows = sh.getRange(2, 1, sh.getLastRow() - 1, 17).getValues();
+  var rows = sh.getRange(2, 1, sh.getLastRow() - 1, 18).getValues();
   completarProductos_(ss, sh, rows);
   // v27 — LA CUENTA ES DE LA CEDULA, NO DEL NOMBRE. Se agrupaba por nombre escrito: cuando "Taller Diesel
   // Luis" paso a llamarse "TALLER DIESEL", su cuenta se partio en dos y cada mitad mostraba solo parte de
@@ -1781,7 +1803,9 @@ function estadoCxc_(ss, soloCliente) {
     var monto = Number(r[7]) || 0;
     var mov = {fecha:fmtFecha_(r[0]), hora:String(r[1]||''), tipo:String(r[4]), idVenta:String(r[5]||''), nota:r[6]||'', montoUSD:monto,
                moneda:String(r[8]||''), montoPagado:Number(r[9])||0, tasa:Number(r[10])||0, metodo:String(r[11]||''), banco:String(r[12]||''),
-               productos:String(r[16]||'')};
+               productos:String(r[16]||''), aplicaA:String(r[17]||'').trim()};
+    // v28.14 — una devolucion con saldo a favor (DEV-n) va contra la nota devuelta.
+    if (mov.tipo === 'ABONO' && !mov.aplicaA && /^DEV-/.test(mov.idVenta) && mov.nota) mov.notaDev = String(mov.nota);
     c.movs.push(mov);
     if (mov.tipo === 'CARGO') { c.cargosUSD += monto; c.notas.push({idVenta:mov.idVenta, nota:mov.nota, fecha:mov.fecha, montoUSD:monto, abonadoUSD:0, productos:mov.productos}); }
     else if (mov.tipo === 'ABONO') c.abonosUSD += monto;
@@ -1789,12 +1813,25 @@ function estadoCxc_(ss, soloCliente) {
   var out = [];
   Object.keys(porCliente).forEach(function(k) {
     var c = porCliente[k];
-    // Aplicar abonos a las notas mas viejas primero (orden de registro)
-    var resto = c.abonosUSD;
+    // v28.14 — Primero los abonos DIRIGIDOS van a su nota (lo que sobre pasa al monto general). Despues el resto
+    // se aplica a las notas mas viejas primero (orden de registro), como siempre.
+    var resto = 0;
+    c.notas.forEach(function(n) { n.abonadoUSD = 0; });
+    c.movs.forEach(function(m) {
+      if (m.tipo !== 'ABONO') return;
+      var dest = null;
+      if (m.aplicaA) dest = c.notas.filter(function(n) { return String(n.idVenta).trim() === m.aplicaA; })[0];
+      else if (m.notaDev) dest = c.notas.filter(function(n) { return String(n.nota) === m.notaDev; })[0];
+      if (!dest) { resto += m.montoUSD; return; }
+      var cabe = Math.max(0, dest.montoUSD - dest.abonadoUSD), ap = Math.min(cabe, m.montoUSD);
+      dest.abonadoUSD += ap; resto += m.montoUSD - ap;
+      m.notaAplicada = dest.nota;
+    });
     c.notas.forEach(function(n) {
-      var ap = Math.min(n.montoUSD, resto); n.abonadoUSD = round2_(ap); resto -= ap;
-      n.pendienteUSD = round2_(n.montoUSD - ap);
-      n.estado = n.pendienteUSD <= 0.009 ? 'PAGADA' : (ap > 0 ? 'PARCIAL' : 'PENDIENTE');
+      var ap = Math.min(Math.max(0, n.montoUSD - n.abonadoUSD), resto); resto -= ap;
+      n.abonadoUSD = round2_(n.abonadoUSD + ap);
+      n.pendienteUSD = round2_(n.montoUSD - n.abonadoUSD);
+      n.estado = n.pendienteUSD <= 0.009 ? 'PAGADA' : (n.abonadoUSD > 0.009 ? 'PARCIAL' : 'PENDIENTE');
     });
     c.cargosUSD = round2_(c.cargosUSD); c.abonosUSD = round2_(c.abonosUSD);
     c.saldoUSD = round2_(c.cargosUSD - c.abonosUSD);

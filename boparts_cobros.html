@@ -1,7 +1,11 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_cobros.html
-  VERSION: v3.3 (2026-11-01) | build 2026-11-04.5 | requiere Apps Script v28
+  VERSION: v3.4 (2026-11-05) | build 2026-11-05.1 | requiere Apps Script v28.14
+  v3.4: solo se ven las notas que se deben (las pagadas, con "Ver pagadas"). Cada nota tiene "Pagar esta": el abono
+  va a esa nota y no a la mas vieja; el monto se llena con lo que debe y no deja pasar de ahi. Sin elegir nota es
+  un abono general, como siempre. Los ultimos abonos dicen a que nota fueron.
+  VERSION anterior: v3.3 (2026-11-01) | build 2026-11-02.8 | requiere Apps Script v28
   v3.3: los metodos salen de la hoja CANALES (habilitados para ENTRAR) y la moneda del abono queda fija en la de
   la cuenta del metodo. El efectivo queda amarrado a su caja (Efectivo USD o Efectivo Bs).
   VERSION anterior: v3.2 (2026-09-22) | build 2026-10-31.1 | REQUIERE Apps Script v26
@@ -193,6 +197,12 @@ select option{background:#1E1E1E;color:var(--ink)}
 .b-pend{background:rgba(239,68,68,.15);color:var(--red)}
 .b-parc{background:var(--brand-soft);color:var(--brand)}
 .b-pag{background:rgba(34,197,94,.15);color:var(--green)}
+/* v3.4 abono a una nota */
+.nrow.sel{background:rgba(245,168,0,.10);border-radius:8px;padding-left:8px;padding-right:8px}
+.pagar{margin-top:6px;background:none;border:1px solid var(--brand);color:var(--brand);border-radius:6px;padding:4px 10px;font-size:11px;font-weight:700;font-family:inherit;cursor:pointer}
+.pagar.on{background:var(--brand);color:#111}
+.verpag{background:none;border:none;color:var(--ink-muted);font-size:12px;font-family:inherit;cursor:pointer;padding:8px 0;text-decoration:underline}
+.destino{display:flex;justify-content:space-between;align-items:center;gap:8px;background:rgba(245,168,0,.10);border:1px solid var(--brand);border-radius:8px;padding:8px 10px;margin-bottom:10px;font-size:12px}
 .saldo-big{font-size:26px;font-weight:700;color:var(--brand)}
 .saldo-sub{font-size:12px;color:var(--ink-muted)}
 .empty{text-align:center;padding:20px;color:var(--ink-muted);font-size:13px}
@@ -232,8 +242,9 @@ select option{background:#1E1E1E;color:var(--ink)}
       <div class="saldo-big" id="detSaldo">$0.00</div>
       <div class="saldo-sub" id="detSaldoBs"></div>
       <div style="margin-top:12px">
-        <label>Notas de entrega</label>
+        <label>Notas por cobrar</label>
         <div id="detNotas"></div>
+        <button class="verpag" id="btnVerPag" onclick="VER_PAGADAS=!VER_PAGADAS;renderDetalle(true)" style="display:none"></button>
       </div>
       <div style="margin-top:12px">
         <label>Ultimos abonos</label>
@@ -244,6 +255,7 @@ select option{background:#1E1E1E;color:var(--ink)}
 
     <div class="section">
       <div class="stitle">Registrar abono</div>
+      <div id="abDestino"></div>
       <div class="row2">
         <div class="field"><label>Monto pagado</label><input type="number" id="abMonto" placeholder="0.00" step="0.01" oninput="previewAbono()"></div>
         <div class="field"><label>Moneda</label><select id="abMoneda" onchange="previewAbono()"><option value="USD">USD</option><option value="BS">Bs</option></select></div>
@@ -347,7 +359,7 @@ select option{background:#1E1E1E;color:var(--ink)}
   </div>
 </div>
 
-<script src="boparts_sesion.js?v=2026-11-04.5"></script>
+<script src="boparts_sesion.js?v=2026-11-05.1"></script>
 <script>
 
 
@@ -495,7 +507,7 @@ function primerNombre(n) {
 }
 var ultimo = null;   // ultimo abono registrado (para el mensaje de WhatsApp)
 
-var APP_VERSION = 'v3.3';
+var APP_VERSION = 'v3.4';
 document.getElementById('fechaHdr').textContent = APP_VERSION + ' · ' + new Date().toLocaleDateString('es-VE', {weekday:'long', day:'numeric', month:'long'});
 
 // Metodos de pago (sin CREDITO)
@@ -541,30 +553,66 @@ function elegir(nombre) {
   document.getElementById('detalle').scrollIntoView({behavior:'smooth'});
 }
 
-function renderDetalle() {
+// v3.4 — ABONO A UNA NOTA. ABONO_A = la nota que el cliente esta pagando (null = abono general, va a las mas viejas).
+// Las notas pagadas no se muestran: solo lo que se debe. "Ver pagadas" las trae si hace falta revisar.
+var ABONO_A = null, VER_PAGADAS = false;
+function elegirNota(idVenta) {
+  var n = sel ? sel.notas.filter(function(x) { return x.idVenta === idVenta; })[0] : null;
+  ABONO_A = (n && (!ABONO_A || ABONO_A.idVenta !== idVenta)) ? n : null;
+  if (ABONO_A) {
+    var mon = document.getElementById('abMoneda').value;
+    document.getElementById('abMonto').value = mon === 'BS' ? (TASA ? Math.round(ABONO_A.pendienteUSD * TASA * 100) / 100 : '') : ABONO_A.pendienteUSD;
+  }
+  renderDetalle(true);
+  if (ABONO_A) document.getElementById('abMonto').scrollIntoView({behavior:'smooth', block:'center'});
+}
+function pintarDestino() {
+  var el = document.getElementById('abDestino');
+  el.innerHTML = ABONO_A
+    ? '<div class="destino"><div>Paga la nota <b>NE-' + ('000' + ABONO_A.nota).slice(-4) + '</b> · debe <b>' + fmtUSD(ABONO_A.pendienteUSD) + '</b></div>' +
+      '<button class="pagar" onclick="elegirNota(\'' + escAttr(ABONO_A.idVenta) + '\')">Quitar</button></div>'
+    : '<div class="cominfo" style="margin:0 0 10px">Abono general: se aplica a las notas mas viejas. Para pagar una nota en particular, toca <b>Pagar esta</b> en la nota.</div>';
+}
+
+function renderDetalle(conservar) {
   if (!sel) { document.getElementById('detalle').style.display = 'none'; document.getElementById('btnAbono').style.display = 'none'; return; }
   document.getElementById('detalle').style.display = 'block';
   document.getElementById('btnAbono').style.display = 'block';
   document.getElementById('detNombre').textContent = sel.cliente;
   document.getElementById('detSaldo').textContent = fmtUSD(sel.saldoUSD);
   document.getElementById('detSaldoBs').textContent = (TASA ? fmtBS(sel.saldoUSD * TASA) + ' a tasa ' + TASA + ' · ' : '') + 'Cargos ' + fmtUSD(sel.cargosUSD) + ' · Abonos ' + fmtUSD(sel.abonosUSD);
-  var h = '';
+  if (!conservar) { ABONO_A = null; VER_PAGADAS = false; }
+  if (ABONO_A) ABONO_A = sel.notas.filter(function(x) { return x.idVenta === ABONO_A.idVenta && x.estado !== 'PAGADA'; })[0] || null;
+  var h = '', pagadas = sel.notas.filter(function(n) { return n.estado === 'PAGADA'; });
   sel.notas.slice().reverse().forEach(function(n) {
-    var cls = n.estado === 'PAGADA' ? 'b-pag' : (n.estado === 'PARCIAL' ? 'b-parc' : 'b-pend');
-    h += '<div class="nrow"><div style="flex:1;padding-right:8px"><b>' + (n.nota ? 'NE-' + ('000' + n.nota).slice(-4) : 'Sin nota') + '</b> · ' + fechaCorta(n.fecha) +
-      '<br><span style="color:var(--ink-muted)">' + fmtUSD(n.montoUSD) + (n.estado === 'PARCIAL' ? ' · debe ' + fmtUSD(n.pendienteUSD) : '') + '</span>' +
+    var pagada = n.estado === 'PAGADA';
+    if (pagada && !VER_PAGADAS) return;
+    var cls = pagada ? 'b-pag' : (n.estado === 'PARCIAL' ? 'b-parc' : 'b-pend');
+    var elegida = ABONO_A && ABONO_A.idVenta === n.idVenta;
+    h += '<div class="nrow' + (elegida ? ' sel' : '') + '"' + (pagada ? ' style="opacity:.55"' : '') + '><div style="flex:1;padding-right:8px"><b>' + (n.nota ? 'NE-' + ('000' + n.nota).slice(-4) : 'Sin nota') + '</b> · ' + fechaCorta(n.fecha) +
+      '<br><span style="color:var(--ink-muted)">' + (pagada ? fmtUSD(n.montoUSD) : 'debe <b style="color:var(--ink)">' + fmtUSD(n.pendienteUSD) + '</b>' +
+        (n.estado === 'PARCIAL' ? ' de ' + fmtUSD(n.montoUSD) : '')) + '</span>' +
       (n.productos ? '<div style="font-size:11px;color:var(--ink-soft);margin-top:4px;line-height:1.4">' + escHtml(limpiarProductos(n.productos)) + '</div>' : '') +
+      (!pagada && n.idVenta ? '<button class="pagar' + (elegida ? ' on' : '') + '" onclick="elegirNota(\'' + escAttr(n.idVenta) + '\')">' + (elegida ? 'Pagando esta' : 'Pagar esta') + '</button>' : '') +
       '</div><span class="badge ' + cls + '">' + n.estado + '</span></div>';
   });
-  document.getElementById('detNotas').innerHTML = h || '<div class="empty">Sin notas</div>';
+  document.getElementById('detNotas').innerHTML = h || '<div class="empty">' + (pagadas.length ? 'Todo pagado.' : 'Sin notas') + '</div>';
+  var vp = document.getElementById('btnVerPag');
+  vp.style.display = pagadas.length ? 'block' : 'none';
+  vp.textContent = VER_PAGADAS ? 'Ocultar las pagadas' : 'Ver las ' + pagadas.length + ' nota' + (pagadas.length === 1 ? '' : 's') + ' ya pagada' + (pagadas.length === 1 ? '' : 's');
   var ab = sel.movs.filter(function(m) { return m.tipo === 'ABONO'; }).slice(-5).reverse();
   var ha = '';
   ab.forEach(function(m) {
-    ha += '<div class="nrow"><div>' + fechaCorta(m.fecha) + ' · ' + escHtml(m.metodo) + (m.banco ? ' ' + escHtml(m.banco) : '') + '</div><div>' + fmtUSD(m.montoUSD) + (m.moneda === 'BS' ? '<br><span style="color:var(--ink-muted)">' + fmtBS(m.montoPagado) + '</span>' : '') + '</div></div>';
+    ha += '<div class="nrow"><div>' + fechaCorta(m.fecha) + ' · ' + escHtml(m.metodo) + (m.banco ? ' ' + escHtml(m.banco) : '') +
+      (m.notaAplicada && (m.aplicaA || m.notaDev) ? '<br><span style="color:var(--brand)">a la nota NE-' + ('000' + m.notaAplicada).slice(-4) + '</span>' : '') + '</div><div>' + fmtUSD(m.montoUSD) + (m.moneda === 'BS' ? '<br><span style="color:var(--ink-muted)">' + fmtBS(m.montoPagado) + '</span>' : '') + '</div></div>';
   });
   document.getElementById('detAbonos').innerHTML = ha || '<div class="empty">Sin abonos todavia</div>';
-  document.getElementById('abMonto').value = ''; document.getElementById('abNotas').value = '';
-  document.getElementById('abMetodo').value = ''; previewAbono();
+  pintarDestino();
+  if (!conservar) {
+    document.getElementById('abMonto').value = ''; document.getElementById('abNotas').value = '';
+    document.getElementById('abMetodo').value = '';
+  }
+  previewAbono();
 }
 
 function calcAbono() {
@@ -582,9 +630,11 @@ function previewAbono() {
   var a = calcAbono(); var el = document.getElementById('abPreview');
   if (!a.monto) { el.style.display = 'none'; return; }
   el.style.display = 'block';
-  el.innerHTML = 'Se abonan <b>' + fmtUSD(a.usd) + '</b> a la deuda' + (a.moneda === 'BS' ? ' (tasa ' + TASA + ')' : '') +
+  el.innerHTML = 'Se abonan <b>' + fmtUSD(a.usd) + '</b> ' + (ABONO_A ? 'a la nota NE-' + ('000' + ABONO_A.nota).slice(-4) : 'a la deuda') + (a.moneda === 'BS' ? ' (tasa ' + TASA + ')' : '') +
     (a.com ? ' · comision ' + fmtBS(a.com) : '') +
-    (sel ? ' · saldo quedaria en <b>' + fmtUSD(Math.max(0, sel.saldoUSD - a.usd)) + '</b>' : '');
+    (ABONO_A ? ' · la nota quedaria en <b>' + fmtUSD(Math.max(0, ABONO_A.pendienteUSD - a.usd)) + '</b>' +
+               (a.usd > ABONO_A.pendienteUSD + 0.05 ? ' <span style="color:var(--red)">(pasa de lo que debe esa nota)</span>' : '') : '') +
+    (sel ? ' · saldo total quedaria en <b>' + fmtUSD(Math.max(0, sel.saldoUSD - a.usd)) + '</b>' : '');
 }
 
 /* ===== ID DEL ABONO — el mismo cobro conserva su ID entre reintentos ======================
@@ -620,6 +670,7 @@ function guardarAbono() {
   if (!a.m) { toast('Selecciona el metodo de pago', 'err'); return; }
   if (a.moneda === 'BS' && !TASA) { toast('No hay tasa cargada. Abre Lista de Precios y fijala.', 'err'); return; }
   if (a.usd > sel.saldoUSD + 0.05) { toast('El abono (' + fmtUSD(a.usd) + ') supera el saldo (' + fmtUSD(sel.saldoUSD) + ')', 'err'); return; }
+  if (ABONO_A && a.usd > ABONO_A.pendienteUSD + 0.05) { toast('El abono (' + fmtUSD(a.usd) + ') pasa de lo que debe la nota NE-' + ('000' + ABONO_A.nota).slice(-4) + ' (' + fmtUSD(ABONO_A.pendienteUSD) + '). Quita la nota para abonar en general.', 'err'); return; }
   var now = new Date();
   var payload = {
     tipo:'abono', cliente:sel.cliente, rif:sel.rif || '',
@@ -627,7 +678,8 @@ function guardarAbono() {
     idAbono:idDeEsteAbono(sel.cliente, a.usd),
     montoUSD:a.usd, moneda:a.moneda, montoPagado:a.monto, tasa:TASA,
     metodo:a.m.metodo, banco:a.m.banco, comision:a.com,
-    registradoPor:quien, notas:document.getElementById('abNotas').value
+    registradoPor:quien, notas:document.getElementById('abNotas').value,
+    aplicaA:ABONO_A ? ABONO_A.idVenta : ''        // v3.4: abono a una nota en particular
   };
   var btn = document.getElementById('btnAbono');
   btn.disabled = true; btn.textContent = 'Guardando...';
@@ -635,7 +687,7 @@ function guardarAbono() {
     .then(leerJSON)
     .then(function(d) {
       btn.disabled = false; btn.textContent = 'Registrar Abono';
-      if (!d || d.ok !== true) throw new Error(d && d.error ? d.error : 'Respuesta invalida');
+      if (!d || d.ok !== true) { var er = new Error(d && d.error ? d.error : 'Respuesta invalida'); er.rechazo = !!(d && d.rechazada); throw er; }
       olvidarIdAbono();   // quedo confirmado: el proximo cobro empieza con ID nuevo
       ultimo = {cliente:sel.cliente, usd:a.usd, moneda:a.moneda, monto:a.monto, metodo:a.m.label, saldo:d.saldoUSD};
       // v26: el servidor avisa cuando ese abono YA estaba registrado. Se dice, en vez de dejar
@@ -643,6 +695,7 @@ function guardarAbono() {
       document.getElementById('successMsg').textContent =
         (d.repetido ? 'Ese abono YA estaba registrado. No se duplico.\n\n' : '') +
         sel.cliente + ' - ' + fmtUSD(a.usd) + (a.moneda === 'BS' ? ' (' + fmtBS(a.monto) + ')' : '') +
+        (ABONO_A ? '\na la nota NE-' + ('000' + ABONO_A.nota).slice(-4) : '') +
         '\nSaldo: ' + fmtUSD(d.saldoUSD) +
         (d.comisionesLiberadas ? '\n\nSe liberaron ' + d.comisionesLiberadas + ' comision(es) de aliado: la nota quedo pagada.' : '');
       document.getElementById('success').classList.add('open');
@@ -650,6 +703,7 @@ function guardarAbono() {
     })
     .catch(function(err) {
       btn.disabled = false; btn.textContent = 'Registrar Abono';
+      if (err && err.rechazo) { olvidarIdAbono(); toast('No se registro: ' + err.message, 'err'); return; }
       toast('No se guardo el abono (' + (err && err.message ? err.message : 'sin conexion') + '). Reintenta.', 'err');
     });
 }

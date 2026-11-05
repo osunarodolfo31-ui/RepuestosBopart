@@ -1,5 +1,13 @@
 # CHANGELOG — Repuesto BoParts
 
+## Apps Script v28.14 + cobros v3.4 — build 2026-11-05.1 — abono a una nota en particular
+
+- CXC_MOV columna R APLICA_A. tipo=abono acepta aplicaA (ID_VENTA): nota del cliente, con saldo, sin pasar de lo que
+  falta. En el estado de cuenta los abonos dirigidos van primero a su nota (las devoluciones con saldo a favor, a la
+  nota devuelta); el resto se reparte a las mas viejas, como antes.
+- Cobros: solo se ven las notas que se deben ("Ver pagadas" las muestra). "Pagar esta" en cada nota llena el monto con
+  lo que debe; sin elegir nota es abono general. Los ultimos abonos dicen a que nota fueron.
+
 ## Apps Script v28.13 + documentos v1.2 — build 2026-11-04.5 — facturar una nota ya hecha
 
 - Documentos: boton "Facturar" (solo socios) en notas sin factura. Pide RIF, nombre, domicilio por partes, correo y
