@@ -1,5 +1,12 @@
 # CHANGELOG — Repuesto BoParts
 
+## Apps Script v28.15 + cobros v3.5 — build 2026-11-05.2 — cedula corregida = una sola cuenta
+
+- guardarCliente_: si la cedula/RIF cambia, se reemplaza (celda exacta) en CXC_MOV, VENTAS, COMISIONES, APARTADOS,
+  DEVOLUCIONES y FACTURAS (cambiarRifEnHistorico_). Antes la deuda quedaba partida en dos cuentas con el mismo nombre.
+- Cobros: las cuentas se eligen por nombre + cedula; aviso cuando dos cuentas comparten nombre.
+- Hoja (hecho directo): V-12435 -> V-25951184 (78 celdas) y J052141812 -> J-50214181-2 (25 celdas).
+
 ## Apps Script v28.14 + cobros v3.4 — build 2026-11-05.1 — abono a una nota en particular
 
 - CXC_MOV columna R APLICA_A. tipo=abono acepta aplicaA (ID_VENTA): nota del cliente, con saldo, sin pasar de lo que

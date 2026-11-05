@@ -1,6 +1,11 @@
 /**
  * Repuesto BoParts — Code.gs
- * VERSION: v28.14 (2026-11-05) | cobros: abono a una nota en particular
+ * VERSION: v28.15 (2026-11-05) | cambiar la cedula de un cliente la cambia en todo su historico
+ *
+ * v28.15 — guardarCliente_: si la cedula/RIF cambia, se reemplaza (celda exacta) en CXC_MOV, VENTAS, COMISIONES,
+ *   APARTADOS, DEVOLUCIONES y FACTURAS. Antes la cuenta por cobrar se partia en dos con el mismo nombre.
+ *
+ * VERSION anterior: v28.14 (2026-11-05) | cobros: abono a una nota en particular
  *
  * v28.14 — CXC_MOV columna R APLICA_A. Un abono puede ir a una nota en particular (tipo=abono con aplicaA = ID_VENTA):
  *   se valida que la nota sea del cliente, que tenga saldo y que el abono no pase de lo que falta. En el estado de
@@ -784,7 +789,7 @@ function claveDePost_(data) {
 // OJO: esta constante es lo que ven las apps en el menu. Se habia quedado en v21.4 mientras el
 // encabezado ya decia v24, asi que el sello de version — que existe justamente para saber si lo
 // desplegado es lo que crees — estaba mintiendo. Cada version nueva se cambia AQUI tambien.
-var VERSION_SCRIPT = 'v28.14';
+var VERSION_SCRIPT = 'v28.15';
 
 function json_(obj) {
   // La version viaja en cada respuesta: es la forma rapida de saber si lo desplegado es lo que crees
@@ -2733,6 +2738,8 @@ function guardarCliente_(ss, d) {
     }
   }
   var creado = fila ? sh.getRange(fila, 6).getValue() : fechaVE_(d.fecha || '');
+  // v28.15 — la cedula/RIF que tenia el cliente ANTES de este guardado (para propagar si cambia)
+  var rifViejo = fila ? String(sh.getRange(fila, 2).getValue() || '').trim() : '';
   function conserva(campo, col) {   // si el campo no viene en el mensaje, se deja lo que ya habia
     if (campo !== undefined && campo !== null && campo !== '') return campo;
     return fila ? sh.getRange(fila, col).getValue() : '';
@@ -2754,10 +2761,15 @@ function guardarCliente_(ss, d) {
   if (String(partes.calle || partes.local || partes.sector || '').trim()) datos[3] = componerDireccion_(partes);
   var eraNuevo = !fila;
   if (fila) sh.getRange(fila, 1, 1, CLI_COLS).setValues([datos]);
+  // v28.15 — SI CAMBIA LA CEDULA, CAMBIA EN TODO EL HISTORICO. La cuenta por cobrar, las comisiones de aliado y
+  // los apartados se agrupan por cedula: al corregir V-12435 -> V-25951184 solo en CLIENTES, la deuda de David se
+  // partio en dos cuentas con el mismo nombre (la venta nueva quedo con la cedula nueva y lo viejo con la vieja).
+  var propagadas = 0;
+  if (fila && rifViejo && d.rif && rifViejo !== String(d.rif).trim()) propagadas = cambiarRifEnHistorico_(ss, rifViejo, String(d.rif).trim());
   else { sh.appendRow(datos); fila = sh.getLastRow(); }
   formatoFecha_(sh, fila, 6);
   var final = sh.getRange(fila, 1, 1, CLI_COLS).getValues()[0];
-  return {ok:true, tipo:'cliente', nuevo:eraNuevo, actualizado:!eraNuevo, fila:fila,
+  return {ok:true, tipo:'cliente', nuevo:eraNuevo, actualizado:!eraNuevo, fila:fila, rifPropagado:propagadas,
           cliente:{nombre:String(final[0]||''), rif:String(final[1]||''), tel:String(final[2]||''),
                    credito:String(final[6]||'').toUpperCase() === 'SI',
                    limite:Number(final[7]) || 0, dias:Number(final[8]) || 0,
@@ -2766,6 +2778,16 @@ function guardarCliente_(ss, d) {
                    dir:String(final[3]||''), correo:String(final[CLI_CORREO-1]||''),
                    estado:String(final[CLI_ESTADO-1]||''), ciudad:String(final[CLI_CIUDAD-1]||''), sector:String(final[CLI_SECTOR-1]||''),
                    calle:String(final[CLI_CALLE-1]||''), local:String(final[CLI_LOCAL-1]||''), referencia:String(final[CLI_REF-1]||'')}};
+}
+
+// v28.15 — Reemplaza la cedula vieja por la nueva (celda completa, exacta) en las hojas que agrupan por cedula.
+function cambiarRifEnHistorico_(ss, viejo, nuevo) {
+  var n = 0;
+  [SH_CXC, SH_VENTAS, 'COMISIONES', 'APARTADOS', 'DEVOLUCIONES', 'FACTURAS'].forEach(function(nom) {
+    var sh = ss.getSheetByName(nom); if (!sh) return;
+    try { n += sh.createTextFinder(viejo).matchEntireCell(true).matchCase(true).replaceAllWith(nuevo) || 0; } catch (e) {}
+  });
+  return n;
 }
 
 // v28.11 — Cedula / RIF. Misma regla que boparts_clientes.js (validarRif). Digito verificador SENIAT:

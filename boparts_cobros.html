@@ -1,7 +1,10 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_cobros.html
-  VERSION: v3.4 (2026-11-05) | build 2026-11-05.1 | requiere Apps Script v28.14
+  VERSION: v3.5 (2026-11-05) | build 2026-11-05.2 | requiere Apps Script v28.15
+  v3.5: cada cuenta se elige por nombre + cedula. Dos cuentas con el mismo nombre ya no se tapan (antes se abria
+  siempre la primera) y la lista avisa cuando pasa.
+  VERSION anterior: v3.4 (2026-11-05) | build 2026-11-05.1 | requiere Apps Script v28.14
   v3.4: solo se ven las notas que se deben (las pagadas, con "Ver pagadas"). Cada nota tiene "Pagar esta": el abono
   va a esa nota y no a la mas vieja; el monto se llena con lo que debe y no deja pasar de ahi. Sin elegir nota es
   un abono general, como siempre. Los ultimos abonos dicen a que nota fueron.
@@ -250,7 +253,7 @@ select option{background:#1E1E1E;color:var(--ink)}
         <label>Ultimos abonos</label>
         <div id="detAbonos"></div>
       </div>
-      <button class="cobrar big" onclick="cobrar(sel ? sel.cliente : '')">Cobrar por WhatsApp</button>
+      <button class="cobrar big" onclick="cobrar(sel ? claveDe(sel) : '')">Cobrar por WhatsApp</button>
     </div>
 
     <div class="section">
@@ -359,7 +362,7 @@ select option{background:#1E1E1E;color:var(--ink)}
   </div>
 </div>
 
-<script src="boparts_sesion.js?v=2026-11-05.1"></script>
+<script src="boparts_sesion.js?v=2026-11-05.2"></script>
 <script>
 
 
@@ -458,8 +461,12 @@ function detalleProductos(p) {
 //    cifras (total, abonado, pendiente) para que el cliente no sume por su cuenta y reclame.
 // Los emojis son marcadores (quien, cuanto, que hacer), no adorno. La vineta es '•' y no '*': el
 // asterisco es el marcador de negrita de WhatsApp y mezclarlos corre el formato del mensaje.
-function cobrar(nombre) {
-  var c = CLIENTES.filter(function(x) { return x.cliente === nombre; })[0];
+// v3.5 — un cliente se identifica por nombre + cedula: dos cuentas con el mismo nombre (cedula corregida, homonimos)
+// ya no se tapan una a la otra. Antes elegir por nombre agarraba siempre la primera.
+function claveDe(c) { return String(c.cliente || '') + '|' + String(c.rif || '').replace(/[^0-9]/g, ''); }
+function porClave(k) { return CLIENTES.filter(function(x) { return claveDe(x) === k; })[0] || null; }
+function cobrar(clave) {
+  var c = porClave(clave);
   if (!c) { toast('No se encontro el cliente', 'err'); return; }
   var bloques = [];
   c.notas.filter(function(n) { return n.estado !== 'PAGADA'; }).forEach(function(n) {
@@ -507,7 +514,7 @@ function primerNombre(n) {
 }
 var ultimo = null;   // ultimo abono registrado (para el mensaje de WhatsApp)
 
-var APP_VERSION = 'v3.4';
+var APP_VERSION = 'v3.5';
 document.getElementById('fechaHdr').textContent = APP_VERSION + ' · ' + new Date().toLocaleDateString('es-VE', {weekday:'long', day:'numeric', month:'long'});
 
 // Metodos de pago (sin CREDITO)
@@ -528,7 +535,7 @@ function cargar() {
       document.getElementById('tasaLbl').textContent = TASA ? 'Tasa ' + TASA : 'Sin tasa';
       CLIENTES = d.clientes || [];
       renderLista();
-      if (sel) { var s2 = CLIENTES.filter(function(c) { return c.cliente === sel.cliente; })[0]; sel = s2 || null; if (sel) renderDetalle(); }
+      if (sel) { sel = porClave(claveDe(sel)); if (sel) renderDetalle(); }
     })
     .catch(function(e) { document.getElementById('cliList').innerHTML = '<div class="empty" style="color:var(--red)">No se pudo cargar (' + e.message + '). Revisa la conexion.</div>'; });
 }
@@ -539,16 +546,18 @@ function renderLista() {
   var h = '';
   conSaldo.forEach(function(c) {
     var pend = c.notas.filter(function(n) { return n.estado !== 'PAGADA'; }).length;
-    h += '<div class="ccard' + (sel && sel.cliente === c.cliente ? ' sel' : '') + '" onclick="elegir(\'' + escAttr(c.cliente) + '\')">' +
+    var mismoNombre = conSaldo.filter(function(x) { return x.cliente === c.cliente; }).length > 1;
+    h += '<div class="ccard' + (sel && claveDe(sel) === claveDe(c) ? ' sel' : '') + '" onclick="elegir(\'' + escAttr(claveDe(c)) + '\')">' +
       '<div><div class="cn">' + escHtml(c.cliente) + '</div><div class="cr">' + pend + ' nota' + (pend === 1 ? '' : 's') + ' pendiente' + (pend === 1 ? '' : 's') + (c.rif ? ' · ' + escHtml(c.rif) : '') + '</div></div>' +
       '<div class="right"><div class="cs">' + fmtUSD(c.saldoUSD) + '<small>' + (TASA ? fmtBS(c.saldoUSD * TASA) : '') + '</small></div>' +
-      '<button class="cobrar" onclick="event.stopPropagation();cobrar(\'' + escAttr(c.cliente) + '\')">Cobrar</button></div></div>';
+      '<button class="cobrar" onclick="event.stopPropagation();cobrar(\'' + escAttr(claveDe(c)) + '\')">Cobrar</button></div></div>' +
+      (mismoNombre ? '<div class="cominfo" style="margin:-4px 0 8px;color:var(--red)">Hay otra cuenta con el mismo nombre y otra cedula (' + escHtml(c.rif || 'sin cedula') + '). Revisa la cedula en Gerencia &gt; Clientes.</div>' : '');
   });
   document.getElementById('cliList').innerHTML = h;
 }
 
-function elegir(nombre) {
-  sel = CLIENTES.filter(function(c) { return c.cliente === nombre; })[0] || null;
+function elegir(clave) {
+  sel = porClave(clave);
   renderLista(); renderDetalle();
   document.getElementById('detalle').scrollIntoView({behavior:'smooth'});
 }
@@ -712,7 +721,7 @@ function volver() { document.getElementById('success').classList.remove('open');
 
 function enviarEstado() {
   if (!sel) return;
-  var c = CLIENTES.filter(function(x) { return x.cliente === sel.cliente; })[0] || sel;
+  var c = porClave(claveDe(sel)) || sel;
   var lineas = '';
   c.notas.forEach(function(n) {
     if (n.estado === 'PAGADA') return;
