@@ -1,7 +1,17 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_demanda.html
-  VERSION: v9.0 (2026-09-24) | build 2026-11-05.2 | requiere Apps Script v27
+  VERSION: v10.1 (2026-11-06) | build 2026-11-06.2 | requiere Apps Script v28.17
+  v10.1: si se registra lo mismo dos veces en 15 minutos, pregunta si es otra persona (las dos cuentan) en vez de
+  descartarla. Analisis con MAPA DE CALOR de 8 semanas (productos, modelos, sistemas), ritmo ("3 en 7 dias") y
+  orden por calor: lo pedido seguido y reciente arriba.
+  VERSION anterior: v10.0 (2026-11-06) | build 2026-11-06.1 | requiere Apps Script v28.16
+  v10.0: DEMANDA ESTRUCTURADA. Un solo buscador en tu lista (agotados) y en el catalogo de proveedores; si no
+  aparece, se arma con listas (vehiculo, modelo, sistema, pieza, medida/variante) y el nombre sale solo. "+ Otro..."
+  agrega opciones (queda quien). Avisa cuantas veces ya lo pidieron y no duplica el doble toque. Pestana ANALISIS:
+  lo mas pedido con estado (pendiente, en pedido, llego, avisado, descartado), aviso por WhatsApp al cliente cuando
+  llega, y el cruce de pedidos contra ventas por modelo y por sistema.
+  VERSION anterior: v9.0 (2026-09-24) | build 2026-11-05.2 | requiere Apps Script v27
   v9.0: auditoria #8, las fotos se pintan pasando por urlSegura().
   VERSION anterior: v8.9 (2026-09-22) | build 2026-09-23.1 |
   v8.9: sesion, login y aviso de version salen del HTML y viven en boparts_sesion.js, un solo archivo
@@ -113,6 +123,44 @@ select option{background:#1E1E1E;color:var(--ink)}
 .sbtn{width:100%;padding:14px;border:none;border-radius:var(--radius);font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;margin-bottom:10px;background:var(--brand);color:#111}
 
 /* TOAST */
+.tabs2{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px}
+.tabb{padding:11px;border-radius:10px;border:1.5px solid var(--border);background:var(--card);color:var(--ink-soft);font-weight:700;font-size:13px;font-family:inherit;cursor:pointer}
+.tabb.on{border-color:var(--brand);color:#111;background:var(--brand)}
+.otro{margin-top:6px;display:none}
+.armado{background:var(--card2);border-radius:8px;padding:10px 12px;font-size:13px;margin-top:4px;line-height:1.5}
+.armado b{color:var(--brand)}
+.yapedido{font-size:12px;color:var(--brand);margin-top:6px}
+.kpis{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px}
+.kpi{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px}
+.kpi b{display:block;font-size:22px;color:var(--brand)}
+.kpi span{font-size:11px;color:var(--ink-muted)}
+.grp{border-bottom:1px solid var(--border);padding:12px 0}
+.grp:last-child{border-bottom:none}
+.gtit{font-size:14px;font-weight:700;line-height:1.35}
+.gmeta{font-size:11px;color:var(--ink-muted);margin-top:3px;line-height:1.5}
+.chip{display:inline-block;font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;margin-right:4px;background:var(--card2);color:var(--ink-soft);border:1px solid var(--border)}
+.chip.PENDIENTE{color:#F5A800;border-color:#F5A800}.chip.EN{color:#60A5FA;border-color:#60A5FA}.chip.LLEGO{color:var(--green);border-color:var(--green)}
+.gbtns{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.gbtn{background:none;border:1px solid var(--border);color:var(--ink-soft);border-radius:6px;padding:5px 9px;font-size:11px;font-weight:700;font-family:inherit;cursor:pointer}
+.gbtn.wa{border-color:var(--green);color:var(--green)}
+.tbl{width:100%;border-collapse:collapse;font-size:12px}
+.tbl th{text-align:left;color:var(--ink-muted);font-weight:600;padding:6px 4px;border-bottom:1px solid var(--border)}
+.tbl td{padding:7px 4px;border-bottom:1px solid var(--border)}
+.tbl td.n{text-align:right;font-variant-numeric:tabular-nums}
+.tbl tr.hot td{color:var(--brand)}
+.heat{width:100%;border-collapse:separate;border-spacing:2px;font-size:11px;table-layout:fixed}
+.heat th{color:var(--ink-muted);font-weight:600;font-size:9px;padding:2px 0;text-align:center;line-height:1.2}
+.heat td{height:26px;text-align:center;border-radius:4px;font-weight:700;font-size:11px}
+.heat td.lbl{text-align:left;font-weight:600;color:var(--ink);background:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:4px;font-size:11px}
+.heat col.c1{width:38%}
+.segm{display:flex;gap:6px;margin-bottom:10px}
+.segm button{flex:1;padding:7px 4px;border-radius:8px;border:1px solid var(--border);background:var(--card2);color:var(--ink-soft);font-size:11px;font-weight:700;font-family:inherit;cursor:pointer}
+.segm button.on{border-color:var(--brand);color:var(--brand)}
+.ritmo{display:inline-block;font-size:11px;font-weight:700;color:#111;background:var(--brand);border-radius:10px;padding:1px 8px;margin-right:4px}
+.ritmo.tibio{background:#7C5A00;color:#FFD580}.ritmo.frio{background:var(--card2);color:var(--ink-muted);border:1px solid var(--border)}
+.confov{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:320;align-items:flex-end;justify-content:center}
+.confov.open{display:flex}
+.confbox{background:var(--bg2);border-top:2px solid var(--brand);border-radius:18px 18px 0 0;padding:20px 16px 28px;width:100%;max-width:520px}
 .toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%) translateY(80px);background:#222;color:#fff;padding:12px 20px;border-radius:30px;font-size:13px;font-weight:600;transition:transform .3s;z-index:999;white-space:nowrap;border:1px solid var(--border);pointer-events:none}
 .toast.show{transform:translateX(-50%) translateY(0)}
 .toast.ok{border-color:var(--green);color:var(--green)}
@@ -145,6 +193,11 @@ select option{background:#1E1E1E;color:var(--ink)}
 </header>
 
 <div class="container">
+  <div class="tabs2">
+    <button class="tabb on" id="tabR" onclick="modo('reg')">Registrar</button>
+    <button class="tabb" id="tabA" onclick="modo('ana')">Analisis</button>
+  </div>
+  <div id="vistaReg">
 
   <!-- VENDEDOR -->
   <div class="section">
@@ -159,55 +212,43 @@ select option{background:#1E1E1E;color:var(--ink)}
     </div>
   </div>
 
-  <!-- PRODUCTO -->
+  <!-- PRODUCTO (v10: primero se busca; si no aparece, se arma con listas) -->
   <div class="section">
-    <div class="stitle">Producto Solicitado</div>
+    <div class="stitle">Que esta pidiendo</div>
     <div class="field wrap">
-      <label>Buscar en catalogo de proveedores</label>
+      <label>Buscar en tu lista y en los proveedores</label>
       <input type="search" id="prodSearch" placeholder="Nombre o codigo..." autocomplete="off" autocorrect="off" spellcheck="false">
       <div class="drop" id="prodDrop"></div>
     </div>
 
-    <!-- Producto seleccionado -->
     <div class="prod-sel" id="prodSel">
       <button class="prod-clear" onclick="limpiarProd()">&#x2715;</button>
       <div class="prod-sel-name" id="prodSelName"></div>
       <div class="prod-sel-meta" id="prodSelMeta"></div>
     </div>
 
-    <!-- Proveedores que lo tienen -->
     <div id="provsWrap" style="display:none">
-      <label>Proveedores disponibles</label>
+      <label>Proveedores que lo tienen</label>
       <div class="prov-cards" id="provCards"></div>
     </div>
 
-    <!-- Si no está en catálogo -->
-    <div class="field" id="prodManualWrap" style="display:none">
-      <label>Nombre del producto</label>
-      <input type="text" id="prodManual" placeholder="Describe el producto solicitado">
-    </div>
-
+    <div class="stitle" style="margin:14px 0 8px;font-size:11px">Clasificacion <span style="color:var(--ink-muted);text-transform:none;font-weight:500">(se llena sola si lo encontraste arriba)</span></div>
     <div class="row2">
-      <div class="field">
-        <label>Categoria</label>
-        <select id="selCat">
-          <option value="">Seleccionar...</option>
-          <option>MOTO</option>
-          <option>CARRO</option>
-          <option>CAMION</option>
-          <option>LUBRICANTES Y FLUIDOS</option>
-          <option>CONSUMIBLES</option>
-          <option>NEUMATICOS</option>
-          <option>OTRO</option>
-        </select>
-      </div>
-      <div class="field">
-        <label>Cantidad pedida</label>
-        <input type="number" id="cantidad" value="1" min="1">
-      </div>
+      <div class="field"><label>Vehiculo</label><select id="cVeh" onchange="cambioNivel('Veh')"></select><input class="otro" id="cVehO" placeholder="Nuevo vehiculo" oninput="pintarArmado()"></div>
+      <div class="field"><label>Modelo</label><select id="cMod" onchange="cambioNivel('Mod')"></select><input class="otro" id="cModO" placeholder="Nuevo modelo (ej: Bera Cobra)" oninput="pintarArmado()"></div>
     </div>
+    <div class="row2">
+      <div class="field"><label>Sistema</label><select id="cSis" onchange="cambioNivel('Sis')"></select><input class="otro" id="cSisO" placeholder="Nuevo sistema" oninput="pintarArmado()"></div>
+      <div class="field"><label>Pieza</label><select id="cPie" onchange="cambioNivel('Pie')"></select><input class="otro" id="cPieO" placeholder="Nueva pieza" oninput="pintarArmado()"></div>
+    </div>
+    <div class="row2">
+      <div class="field"><label>Medida / variante</label><input type="text" id="cVar" list="cVarL" placeholder="0.50, 90/90-18, 38T, trasero..." oninput="pintarArmado()"><datalist id="cVarL"></datalist></div>
+      <div class="field"><label>Cantidad pedida</label><input type="number" id="cantidad" value="1" min="1"></div>
+    </div>
+    <div class="armado" id="armado">Busca el producto o elige la pieza.</div>
+    <div class="yapedido" id="yaPedido"></div>
 
-    <div class="field">
+    <div class="field" style="margin-top:12px">
       <label>Notas adicionales</label>
       <textarea id="notas" rows="2" placeholder="Detalles, referencias, observaciones..."></textarea>
     </div>
@@ -243,15 +284,34 @@ select option{background:#1E1E1E;color:var(--ink)}
     </div>
   </div>
 
+  </div><!-- /vistaReg -->
+
+  <!-- v10: ANALISIS DE LO QUE PIDEN -->
+  <div id="vistaAna" style="display:none">
+    <div class="field"><label>Periodo</label>
+      <select id="anaDias" onchange="cargarAnalisis()"><option value="30">Ultimos 30 dias</option><option value="90" selected>Ultimos 90 dias</option><option value="365">Ultimo año</option></select>
+    </div>
+    <div id="anaBox"><div class="no-prov">Cargando...</div></div>
+  </div>
 </div>
 
-<button class="subbtn" onclick="guardar()">Registrar Demanda</button>
+<button class="subbtn" id="btnReg" onclick="guardar()">Registrar Demanda</button>
 
 <div class="success" id="success">
   <div class="sicon">✅</div>
-  <h2>Demanda Registrada</h2>
+  <h2 id="successTit">Demanda Registrada</h2>
   <p id="successMsg"></p>
   <button class="sbtn" onclick="nuevo()">Registrar otra</button>
+</div>
+
+<!-- v10.1: lo mismo dos veces en 15 minutos: se pregunta, no se descarta -->
+<div class="confov" id="confOv">
+  <div class="confbox">
+    <div style="font-size:16px;font-weight:700;margin-bottom:6px">¿Es otra persona preguntando?</div>
+    <div id="confMsg" style="font-size:13px;color:var(--ink-soft);line-height:1.5;margin-bottom:16px"></div>
+    <button class="sbtn" onclick="confirmarOtra(true)">Si, es otra persona: registrar</button>
+    <button class="sbtn" style="background:var(--card2);color:var(--ink)" onclick="confirmarOtra(false)">No, es la misma: no registrar</button>
+  </div>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -335,12 +395,12 @@ select option{background:#1E1E1E;color:var(--ink)}
   </div>
 </div>
 
-<script src="boparts_sesion.js?v=2026-11-05.2"></script>
+<script src="boparts_sesion.js?v=2026-11-06.2"></script>
 <script>
 
 
 var SCRIPT_URL    = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
-var APP_VERSION = 'v9.0';
+var APP_VERSION = 'v10.1';
 var SCRIPT_URL_SESION = SCRIPT_URL;
 var VER_SCRIPT = '?';
 function sellarVersion(d) {
@@ -385,7 +445,7 @@ function isValid(txt) {
   return !(t.indexOf('<!doc')===0||t.indexOf('<html')===0||t.indexOf('function')===0);
 }
 
-function escHtml(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function escHtml(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
 // LOAD CATALOGO
 // v8.6: el catalogo viene del script, para poder despublicar CATALOGO_PROVEEDORES (lleva los costos de
@@ -432,10 +492,15 @@ function parseCatalogo(txt) {
   }
 }
 
-// SEARCH
+// SEARCH — v10: busca en TU lista (agotados) y en el catalogo de proveedores, en una sola lista.
 function norm(s) {
-  return (s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+  return (s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'');
 }
+var PROPIOS = [];      // tu lista de productos con stock (action=stock)
+var LISTAS = null;     // vehiculos, modelos, sistemas, piezas, variantes, reglas, tags (action=demanda_listas)
+var ANA = null;        // ultimo analisis (para avisar "ya lo pidieron")
+var origen = 'MANUAL'; // CATALOGO (tu lista) | PROVEEDOR | MANUAL
+var idDemanda = '';
 
 var prodSearch = document.getElementById('prodSearch');
 var prodDrop   = document.getElementById('prodDrop');
@@ -444,39 +509,23 @@ prodSearch.addEventListener('input', function() {
   var q = norm(prodSearch.value).trim();
   if (q.length < 3) { prodDrop.classList.remove('open'); return; }
   var terms = q.split(/\s+/);
-
-  // Find matching unique products (same name, different providers)
-  var seen = {}, res = [];
-  for (var i = 0; i < CATALOGO.length && res.length < 20; i++) {
+  function calza(txt) { var h = norm(txt); for (var t = 0; t < terms.length; t++) if (h.indexOf(terms[t]) < 0) return false; return true; }
+  var h = '', n = 0;
+  PROPIOS.forEach(function(p, i) {
+    if (n >= 8 || !calza(p.producto + ' ' + p.codigo)) return; n++;
+    h += '<div class="ditem" onclick="selPropio(' + i + ')"><span class="ditem-price" style="color:var(--green)">tu lista</span>' + escHtml(p.producto) +
+      '<div class="ditem-meta">#' + escHtml(p.codigo) + ' · ' + (p.stock === null ? 'sin conteo' : 'stock ' + p.stock) + '</div></div>';
+  });
+  var seen = {}, m = 0;
+  for (var i = 0; i < CATALOGO.length && m < 12; i++) {
     var p = CATALOGO[i];
-    var hay = norm(p.descripcion + ' ' + p.codigo);
-    var ok = true;
-    for (var t = 0; t < terms.length; t++) { if (hay.indexOf(terms[t]) < 0) { ok = false; break; } }
-    if (!ok) continue;
-    var key = norm(p.descripcion);
-    if (!seen[key]) {
-      seen[key] = true;
-      res.push(p);
-    }
+    if (!calza(p.descripcion + ' ' + p.codigo)) continue;
+    var key = norm(p.descripcion); if (seen[key]) continue; seen[key] = true; m++;
+    var provCount = CATALOGO.filter(function(x){ return norm(x.descripcion) === key; }).length;
+    h += '<div class="ditem" onclick="selProd(\'' + escHtml(key).replace(/'/g, "\\'") + '\')">' + escHtml(p.descripcion) +
+      '<div class="ditem-meta">' + escHtml(p.categoria) + (p.codigo ? ' · #' + escHtml(p.codigo) : '') + ' · ' + provCount + ' proveedor(es)</div></div>';
   }
-
-  if (!res.length) {
-    prodDrop.innerHTML = '<div class="ditem" onclick="prodNuevo()" style="color:var(--brand);font-weight:600">+ No encontrado - Registrar como nuevo</div>';
-    prodDrop.classList.add('open');
-    return;
-  }
-
-  var h = '';
-  for (var i = 0; i < res.length; i++) {
-    var p = res[i];
-    // Count how many providers have this
-    var provCount = CATALOGO.filter(function(x){ return norm(x.descripcion)===norm(p.descripcion); }).length;
-    h += '<div class="ditem" onclick="selProd(' + i + ',\'' + escHtml(norm(p.descripcion)).replace(/'/g,"\\'") + '\')">' +
-      escHtml(p.descripcion) +
-      '<div class="ditem-meta">' + escHtml(p.categoria) + (p.codigo ? ' · #'+escHtml(p.codigo) : '') + ' · ' + provCount + ' proveedor(es)</div>' +
-    '</div>';
-  }
-  h += '<div class="ditem" onclick="prodNuevo()" style="color:var(--brand);font-weight:600">+ No esta en el catalogo - Registrar como nuevo</div>';
+  h += '<div class="ditem" onclick="prodNuevo()" style="color:var(--brand);font-weight:600">+ No aparece: armarlo con las listas</div>';
   prodDrop.innerHTML = h;
   prodDrop.classList.add('open');
 });
@@ -485,31 +534,33 @@ document.addEventListener('click', function(e) {
   if (!e.target.closest('.wrap')) prodDrop.classList.remove('open');
 });
 
-// SELECT PRODUCT FROM CATALOG
-function selProd(idx, normDesc) {
-  var p = null;
-  // Find first match
-  for (var i = 0; i < CATALOGO.length; i++) {
-    if (norm(CATALOGO[i].descripcion) === normDesc) { p = CATALOGO[i]; break; }
-  }
-  if (!p) return;
-
-  prodSel = p;
-  prodSearch.value = '';
-  prodDrop.classList.remove('open');
-
-  // Show selected
-  document.getElementById('prodSelName').textContent = p.descripcion;
-  document.getElementById('prodSelMeta').textContent = p.categoria + (p.codigo ? ' · #' + p.codigo : '');
+// De tu lista: es un AGOTADO. La clasificacion viene de PRODUCTO_TAGS.
+function selPropio(i) {
+  var p = PROPIOS[i]; if (!p) return;
+  prodSel = {descripcion:p.producto, codigo:p.codigo, categoria:p.categoria}; provsSel = []; origen = 'CATALOGO';
+  prodSearch.value = ''; prodDrop.classList.remove('open');
+  document.getElementById('prodSelName').textContent = p.producto;
+  document.getElementById('prodSelMeta').innerHTML = 'En tu lista · #' + escHtml(p.codigo) + ' · ' +
+    (p.stock === null ? 'sin conteo' : (p.stock > 0 ? '<b style="color:var(--red)">el sistema dice que hay ' + p.stock + ': cuenta el estante</b>' : 'agotado'));
   document.getElementById('prodSel').classList.add('open');
-  document.getElementById('prodManualWrap').style.display = 'none';
+  document.getElementById('provsWrap').style.display = 'none';
+  var t = LISTAS && LISTAS.tags ? LISTAS.tags[String(p.codigo).toUpperCase()] : null;
+  aplicarTags(t ? {vehiculo:t[0], modelo:t[1], sistema:t[2], pieza:t[3]} : etiquetarCliente(p.producto, p.categoria), '');
+}
 
-  // Set category
-  document.getElementById('selCat').value = p.categoria;
-
-  // Find all providers
+// Del catalogo de proveedores: nombre y proveedores exactos; la clasificacion sale de las mismas reglas del servidor.
+function selProd(normDesc) {
+  var p = null;
+  for (var i = 0; i < CATALOGO.length; i++) if (norm(CATALOGO[i].descripcion) === normDesc) { p = CATALOGO[i]; break; }
+  if (!p) return;
+  prodSel = p; origen = 'PROVEEDOR';
+  prodSearch.value = ''; prodDrop.classList.remove('open');
+  document.getElementById('prodSelName').textContent = p.descripcion;
+  document.getElementById('prodSelMeta').textContent = 'Catalogo de proveedores · ' + p.categoria + (p.codigo ? ' · #' + p.codigo : '');
+  document.getElementById('prodSel').classList.add('open');
   provsSel = CATALOGO.filter(function(x){ return norm(x.descripcion) === normDesc; });
   mostrarProveedores();
+  aplicarTags(etiquetarCliente(p.descripcion, p.categoria), '');
 }
 
 function mostrarProveedores() {
@@ -520,33 +571,127 @@ function mostrarProveedores() {
   var h = '';
   for (var i = 0; i < provsSel.length; i++) {
     var pv = provsSel[i];
-    h += '<div class="prov-card">' +
-      '<div><div class="prov-name">' + escHtml(pv.proveedor) + '</div>' +
+    h += '<div class="prov-card"><div><div class="prov-name">' + escHtml(pv.proveedor) + '</div>' +
       '<div class="prov-cat">' + escHtml(pv.marca || pv.categoria) + '</div></div>' +
-      '<div class="prov-price">$' + pv.precio.toFixed(2) + '</div>' +
-    '</div>';
+      '<div class="prov-price">$' + pv.precio.toFixed(2) + '</div></div>';
   }
   cards.innerHTML = h;
 }
 
 function limpiarProd() {
-  prodSel = null; provsSel = [];
+  prodSel = null; provsSel = []; origen = 'MANUAL';
   document.getElementById('prodSel').classList.remove('open');
   document.getElementById('provsWrap').style.display = 'none';
-  document.getElementById('prodManualWrap').style.display = 'none';
   document.getElementById('prodSearch').value = '';
+  pintarArmado();
+}
+function prodNuevo() {
+  limpiarProd(); prodDrop.classList.remove('open');
+  document.getElementById('cPie').focus();
 }
 
-// NEW PRODUCT (not in catalog)
-function prodNuevo() {
-  prodSel = null; provsSel = [];
-  prodDrop.classList.remove('open');
-  document.getElementById('prodSel').classList.remove('open');
-  document.getElementById('provsWrap').style.display = 'none';
-  document.getElementById('prodManualWrap').style.display = 'block';
-  document.getElementById('provCards').innerHTML = '<div class="no-prov">Ningún proveedor registrado tiene este producto</div>';
-  document.getElementById('provsWrap').style.display = 'block';
-  document.getElementById('prodManual').focus();
+// ---------- Clasificacion con listas ----------
+// Las reglas vienen del servidor (las mismas que etiquetan tu lista), asi un producto de proveedor queda igual.
+function etiquetarCliente(nombre, categoria) {
+  if (!LISTAS || !LISTAS.reglas) return {};
+  var n = String(nombre || '').toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  var cat = String(categoria || '').toUpperCase(), vehCat = /^(MOTO|CARRO|CAMION)$/.test(cat) ? cat : '';
+  var out = {vehiculo:'', modelo:'', sistema:'', pieza:''};
+  var pz = LISTAS.reglas.piezas;
+  for (var i = 0; i < pz.length; i++) if (new RegExp(pz[i][2]).test(n)) { out.pieza = pz[i][0]; out.sistema = pz[i][1]; break; }
+  var md = LISTAS.reglas.modelos;
+  [true, false].forEach(function(mismo) {
+    if (out.modelo) return;
+    for (var j = 0; j < md.length; j++) {
+      if (mismo && vehCat && md[j][1] !== vehCat) continue;
+      if (new RegExp(md[j][2]).test(n)) { out.modelo = md[j][0]; out.vehiculo = md[j][1]; break; }
+    }
+  });
+  if (!out.vehiculo) out.vehiculo = vehCat || 'UNIVERSAL';
+  if (!out.modelo) out.modelo = 'UNIVERSAL';
+  return out;
+}
+var OTRO = '__otro';
+function opts(sel, lista, valor, vacio) {
+  var el = document.getElementById(sel);
+  var h = '<option value="">' + (vacio || 'Elegir...') + '</option>';
+  lista.forEach(function(v) { h += '<option' + (v === valor ? ' selected' : '') + '>' + escHtml(v) + '</option>'; });
+  if (valor && lista.indexOf(valor) < 0) h += '<option selected>' + escHtml(valor) + '</option>';
+  h += '<option value="' + OTRO + '">+ Otro...</option>';
+  el.innerHTML = h;
+}
+function val(nivel) {
+  var v = document.getElementById('c' + nivel).value;
+  return v === OTRO ? document.getElementById('c' + nivel + 'O').value.trim() : v;
+}
+function llenarListas(t) {
+  t = t || {};
+  if (!LISTAS) return;
+  var veh = t.vehiculo !== undefined ? t.vehiculo : val('Veh');
+  opts('cVeh', LISTAS.vehiculos, veh);
+  var mods = LISTAS.modelos.filter(function(m) { return !veh || !m.padre || m.padre === veh || m.v === 'UNIVERSAL'; }).map(function(m) { return m.v; });
+  opts('cMod', mods, t.modelo !== undefined ? t.modelo : val('Mod'));
+  var sis = t.sistema !== undefined ? t.sistema : val('Sis');
+  opts('cSis', LISTAS.sistemas, sis);
+  var pzs = LISTAS.piezas.filter(function(p) { return !sis || p.padre === sis; }).map(function(p) { return p.v; })
+    .filter(function(v, i, a) { return a.indexOf(v) === i; });
+  opts('cPie', pzs, t.pieza !== undefined ? t.pieza : val('Pie'));
+  ['Veh', 'Mod', 'Sis', 'Pie'].forEach(function(k) { document.getElementById('c' + k + 'O').style.display = 'none'; });
+}
+function aplicarTags(t, variante) {
+  llenarListas(t);
+  if (variante !== undefined) document.getElementById('cVar').value = variante;
+  pintarArmado();
+}
+function cambioNivel(k) {
+  var sel = document.getElementById('c' + k), otro = document.getElementById('c' + k + 'O');
+  if (sel.value === OTRO) { otro.style.display = 'block'; otro.focus(); pintarArmado(); return; }
+  otro.style.display = 'none';
+  if (k === 'Veh') llenarListas({vehiculo:sel.value, modelo:'', sistema:val('Sis'), pieza:val('Pie')});
+  if (k === 'Sis') llenarListas({vehiculo:val('Veh'), modelo:val('Mod'), sistema:sel.value, pieza:''});
+  if (k === 'Pie' && !val('Sis')) {
+    var p = LISTAS.piezas.filter(function(x) { return x.v === sel.value; })[0];
+    if (p) llenarListas({vehiculo:val('Veh'), modelo:val('Mod'), sistema:p.padre, pieza:sel.value});
+  }
+  pintarArmado();
+}
+function leerClasif() {
+  return {vehiculo:val('Veh'), modelo:val('Mod'), sistema:val('Sis'), pieza:val('Pie'), variante:document.getElementById('cVar').value.trim()};
+}
+// Misma regla que claveDemanda_ en Code.gs
+function claveDe(c, codigo) {
+  if (codigo) return 'COD:' + String(codigo).trim().toUpperCase();
+  var p = [c.pieza, c.variante, c.modelo].map(function(x) { return String(x || '').trim().toUpperCase().replace(/\s+/g, ' '); });
+  return p[0] ? p.join('|') : '';
+}
+function nombreArmado(c) {
+  return [c.pieza, c.variante, c.modelo && c.modelo !== 'UNIVERSAL' ? c.modelo : (c.modelo === 'UNIVERSAL' ? 'universal' : '')]
+    .filter(Boolean).join(' · ').toUpperCase();
+}
+function pintarArmado() {
+  var c = leerClasif(), el = document.getElementById('armado'), ya = document.getElementById('yaPedido');
+  var nombre = prodSel ? prodSel.descripcion : nombreArmado(c);
+  el.innerHTML = nombre ? 'Se registra como: <b>' + escHtml(nombre) + '</b>' + (prodSel ? '' : (c.pieza ? '' : ' (falta la pieza)')) : 'Busca el producto o elige la pieza.';
+  var k = claveDe(c, prodSel && origen === 'CATALOGO' ? prodSel.codigo : '');
+  var g = (ANA && k) ? ANA.grupos.filter(function(x) { return x.clave === k; })[0] : null;
+  ya.textContent = g ? 'Ya lo pidieron ' + g.veces + (g.veces === 1 ? ' vez' : ' veces') + ' (ultima ' + fechaCorta(g.ultima) + ')' + (g.estado !== 'PENDIENTE' ? ' · ' + g.estado : '') : '';
+}
+function fechaCorta(f) { var p = String(f || '').split('-'); return p.length === 3 ? p[2] + '/' + p[1] : f; }
+
+function cargarListas() {
+  fetch(SCRIPT_URL + '?action=demanda_listas&t=' + Date.now()).then(leerJSON).then(function(d) {
+    if (!d || !d.ok) return;
+    sellarVersion(d); LISTAS = d;
+    document.getElementById('cVarL').innerHTML = (d.variantes || []).map(function(v) { return '<option value="' + escHtml(v) + '">'; }).join('');
+    llenarListas({vehiculo:'MOTO', modelo:'', sistema:'', pieza:''});
+    pintarArmado();
+  }).catch(function() {});
+  fetch(SCRIPT_URL + '?action=stock&t=' + Date.now()).then(leerJSON).then(function(d) {
+    if (d && d.ok) PROPIOS = (d.productos || []).filter(function(p) { return p.producto; });
+  }).catch(function() {});
+  fetch(SCRIPT_URL + '?action=demanda_analisis&dias=365&t=' + Date.now()).then(leerJSON).then(function(d) {
+    if (d && d.ok) { ANA = d; pintarArmado(); }
+  }).catch(function() {});
 }
 
 // FOTOS
@@ -593,55 +738,90 @@ function toggleCli() {
   document.getElementById('cliForm').classList.toggle('open', cliOn);
 }
 
-// GUARDAR
+// GUARDAR — v10
+var PENDIENTE_CONF = null;
+function confirmarOtra(si) {
+  document.getElementById('confOv').classList.remove('open');
+  var p = PENDIENTE_CONF; PENDIENTE_CONF = null;
+  if (!p) return;
+  if (!si) { idDemanda = ''; toast('No se registro (era la misma)', 'ok'); nuevo(); return; }
+  p.otraPersona = true;
+  var btn = document.getElementById('btnReg'); btn.disabled = true; btn.textContent = 'Guardando...';
+  fetch(SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body:JSON.stringify(p)}).then(leerJSON).then(function(d) {
+    btn.disabled = false; btn.textContent = 'Registrar Demanda';
+    if (!d || d.ok !== true) throw new Error(d && d.error ? d.error : 'Respuesta invalida');
+    idDemanda = '';
+    document.getElementById('successTit').textContent = 'Demanda Registrada';
+    document.getElementById('successMsg').textContent = p.producto + '\nYa son ' + d.veces + ' solicitudes de esto.';
+    document.getElementById('success').classList.add('open');
+  }).catch(function(e) {
+    btn.disabled = false; btn.textContent = 'Registrar Demanda';
+    toast('No se guardo (' + (e && e.message ? e.message : 'sin conexion') + '). Reintenta.', 'err');
+  });
+}
 function guardar() {
   var vendedor = document.getElementById('selV').value;
   if (!vendedor) { toast('Selecciona el vendedor', 'err'); return; }
-
-  var prodNombre = prodSel ? prodSel.descripcion : document.getElementById('prodManual').value.trim();
-  if (!prodNombre) { toast('Indica el producto solicitado', 'err'); return; }
-
-  var cat = document.getElementById('selCat').value;
+  var c = leerClasif();
+  if (!prodSel && !c.pieza) { toast('Busca el producto o elige la pieza', 'err'); return; }
+  if (!c.vehiculo || !c.modelo) { toast('Elige el vehiculo y el modelo (o UNIVERSAL)', 'err'); return; }
+  if (!c.sistema) { toast('Elige el sistema', 'err'); return; }
+  var prodNombre = prodSel ? prodSel.descripcion : nombreArmado(c);
   var cant = parseInt(document.getElementById('cantidad').value) || 1;
   var notas = document.getElementById('notas').value;
   var now = new Date();
   var fecha = now.toLocaleDateString('es-VE');
   var hora = now.toLocaleTimeString('es-VE', {hour:'2-digit', minute:'2-digit'});
-
   var prov1 = '', precio1 = '', prov2 = '', precio2 = '';
   if (provsSel.length > 0) { prov1 = provsSel[0].proveedor; precio1 = provsSel[0].precio; }
   if (provsSel.length > 1) { prov2 = provsSel[1].proveedor; precio2 = provsSel[1].precio; }
-
+  // Opciones nuevas que se escribieron con "+ Otro..." (cualquiera puede agregar; queda quien fue)
+  var nuevas = [];
+  [['Veh','VEHICULO',''], ['Mod','MODELO',c.vehiculo], ['Sis','SISTEMA',''], ['Pie','PIEZA',c.sistema]].forEach(function(x) {
+    if (document.getElementById('c' + x[0]).value === OTRO && val(x[0])) nuevas.push({tipo:x[1], valor:val(x[0]), padre:x[2]});
+  });
+  if (!idDemanda) idDemanda = 'D' + now.getTime().toString(36).toUpperCase() + Math.random().toString(36).slice(2, 5).toUpperCase();
   var payload = {
-    tipo: 'demanda',
-    fecha: fecha, hora: hora, vendedor: vendedor,
-    producto: prodNombre, categoria: cat, cantidad: cant,
-    cliNombre: cliOn ? document.getElementById('cliNombre').value.trim() : '',
-    cliTel:    cliOn ? document.getElementById('cliTel').value.trim() : '',
-    notificar: cliOn ? 'SI' : 'NO',
-    foto1: fotos[0] || '', foto2: fotos[1] || '',
-    notas: notas,
-    proveedor1: prov1, precio1: precio1,
-    proveedor2: prov2, precio2: precio2,
-    estado: 'PENDIENTE'
+    tipo:'demanda', idDemanda:idDemanda,
+    fecha:fecha, hora:hora, vendedor:vendedor,
+    producto:prodNombre, categoria:c.vehiculo, cantidad:cant,
+    cliNombre:cliOn ? document.getElementById('cliNombre').value.trim() : '',
+    cliTel:   cliOn ? document.getElementById('cliTel').value.trim() : '',
+    notificar:cliOn ? 'SI' : 'NO',
+    foto1:fotos[0] || '', foto2:fotos[1] || '',
+    notas:notas,
+    proveedor1:prov1, precio1:precio1, proveedor2:prov2, precio2:precio2,
+    codigo:prodSel && origen === 'CATALOGO' ? prodSel.codigo : '', origen:origen,
+    vehiculo:c.vehiculo, modelo:c.modelo, sistema:c.sistema, pieza:c.pieza || (prodSel ? '' : ''), variante:c.variante,
+    nuevas:nuevas
   };
-
-  var btn = document.querySelector('.subbtn');
-  if (btn) { btn.disabled = true; btn.textContent = 'Guardando...'; }
-
+  var btn = document.getElementById('btnReg');
+  btn.disabled = true; btn.textContent = 'Guardando...';
   fetch(SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body:JSON.stringify(payload)})
     .then(leerJSON)
     .then(function(d) {
-      if (btn) { btn.disabled = false; btn.textContent = 'Registrar Demanda'; }
+      btn.disabled = false; btn.textContent = 'Registrar Demanda';
       if (!d || d.ok !== true) throw new Error(d && d.error ? d.error : 'Respuesta invalida');
-      var provText = prov1 ? ' · Proveedor: ' + prov1 + ' ($' + precio1 + ')' : ' · Sin proveedor registrado';
-      document.getElementById('successMsg').textContent = prodNombre + provText;
+      if (d.confirmar) {
+        PENDIENTE_CONF = payload;
+        document.getElementById('confMsg').innerHTML = 'Ya registraste <b>' + escHtml(prodNombre) + '</b> hoy a las ' + escHtml(d.hace) +
+          '.<br>Si es otro cliente preguntando por lo mismo, cuenta como otra solicitud (asi se ve que se esta pidiendo mucho). Si fue un doble toque, no se registra.';
+        document.getElementById('confOv').classList.add('open');
+        return;
+      }
+      idDemanda = '';
+      document.getElementById('successTit').textContent = d.repetido ? 'Ya estaba registrada' : 'Demanda Registrada';
+      document.getElementById('successMsg').textContent = d.repetido
+        ? 'Esa solicitud ya habia quedado guardada (fue un reintento). No se duplico.'
+        : prodNombre + (d.veces > 1 ? '\nYa son ' + d.veces + ' solicitudes de esto.' : '\nPrimera vez que lo piden.') +
+          (prov1 ? '\nProveedor: ' + prov1 + ' ($' + precio1 + ')' : '');
       document.getElementById('success').classList.add('open');
+      if (nuevas.length) cargarListas();
+      else fetch(SCRIPT_URL + '?action=demanda_analisis&dias=365&t=' + Date.now()).then(leerJSON).then(function(x) { if (x && x.ok) ANA = x; }).catch(function() {});
     })
     .catch(function(err) {
-      if (btn) { btn.disabled = false; btn.textContent = 'Registrar Demanda'; }
-      // La demanda NO se guardo: el formulario queda intacto para reintentar
-      toast('No se guardo la demanda (' + (err && err.message ? err.message : 'sin conexion') + '). Reintenta.', 'err');
+      btn.disabled = false; btn.textContent = 'Registrar Demanda';
+      toast('No se guardo la demanda (' + (err && err.message ? err.message : 'sin conexion') + '). Reintenta: no se duplica.', 'err');
     });
 }
 
@@ -653,14 +833,126 @@ function nuevo() {
   cliOn = false;
   document.getElementById('cliTog').classList.remove('on');
   document.getElementById('cliForm').classList.remove('open');
-  document.getElementById('selV').value = '';
-  document.getElementById('selCat').value = '';
   document.getElementById('cantidad').value = '1';
   document.getElementById('notas').value = '';
   document.getElementById('cliNombre').value = '';
   document.getElementById('cliTel').value = '';
-  document.getElementById('prodManual').value = '';
-  document.getElementById('prodManualWrap').style.display = 'none';
+  // Se quedan vehiculo y modelo (lo normal es que el siguiente sea para la misma moto); se limpian pieza y variante.
+  var c = leerClasif();
+  aplicarTags({vehiculo:c.vehiculo, modelo:c.modelo, sistema:'', pieza:''}, '');
+}
+
+// ---------- Pestanas ----------
+function modo(m) {
+  document.getElementById('vistaReg').style.display = m === 'reg' ? '' : 'none';
+  document.getElementById('vistaAna').style.display = m === 'ana' ? '' : 'none';
+  document.getElementById('btnReg').style.display = m === 'reg' ? '' : 'none';
+  document.getElementById('tabR').classList.toggle('on', m === 'reg');
+  document.getElementById('tabA').classList.toggle('on', m === 'ana');
+  if (m === 'ana') cargarAnalisis();
+}
+
+// ---------- Analisis ----------
+var ANA_V = null;
+function cargarAnalisis() {
+  var box = document.getElementById('anaBox');
+  box.innerHTML = '<div class="no-prov">Cargando...</div>';
+  fetch(SCRIPT_URL + '?action=demanda_analisis&dias=' + document.getElementById('anaDias').value + '&t=' + Date.now())
+    .then(leerJSON).then(function(d) {
+      if (!d || !d.ok) throw new Error(d && d.error ? d.error : 'sin datos');
+      ANA_V = d; pintarAnalisis();
+    }).catch(function(e) { box.innerHTML = '<div class="no-prov" style="color:var(--red)">No se pudo cargar (' + escHtml(e.message) + ')</div>'; });
+}
+function pintarAnalisis() {
+  var d = ANA_V, h = '';
+  var repetidos = d.grupos.filter(function(g) { return g.veces > 1; }).length;
+  h += '<div class="kpis">' +
+    '<div class="kpi"><b>' + d.total + '</b><span>solicitudes</span></div>' +
+    '<div class="kpi"><b>' + d.distintos + '</b><span>cosas distintas (' + repetidos + ' pedidas 2+ veces)</span></div>' +
+    '<div class="kpi"><b>' + d.esperando + '</b><span>clientes esperando aviso</span></div>' +
+    '<div class="kpi"><b>' + d.enLista + '</b><span>estan en tu lista (agotados)</span></div></div>';
+  // v10.1 — Mapa de calor: las ultimas 8 semanas, la mas reciente a la derecha
+  h += '<div class="section"><div class="stitle">Mapa de calor · 8 semanas</div>' +
+    '<div class="segm"><button id="hmG" onclick="HM=\'grupos\';pintarAnalisis()">Productos</button><button id="hmM" onclick="HM=\'porModelo\';pintarAnalisis()">Modelos</button><button id="hmS" onclick="HM=\'porSistema\';pintarAnalisis()">Sistemas</button></div>' +
+    mapaCalor(d[HM] || [], d.semanas || []) +
+    '<div class="gmeta" style="margin-top:8px">Cada cuadro es una semana; el numero son las veces que lo pidieron. Ordenado por "calor": lo pedido seguido y hace poco arriba; 1 vez hace un mes pesa poco.</div></div>';
+  // Lo mas pedido
+  h += '<div class="section"><div class="stitle">Lo que mas piden (por calor)</div>';
+  d.grupos.slice(0, 40).forEach(function(g, i) {
+    var est = g.estado || 'PENDIENTE';
+    h += '<div class="grp"><div class="gtit">' + escHtml(g.nombre) + '</div>' +
+      '<div class="gmeta">' + ritmo(g) + '<span class="chip ' + est.split(' ')[0] + '">' + est + '</span>' +
+      '<b style="color:var(--ink)">' + g.veces + (g.veces === 1 ? ' vez' : ' veces') + '</b> en el periodo · ' + g.cantidad + ' und · ultima ' + fechaCorta(g.ultima) +
+      (g.modelo ? ' · ' + escHtml(g.modelo) : '') + (g.sistema ? ' · ' + escHtml(g.sistema) : '') +
+      (g.codigo ? '<br>En tu lista #' + escHtml(g.codigo) + ' · ' + (g.stock === null || g.stock === undefined ? 'sin conteo' : 'stock ' + g.stock) : '') +
+      (g.proveedores.length ? '<br>Proveedor: ' + g.proveedores.map(function(p) { return escHtml(p.proveedor) + (p.precio ? ' $' + Number(p.precio).toFixed(2) : ''); }).join(', ') : '<br>Sin proveedor conocido') +
+      (g.clientes.length ? '<br>Esperando: ' + g.clientes.map(function(c) { return escHtml(c.nombre || c.tel); }).join(', ') : '') +
+      '</div><div class="gbtns">' +
+      (est === 'PENDIENTE' ? '<button class="gbtn" onclick="cambiarEstado(' + i + ',\'EN PEDIDO\')">Ya se pidio</button>' : '') +
+      (est === 'PENDIENTE' || est === 'EN PEDIDO' ? '<button class="gbtn" onclick="cambiarEstado(' + i + ',\'LLEGO\')">Llego</button>' : '') +
+      (est === 'LLEGO' && g.clientes.length ? g.clientes.map(function(c, j) { return '<button class="gbtn wa" onclick="avisar(' + i + ',' + j + ')">Avisar a ' + escHtml((c.nombre || c.tel).split(' ')[0]) + '</button>'; }).join('') : '') +
+      (est === 'LLEGO' ? '<button class="gbtn" onclick="cambiarEstado(' + i + ',\'AVISADO\')">Cerrar (avisado)</button>' : '') +
+      (est !== 'DESCARTADO' && est !== 'AVISADO' ? '<button class="gbtn" onclick="cambiarEstado(' + i + ',\'DESCARTADO\')">No se va a traer</button>' : '<button class="gbtn" onclick="cambiarEstado(' + i + ',\'PENDIENTE\')">Reabrir</button>') +
+      '</div></div>';
+  });
+  if (!d.grupos.length) h += '<div class="no-prov">Nada registrado en este periodo.</div>';
+  h += '</div>';
+  // Por modelo y por sistema: lo que piden contra lo que se vende
+  function tabla(tit, filas, nota) {
+    var t = '<div class="section"><div class="stitle">' + tit + '</div><div class="gmeta" style="margin:-6px 0 8px">' + nota + '</div>' +
+      '<table class="tbl"><tr><th></th><th class="n" style="text-align:right">Pedidos</th><th class="n" style="text-align:right">Ventas</th><th class="n" style="text-align:right">En lista</th></tr>';
+    filas.slice(0, 25).forEach(function(f) {
+      var hot = f.pedidos >= 2 && f.pedidos >= f.ventas / 3;
+      t += '<tr' + (hot ? ' class="hot"' : '') + '><td>' + escHtml(f.nombre) + '</td><td class="n">' + f.pedidos + '</td><td class="n">' + f.ventas + '</td><td class="n">' + f.productos + '</td></tr>';
+    });
+    return t + '</table></div>';
+  }
+  h += tabla('Por modelo', d.porModelo, 'Pedidos = solicitudes que no se pudieron vender. Ventas = renglones vendidos en el mismo periodo. En amarillo: lo que piden pesa mucho frente a lo que vendes de ese modelo.');
+  h += tabla('Por sistema', d.porSistema, 'Mismo cruce, por sistema de la moto o el carro.');
+  document.getElementById('anaBox').innerHTML = h;
+  ['G', 'M', 'S'].forEach(function(k) { var b = document.getElementById('hm' + k); if (b) b.classList.toggle('on', {G:'grupos', M:'porModelo', S:'porSistema'}[k] === HM); });
+}
+var HM = 'grupos';
+// "5 en 7 dias" calienta; "1 en 30 dias" no.
+function ritmo(g) {
+  if (g.v7 >= 2) return '<span class="ritmo">' + g.v7 + ' en 7 dias</span>';
+  if (g.v7 === 1 || g.v30 >= 2) return '<span class="ritmo tibio">' + g.v30 + ' en 30 dias</span>';
+  return '<span class="ritmo frio">' + (g.v30 ? '1 en 30 dias' : 'nada en 30 dias') + '</span>';
+}
+function colorCalor(n, max) {
+  if (!n) return 'background:var(--card2);color:transparent';
+  var a = Math.min(1, 0.25 + 0.75 * n / Math.max(1, max));
+  return 'background:rgba(245,168,0,' + a.toFixed(2) + ');color:' + (a > 0.55 ? '#111' : 'var(--ink)');
+}
+function mapaCalor(filas, semanas) {
+  filas = filas.filter(function(f) { return (f.semanas || []).some(function(x) { return x > 0; }); }).slice(0, 15);
+  if (!filas.length) return '<div class="no-prov">Nada pedido en las ultimas 8 semanas.</div>';
+  var max = 0; filas.forEach(function(f) { f.semanas.forEach(function(x) { if (x > max) max = x; }); });
+  var t = '<table class="heat"><colgroup><col class="c1"></colgroup><tr><th></th>';
+  for (var w = 7; w >= 0; w--) t += '<th>' + (w === 0 ? 'esta<br>sem' : (semanas[w] || '').split('-')[0]) + '</th>';
+  t += '</tr>';
+  filas.forEach(function(f) {
+    t += '<tr><td class="lbl" title="' + escHtml(f.nombre) + '">' + escHtml(f.nombre) + '</td>';
+    for (var w = 7; w >= 0; w--) { var n = f.semanas[w] || 0; t += '<td style="' + colorCalor(n, max) + '">' + (n || '') + '</td>'; }
+    t += '</tr>';
+  });
+  return t + '</table>';
+}
+function cambiarEstado(i, est) {
+  var g = ANA_V.grupos[i]; if (!g) return;
+  fetch(SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body:JSON.stringify({tipo:'demanda_estado', clave:g.clave, estado:est})})
+    .then(leerJSON).then(function(d) {
+      if (!d || !d.ok) throw new Error(d && d.error ? d.error : 'no se cambio');
+      toast(est === 'LLEGO' && g.clientes.length ? 'Llego: avisale a los clientes' : 'Listo: ' + est, 'ok');
+      cargarAnalisis();
+    }).catch(function(e) { if (e && e.message !== 'SESION') toast('No se cambio: ' + e.message, 'err'); });
+}
+function avisar(i, j) {
+  var g = ANA_V.grupos[i], c = g && g.clientes[j]; if (!c) return;
+  var tel = String(c.tel || '').replace(/\D/g, ''); if (tel.charAt(0) === '0') tel = '58' + tel.slice(1);
+  var msg = 'Hola ' + (c.nombre ? c.nombre.split(' ')[0] : '') + ' 👋, te escribimos de *Repuesto BoParts*.\n\nYa nos llego *' + g.nombre +
+    '* que nos pediste el ' + fechaCorta(c.fecha) + '. Te lo apartamos si quieres.\n\n📞 0412-3185778 / 0414-9536708';
+  window.open('https://wa.me/' + tel + '?text=' + encodeURIComponent(msg), '_blank');
 }
 
 function toast(msg, type) {
@@ -679,8 +971,8 @@ function closeNav() {
   document.getElementById('navOv').classList.remove('open');
 }
 
-function alEntrar() { loadCatalogo(); }
-revisarSesion(loadCatalogo);
+function alEntrar() { loadCatalogo(); cargarListas(); }
+revisarSesion(function() { loadCatalogo(); cargarListas(); });
 
 // Convierte '0,6', '7,5', '$ 6.04', '1,234.56' o 6.04 en numero. Devuelve 0 si no puede.
 function parseNum(v) {

@@ -1,6 +1,20 @@
 /**
  * Repuesto BoParts — Code.gs
- * VERSION: v28.15 (2026-11-05) | cambiar la cedula de un cliente la cambia en todo su historico
+ * VERSION: v28.17 (2026-11-06) | demanda: mapa de calor y dos clientes pidiendo lo mismo
+ *
+ * v28.17 — Lo mismo registrado por el mismo vendedor en 15 minutos ya no se descarta: se devuelve confirmar:true y
+ *   la pantalla pregunta si es otra persona (otraPersona:true lo guarda). El analisis trae por grupo, modelo y
+ *   sistema: semanas[0..7] (0 = ultimos 7 dias), v7, v30, porSemana y "calor" (cada solicitud pesa la mitad cada
+ *   10 dias); se ordena por calor.
+ *
+ * VERSION anterior: v28.16 (2026-11-06) | demanda estructurada, etiquetas del catalogo y analisis
+ *
+ * v28.16 — Reglas de clasificacion (TAG_MODELOS, TAG_PIEZAS, etiquetar_): vehiculo, modelo, sistema y pieza de un
+ *   nombre. PRODUCTO_TAGS (si existe) corrige a mano el catalogo. DEMANDA_NO_ATENDIDA suma R..Z (codigo, origen,
+ *   vehiculo, modelo, sistema, pieza, variante, clave, id). DEMANDA_LISTAS guarda las opciones nuevas. Freno al doble
+ *   toque (misma clave, mismo vendedor, 15 min). action=demanda_listas, action=demanda_analisis, tipo=demanda_estado.
+ *
+ * VERSION anterior: v28.15 (2026-11-05) | cambiar la cedula de un cliente la cambia en todo su historico
  *
  * v28.15 — guardarCliente_: si la cedula/RIF cambia, se reemplaza (celda exacta) en CXC_MOV, VENTAS, COMISIONES,
  *   APARTADOS, DEVOLUCIONES y FACTURAS. Antes la cuenta por cobrar se partia en dos con el mismo nombre.
@@ -549,14 +563,14 @@ var PERMISOS_GET = {
   tareas:'VENDEDOR',
   producto:'SOCIO',
   ventas:'SOCIO', socios:'SOCIO', cxp:'SOCIO', cliente_stats:'SOCIO', compras:'SOCIO', diag:'SOCIO',
-  liquidacion:'SOCIO', rendimiento:'SOCIO', dinero:'SOCIO', gastos:'SOCIO',
+  liquidacion:'SOCIO', rendimiento:'SOCIO', dinero:'SOCIO', gastos:'SOCIO', demanda_listas:'VENDEDOR', demanda_analisis:'VENDEDOR',
   documentos:'VENDEDOR', documento:'VENDEDOR'
 };
 var PERMISOS_POST = {
   fotos:'VENDEDOR', cliente:'VENDEDOR', demanda:'VENDEDOR', conteo:'VENDEDOR', gasto:'VENDEDOR',
   proveedor:'VENDEDOR', compra:'VENDEDOR', cotizacion:'VENDEDOR', abono:'VENDEDOR', venta:'VENDEDOR',
   factura_venta:'VENDEDOR', factura_digital:'VENDEDOR', apartado:'VENDEDOR', apartado_abono:'VENDEDOR', apartado_entregar:'VENDEDOR',
-  tarea_marcar:'VENDEDOR', tarea_propia:'VENDEDOR',
+  tarea_marcar:'VENDEDOR', tarea_propia:'VENDEDOR', demanda_estado:'VENDEDOR',
   costeo:'SOCIO', cxp_abono:'SOCIO', conteo_revision:'SOCIO', devolucion:'SOCIO', apartado_cerrar:'SOCIO',
   tasa:'SOCIO', bcv_auto:'SOCIO', socio:'SOCIO', liquidar_aliado:'SOCIO', precio:'SOCIO', tarea_def:'SOCIO',
   anular_venta:'SOCIO', mov_cuenta:'SOCIO', anular_gasto:'SOCIO', consumo_interno:'SOCIO', region:'SOCIO'
@@ -789,7 +803,7 @@ function claveDePost_(data) {
 // OJO: esta constante es lo que ven las apps en el menu. Se habia quedado en v21.4 mientras el
 // encabezado ya decia v24, asi que el sello de version — que existe justamente para saber si lo
 // desplegado es lo que crees — estaba mintiendo. Cada version nueva se cambia AQUI tambien.
-var VERSION_SCRIPT = 'v28.15';
+var VERSION_SCRIPT = 'v28.17';
 
 function json_(obj) {
   // La version viaja en cada respuesta: es la forma rapida de saber si lo desplegado es lo que crees
@@ -857,6 +871,9 @@ function rutearGet_(e) {
     return json_({ok:true, cuentas:listaCuentas_(ssA)});
   }
   // v28.8 — ultimos gastos con su ID, para poder anularlos desde la pantalla de Gastos.
+  // v28.16 — demanda estructurada
+  if (accion === 'demanda_listas') return json_(demandaListas_(ssA));
+  if (accion === 'demanda_analisis') return json_(demandaAnalisis_(ssA, e.parameter.dias));
   if (accion === 'gastos') {
     return json_(listaGastos_(ssA, e.parameter.desde || '', e.parameter.hasta || ''));
   }
@@ -1115,22 +1132,16 @@ function doPost(e) {
       return json_(guardarCliente_(ss, data));
     }
 
-    // ---- DEMANDA ----
+    // ---- DEMANDA (v28.16: estructurada, con clave para agrupar y freno al doble toque) ----
     if (data.tipo === 'demanda') {
-      // v27: una foto que no sea de Cloudinary se descarta (auditoria #8); el resto de la demanda se guarda igual.
-      if (data.foto1 && !urlFotoOk_(data.foto1)) data.foto1 = '';
-      if (data.foto2 && !urlFotoOk_(data.foto2)) data.foto2 = '';
-      const sheet = ss.getSheetByName('DEMANDA_NO_ATENDIDA');
-      sheet.appendRow([
-        data.fecha, data.hora, data.vendedor,
-        data.producto, data.categoria, data.cantidad,
-        data.cliNombre||'', data.cliTel||'', data.notificar||'NO',
-        data.foto1||'', data.foto2||'', data.notas||'',
-        data.proveedor1||'', data.precio1||'',
-        data.proveedor2||'', data.precio2||'',
-        data.estado||'PENDIENTE'
-      ]);
-      return json_({ok:true,tipo:'demanda'});
+      var lockD = LockService.getScriptLock(); lockD.waitLock(20000);
+      try { return json_(guardarDemanda_(ss, data, quien)); }
+      finally { SpreadsheetApp.flush(); lockD.releaseLock(); }
+    }
+    if (data.tipo === 'demanda_estado') {
+      var lockDE = LockService.getScriptLock(); lockDE.waitLock(20000);
+      try { return json_(estadoDemanda_(ss, data, quien)); }
+      finally { SpreadsheetApp.flush(); lockDE.releaseLock(); }
     }
 
     // ---- COSTEO DE COMPRA Y PAGOS A PROVEEDOR (v18) ----
@@ -4352,6 +4363,461 @@ function guardarGasto_(ss, data) {
                    montoPagado:monto, tasa:tasaG, origen:idG, descripcion:(data.categoria||'') + ' - ' + (data.descripcion||''), registradoPor:data.registradoPor||''});
   }
   return {ok:true, tipo:'gasto', repetido:false};
+}
+
+// ============================================================
+// v28.16 — CLASIFICACION DE PRODUCTOS: vehiculo, modelo, sistema y pieza
+// ============================================================
+// Una sola fuente de reglas. Code.gs las usa para etiquetar el catalogo y la demanda, y se las manda a la
+// pantalla de Demanda (action=demanda_listas) para que clasifique lo que viene del catalogo de proveedores
+// con la MISMA regla. Una regla es [valor, padre, expresion]. Gana la primera que calce, asi que lo mas
+// especifico va arriba. Lo que el socio corrija a mano en PRODUCTO_TAGS manda sobre esto.
+var TAG_VEHICULOS = ['MOTO', 'CARRO', 'CAMION', 'UNIVERSAL'];
+var TAG_MODELOS = [
+  // [modelo, vehiculo, expresion]
+  ['CG-200',        'MOTO', 'CG[- ]?200|\\bETX\\b|\\bERK\\b'],
+  ['CG-150',        'MOTO', 'CG[- ]?B?1[25]0|\\bCGB?\\b|COCHINITO'],
+  ['BERA SOCIALISTA','MOTO','SOCIALISTA'],
+  ['CBR',           'MOTO', '\\bCBR\\b'],
+  ['NEW HORSE',     'MOTO', 'NEW HORSE'],
+  ['HORSE',         'MOTO', 'HORSE|\\bEH1\\b|EMPIRE'],
+  ['JORSE',         'MOTO', 'JORSE'],
+  ['A150',          'MOTO', '\\bA ?150\\b'],
+  ['BERA SBR',      'MOTO', '\\bSBR\\b'],
+  ['BERA LEON',     'MOTO', 'LEON'],
+  ['BERA BR/BRZ',   'MOTO', '\\bBRZ?\\b|\\bBR1|BERA[- ]?150|BERA ?200'],
+  ['BERA (otras)',  'MOTO', '\\bBERA\\b'],
+  ['EK EXPRESS',    'MOTO', 'EK ?EXPRES|EK[- ]?150|\\bEK\\b'],
+  ['GY6 / SCOOTER', 'MOTO', 'GY6|CY6|SCOOTER|\\bBWS\\b|ARSEN|\\bJOG\\b'],
+  ['LN',            'MOTO', '\\bLN\\b'],
+  ['MD',            'MOTO', '\\bMDE?\\b|MD-|HAOJIN|\\bHJ'],
+  ['OWEN / GEN',    'MOTO', 'OWEN|OVEN|\\bGEN\\b|GEN-?125'],
+  ['JAGUAR',        'MOTO', 'JAGUAR'],
+  ['KEEWAY',        'MOTO', 'KEEWAY'],
+  ['SKYGO',         'MOTO', 'SKYGO|SKY GO'],
+  ['KLR',           'MOTO', '\\bKLR\\b'],
+  ['TX-200',        'MOTO', '\\bTE?X-? ?200'],
+  ['AX-100',        'MOTO', '\\bS?AX ?100'],
+  ['YAMAHA DT',     'MOTO', '\\bDT ?1[12]5|\\bDT\\b'],
+  ['SUZUKI GN',     'MOTO', '\\bS?GN ?125|EOW'],
+  ['SHINERAY',      'MOTO', 'SHINERAY|\\bSHJ'],
+  ['ISUZU',         'CAMION', 'ISUZU|\\bNPR\\b|\\bNKR\\b|\\bFVR\\b|4HG1'],
+  ['FORD CARGO',    'CAMION', 'FORD CARGO|CARGO 1721|\\b1721\\b|\\b4432\\b|\\b2632\\b'],
+  ['FORD 7000 / CAT','CAMION','FORD 7000|KODIAK|\\bCAT\\b'],
+  ['MACK',          'CAMION', '\\bMACK\\b'],
+  ['CHEVROLET (carro)', 'CARRO', 'AVEO|CORSA|OPTRA|CRUZE|CAVALIER|SPARK|CHEVETTE|LUV|DIMAX|MONTANA'],
+  ['TOYOTA',        'CARRO', 'COROLLA|STARLET|CAMRY|BABYCAMRY|MERU|PRADO|HILUX|TERIOS|YARIS|BURBUJA|FORTUNER|4RUNNER'],
+  ['FORD (carro)',  'CARRO', 'FIESTA|FOCUS|KA\\b|EXPLORER|F-?150|ECOSPORT|FORD'],
+  ['HYUNDAI / KIA', 'CARRO', 'ACCENT|GETZ|ELANTRA|TUCSON|SANTA FE|\\bRIO\\b|PICANTO|SPORTAGE|CERATO'],
+  ['CHERY',         'CARRO', 'CHERY|ORINOCO|ARAUCA|TIGGO|QQ'],
+  ['MITSUBISHI',    'CARRO', 'LANCER|SIGNO|MONTERO|L200|MF'],
+  ['RENAULT',       'CARRO', 'LOGAN|SANDERO|CLIO|TWINGO|SYMBOL|MEGANE'],
+  ['FIAT',          'CARRO', 'PALIO|SIENA|UNO\\b|FIORINO|PUNTO'],
+  ['VOLKSWAGEN',    'CARRO', 'GOL\\b|JETTA|FOX\\b|BORA|PASSAT|ESCARABAJO'],
+  ['GRAND VITARA',  'CARRO', 'VITARA|SWIFT|SUZUKI']
+];
+var TAG_SISTEMAS = ['MOTOR', 'TRANSMISION', 'FRENOS', 'ELECTRICO', 'SUSPENSION Y DIRECCION', 'ESCAPE', 'CARROCERIA',
+                    'NEUMATICOS Y RINES', 'COMBUSTIBLE', 'GUAYAS Y CONTROLES', 'FILTROS', 'LUBRICANTES', 'CONSUMIBLES', 'HERRAMIENTAS',
+                    'ACCESORIOS'];
+var TAG_PIEZAS = [
+  // [pieza, sistema, expresion]  — lo especifico primero
+  ['Manguera de freno',       'FRENOS',      'MANGUERA (DE )?FRENO'],
+  ['Manguera de gasolina',    'COMBUSTIBLE', 'MANGUERA (DE )?GASOLINA'],
+  ['Flotante de gasolina',    'COMBUSTIBLE', 'FLOTANTE'],
+  ['Filtro de combustible / gasoil', 'FILTROS', 'FILTRO (DIESEL|GASOIL)'],
+  ['Selector y pata de cambio','TRANSMISION','SELECTOR|PATA DE CAMBIO|EJE DE CAMBIO|KIT TERCERA|CAJA (COMPLETA )?(DE )?VELOCIDAD|CAJA VELOCIDAD'],
+  ['Pedal de arranque',       'MOTOR',       'PEDAL DE PRENDER|CREMALLERA'],
+  ['Calipers y varillas',     'FRENOS',      'CALIPE|VARILLA (DE )?FRENO|MEDIA LUNA FRENO|SENSOR DE FRENO'],
+  ['Tablero / velocimetro',   'ELECTRICO',   'TACOMETRO|TACÓMETRO|KILOMETRAJE|CUENTA KILOMETRO|VELOCIMETRO'],
+  ['Fusibles',                'ELECTRICO',   'FUSIBLE'],
+  ['Cascos',                  'ACCESORIOS',  'CASCO'],
+  ['Accesorios',              'ACCESORIOS',  'CHAPALETA|DESCANSADOR|EMBLEMA|SLIDER|PORTA CELULAR|CALCOMANIA'],
+  ['Correas',                 'MOTOR',       'CORREA'],
+  ['Conchas de bancada',      'MOTOR',       'CONCHA (DE )?BANCADA|CONCHA BIELA'],
+  ['Taquetes',                'MOTOR',       'TAQUETE'],
+  ['Muñones y rotulas',       'SUSPENSION Y DIRECCION', 'MU[NÑ]ON|ROTULA|TERMINAL'],
+  ['Ejes y bujes',            'SUSPENSION Y DIRECCION', '\\bEJE\\b|\\bBUJE|\\bTE (ABAJO|ARRIBA)|TEE DIRECCION|KIT RESORTE'],
+  ['Parches',                 'NEUMATICOS Y RINES', 'PARCHE'],
+  ['Arranque (cochinito)',    'ELECTRICO',   'COCHINITO'],
+  ['Bombillos y luces',       'ELECTRICO',   'COCUYO'],
+  ['Cables y conectores',     'ELECTRICO',   'INSTALACION|PORTA FUSIBLE'],
+  ['Balancin',                'MOTOR',       'MARTILLO'],
+  ['Piston',                  'MOTOR',       'KIT DE PISTO'],
+  ['Multiple / manifold',     'MOTOR',       'MANIFOR|MULTIPLE'],
+  ['Clutch / croche',         'TRANSMISION', 'CUCHARITA'],
+  ['Manubrio',                'SUSPENSION Y DIRECCION', 'CONTRAPESO'],
+  ['Empacaduras',             'MOTOR',       'EMPACADURA|EMPAQUE|JUNTA'],
+  ['Posapie',                 'CARROCERIA',  'POSA ?PIE|PEDALIN'],
+  ['Aro / anillo de escape',  'ESCAPE',      '(ARO|ANILLO|EMPACADURA) (DE )?(TUBO )?(DE )?ESCAPE|ANILLO TUBO'],
+  ['Base de tubo de escape',  'ESCAPE',      'BASE (DE )?TUBO'],
+  ['Tubo de escape',          'ESCAPE',      'TUBO (DE )?ESCAPE|SILENCIADOR|MOFLE|BAJANTE|RESONADOR|CONCHA TUBO'],
+  ['Filtro de gasolina',      'COMBUSTIBLE', 'FILTRO (DE )?GASOLINA'],
+  ['Bomba de gasolina',       'COMBUSTIBLE', 'BOMBA (DE )?GASOLINA'],
+  ['Llave de gasolina',       'COMBUSTIBLE', 'LLAVE (DE )?GASOLINA|GRIFO'],
+  ['Filtro de aceite',        'FILTROS',     'FILTRO (DE )?ACEITE|\\bPL-?\\d|FILTRO STARLET|FILTRO DE AVEO|CA-O'],
+  ['Filtro de aire',          'FILTROS',     'FILTRO (DE )?AIRE|ELEMENTO TURBINA'],
+  ['Filtro de combustible / gasoil', 'FILTROS', 'FILTRO (COMB|DE GASOIL|DE GAS OIL)|TRAMPA (DE )?AGUA|RACOR|FILTRO DE GASOIL'],
+  ['Kit de arrastre',         'TRANSMISION', 'KIT (DE )?ARRASTRE'],
+  ['Corona',                  'TRANSMISION', 'CORONA(?! DE)|PORTA ?CORONA'],
+  ['Pinon',                   'TRANSMISION', 'PI[NÑ]ON'],
+  ['Herramientas',            'HERRAMIENTAS','PICA ?CADENA|CORTA ?CADENA|REMACHADORA'],
+  ['Tensor / prensa de cadena','TRANSMISION','PRENSA ?CADENA|TENSOR (DE )?CADENA(?!ILLA)|TEMPLADOR'],
+  ['Cadena',                  'TRANSMISION', 'CADENA(?! ?DE ?TIEMPO)'],
+  ['Clutch / croche',         'TRANSMISION', 'CROCHE|CLOCHE|CLUTCH|EMBRAGUE|CAMPANA|CROCHERA'],
+  ['Caja / engranajes',       'TRANSMISION', '\\b(1RA|2DA|3RA|4TA|5TA)\\b|CAJA (DE )?CAMBIO|ENGRANAJE|TORRINTON|PEDAL (DE )?CAMBIO|PALANCA (DE )?CAMBIO'],
+  ['Pastillas de freno',      'FRENOS',      'PASTILLA'],
+  ['Bandas de freno',         'FRENOS',      'BANDA'],
+  ['Disco de freno',          'FRENOS',      'DISCO (DE )?FRENO'],
+  ['Bomba / mordaza de freno','FRENOS',      'BOMBA (DE )?FRENO|MORDAZA|CALIPER'],
+  ['Pata / pedal de freno',   'FRENOS',      '(PATA|PEDAL|RESORTE).*FRENO'],
+  ['Liga de freno',           'LUBRICANTES', 'LIGA (DE )?FRENO|HIBRY|DOT ?[34]'],
+  ['Piston',                  'MOTOR',       'PISTON'],
+  ['Anillos de piston',       'MOTOR',       'ANILLO'],
+  ['Cilindro / kit cilindro', 'MOTOR',       'CILINDRO'],
+  ['Valvulas',                'MOTOR',       'VALVULA'],
+  ['Arbol de levas',          'MOTOR',       'ARBOL (DE )?LEVA'],
+  ['Balancin',                'MOTOR',       'BALANCIN|MARTILLERA'],
+  ['Cadenilla / tensor',      'MOTOR',       'CADENILLA|TENSOR|CADENA (DE )?TIEMPO|GUIA CADENILLA'],
+  ['Carburador',              'MOTOR',       'CARBURADOR'],
+  ['Biela / cigueñal',        'MOTOR',       'BIELA|CIGUE'],
+  ['Estoperas / retenes',     'MOTOR',       'ESTOPERA|RETEN|ORING|O-RING'],
+  ['Rolineras',               'MOTOR',       'ROLINERA|RODAMIENTO|BALINERA'],
+  ['Bujia',                   'ELECTRICO',   'BUJIA'],
+  ['CDI',                     'ELECTRICO',   '\\bCDI\\b'],
+  ['Regulador / rectificador','ELECTRICO',   'REGULADOR|RECTIFICADOR'],
+  ['Bobina / estator',        'ELECTRICO',   'BOBINA|EMBOBINADO|ESTATOR|MAGNETO'],
+  ['Motor de arranque',       'ELECTRICO',   'ARRANQUE|AUTOMATICO|BENDIX'],
+  ['Bateria',                 'ELECTRICO',   'BATERIA'],
+  ['Bombillos y luces',       'ELECTRICO',   'BOMBILLO|\\bLED\\b|FARO|LUZ|EXPLORADORA|STOP'],
+  ['Direccionales / flasher', 'ELECTRICO',   'DIRECCIONAL|INTERMITENTE|FLASHER|CRUCE'],
+  ['Relay',                   'ELECTRICO',   'RELAY|RELE|RELEVADOR'],
+  ['Suichera / interruptores','ELECTRICO',   'SUICHERA|SWITCH|INTERRUPTOR|MANDO|COMANDO'],
+  ['Corneta',                 'ELECTRICO',   'CORNETA|PITO'],
+  ['Cables y conectores',     'ELECTRICO',   'CABLE|CONECTOR|SOCATE|ARNES'],
+  ['Amortiguadores',          'SUSPENSION Y DIRECCION', 'AMORTIGUADOR'],
+  ['Barras / horquilla',      'SUSPENSION Y DIRECCION', 'BARRA|HORQUILLA|TIJERA|BASCULANTE'],
+  ['Tazas de direccion',      'SUSPENSION Y DIRECCION', 'TAZA'],
+  ['Manubrio',                'SUSPENSION Y DIRECCION', 'MANUBRIO'],
+  ['Guaya',                   'GUAYAS Y CONTROLES', 'GUAYA'],
+  ['Manillas y puños',        'GUAYAS Y CONTROLES', 'MANILLA|MANETA|PU[NÑ]O|ACELERADOR'],
+  ['Caucho',                  'NEUMATICOS Y RINES', 'CAUCHO|NEUMATICO|LLANTA'],
+  ['Tripa',                   'NEUMATICOS Y RINES', 'TRIPA|CAMARA'],
+  ['Rin / rayos',             'NEUMATICOS Y RINES', '\\bRIN\\b|RAYOS'],
+  ['Tanque',                  'CARROCERIA',  'TANQUE'],
+  ['Asiento',                 'CARROCERIA',  'ASIENTO'],
+  ['Guardafango',             'CARROCERIA',  'GUARDA ?FANGO|COLITA'],
+  ['Posapie',                 'CARROCERIA',  'POSA ?PIE|PEDALIN|GOMA POSAPIE'],
+  ['Pata de cabra / burro',   'CARROCERIA',  'BURRO|PATA (DE )?CABRA|PATA LATERAL|SOPORTE LATERAL'],
+  ['Retrovisores',            'CARROCERIA',  'RETROVISOR|ESPEJO'],
+  ['Plasticos y tapas',       'CARROCERIA',  'PLASTICO|TAPA|CARENAJE|PORTA ?PLACA|PARRILLA'],
+  ['Aceite de motor',         'LUBRICANTES', 'ACEITE|\\d{1,2}W-?\\d{2}|SAE|LUBRICHSAMPIOMS|DIESEL 50|VALVULINA|\\bATF\\b'],
+  ['Solventes',               'LUBRICANTES', 'SOLVENTE|TINNER|THINNER|KEROSEN'],
+  ['Grasa',                   'LUBRICANTES', 'GRASA'],
+  ['Refrigerante',            'LUBRICANTES', 'REFRIGERANTE|COOLANT'],
+  ['Selladores y pegas',      'CONSUMIBLES', 'SILICON|PEGA|EPOXI|CEMENTO|FIJADOR|TEFLON|SELLADOR'],
+  ['Sprays y limpiadores',    'CONSUMIBLES', 'SPRAY|LIMPIA|ANTI ?ESPICHE|SIN SPICHE|DESENGRASANTE|LUBRICANTE MULTI'],
+  ['Tornilleria',             'CONSUMIBLES', 'TORNILLO|TUERCA|ARANDELA|ESPARRAGO|PERNO'],
+  ['Abrazaderas y tirrajes',  'CONSUMIBLES', 'ABRAZADERA|TIRRAJE|TIRRO|CINTA|SILBATRIN|MALLA|LIGAS? (DE )?AMARRE|LIGAS CORTAS|TEIPE|MORROPACK'],
+  ['Herramientas',            'HERRAMIENTAS','LLAVE|EXTRACTOR|PRENSA|PINZA|DESTORNILLADOR|JUEGO DE|HERRAMIENTA'],
+  ['Limpiaparabrisas',        'CARROCERIA',  'LIMPIA ?PARABRISAS|CEPILLO']
+];
+
+// Etiqueta un nombre. categoria = la de la lista (MOTO, CARRO, CAMION, LUBRICANTES..., CONSUMIBLES).
+// Devuelve {vehiculo, modelo, sistema, pieza, seguro}: seguro=false cuando no se encontro pieza (va a "revisar").
+function etiquetar_(nombre, categoria) {
+  var n = String(nombre || '').toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/Ñ/g, 'N');
+  var cat = String(categoria || '').toUpperCase();
+  var out = {vehiculo:'', modelo:'', sistema:'', pieza:'', seguro:false};
+  for (var i = 0; i < TAG_PIEZAS.length; i++) {
+    if (new RegExp(TAG_PIEZAS[i][2]).test(n)) { out.pieza = TAG_PIEZAS[i][0]; out.sistema = TAG_PIEZAS[i][1]; out.seguro = true; break; }
+  }
+  var vehCat = cat === 'MOTO' || cat === 'CARRO' || cat === 'CAMION' ? cat : '';
+  // Primero un modelo del mismo vehiculo que la categoria de la lista; si no hay, cualquiera (un filtro de NPR
+  // puede estar cargado como CARRO).
+  [true, false].forEach(function(mismo) {
+    if (out.modelo) return;
+    for (var j = 0; j < TAG_MODELOS.length; j++) {
+      var m = TAG_MODELOS[j];
+      if (mismo && vehCat && m[1] !== vehCat) continue;
+      if (new RegExp(m[2]).test(n)) { out.modelo = m[0]; break; }
+    }
+  });
+  var vehMod = out.modelo ? TAG_MODELOS.filter(function(m) { return m[0] === out.modelo; })[0][1] : '';
+  out.vehiculo = vehMod || vehCat || 'UNIVERSAL';
+  // Sin modelo reconocible = pieza generica (bujia D8TC, estopera por medida, cadena 428): cabe en varios.
+  if (!out.modelo) { out.modelo = 'UNIVERSAL'; out.generico = true; }
+  return out;
+}
+
+// ============================================================
+// v28.16 — DEMANDA ESTRUCTURADA, ETIQUETAS DEL CATALOGO Y ANALISIS
+// ============================================================
+// DEMANDA_NO_ATENDIDA suma columnas (R..Z). Las 17 primeras no cambian: Mi dia y Rendimiento las leen.
+var DEM_COLS_NUEVAS = ['CODIGO','ORIGEN','VEHICULO','MODELO','SISTEMA','PIEZA','VARIANTE','CLAVE','ID_DEMANDA'];
+var DEM = {FECHA:0, HORA:1, VENDEDOR:2, PRODUCTO:3, CATEGORIA:4, CANTIDAD:5, CLI:6, TEL:7, NOTIFICAR:8, NOTAS:11,
+           PROV1:12, PRECIO1:13, PROV2:14, PRECIO2:15, ESTADO:16, CODIGO:17, ORIGEN:18, VEHICULO:19, MODELO:20,
+           SISTEMA:21, PIEZA:22, VARIANTE:23, CLAVE:24, ID:25};
+var DEM_ESTADOS = ['PENDIENTE', 'EN PEDIDO', 'LLEGO', 'AVISADO', 'DESCARTADO', 'DUPLICADO'];
+function hojaDemanda_(ss) {
+  var sh = ss.getSheetByName('DEMANDA_NO_ATENDIDA');
+  if (!sh) { sh = ss.insertSheet('DEMANDA_NO_ATENDIDA');
+    sh.appendRow(['FECHA','HORA','VENDEDOR','PRODUCTO_SOLICITADO','CATEGORIA','CANTIDAD','CLIENTE_NOMBRE','CLIENTE_TEL','NOTIFICAR',
+                  'FOTO1','FOTO2','NOTAS','PROVEEDOR_SUGERIDO','PRECIO1','PROVEEDOR2','PRECIO2','ESTADO']); }
+  try {
+    var cab = sh.getRange(1, 14, 1, 13).getValues()[0];
+    var falta = ['PRECIO1','PROVEEDOR2','PRECIO2','ESTADO'].concat(DEM_COLS_NUEVAS);
+    for (var i = 0; i < falta.length; i++) if (!String(cab[i] || '').trim()) sh.getRange(1, 14 + i).setValue(falta[i]);
+  } catch (e) {}
+  return sh;
+}
+// La clave agrupa las solicitudes de lo mismo: por codigo si es de la lista; si no, pieza + variante + modelo.
+function claveDemanda_(d) {
+  if (String(d.codigo || '').trim()) return 'COD:' + String(d.codigo).trim().toUpperCase();
+  var p = [d.pieza, d.variante, d.modelo].map(function(x) { return String(x || '').trim().toUpperCase().replace(/\s+/g, ' '); });
+  if (!p[0]) return 'TXT:' + String(d.producto || '').trim().toUpperCase().replace(/\s+/g, ' ');
+  return p.join('|');
+}
+
+// Etiquetas del catalogo. PRODUCTO_TAGS es la hoja para revisarlas: se crea sola con las reglas la primera vez y
+// cada producto nuevo se agrega solo. Lo que este en la hoja manda. Para corregir: cambia vehiculo, modelo,
+// sistema o pieza y pon MANUAL en FUENTE (asi reetiquetarCatalogo no lo pisa si un dia mejoran las reglas).
+function tagsCatalogo_(ss) {
+  var out = {}, orden = [];
+  var lp = ss.getSheetByName('LISTA DE PRODUCTOS');
+  if (lp && lp.getLastRow() >= 3) {
+    lp.getRange(3, 1, lp.getLastRow() - 2, 4).getValues().forEach(function(r) {
+      var cod = String(r[0] || '').trim(); if (!cod || !String(r[2] || '').trim()) return;
+      var t = etiquetar_(r[2], r[3]), k = cod.toUpperCase();
+      if (out[k]) return;
+      out[k] = {codigo:cod, vehiculo:t.vehiculo, modelo:t.modelo, sistema:t.sistema, pieza:t.pieza, producto:String(r[2]).trim(),
+                fuente:!t.pieza ? 'REVISAR' : (t.generico ? 'AUTO (generico)' : 'AUTO'), enHoja:false};
+      orden.push(k);
+    });
+  }
+  var pt = ss.getSheetByName('PRODUCTO_TAGS');
+  if (!pt) { pt = ss.insertSheet('PRODUCTO_TAGS'); pt.appendRow(['CODIGO','PRODUCTO','VEHICULO','MODELO','SISTEMA','PIEZA','FUENTE']); pt.setFrozenRows(1); }
+  if (pt.getLastRow() >= 2) {
+    pt.getRange(2, 1, pt.getLastRow() - 1, 7).getValues().forEach(function(r) {
+      var k = String(r[0] || '').trim().toUpperCase(); if (!k || !out[k]) return;
+      out[k].vehiculo = String(r[2] || '').trim() || out[k].vehiculo; out[k].modelo = String(r[3] || '').trim() || out[k].modelo;
+      out[k].sistema = String(r[4] || '').trim() || out[k].sistema; out[k].pieza = String(r[5] || '').trim() || out[k].pieza;
+      out[k].fuente = String(r[6] || '').trim(); out[k].enHoja = true;
+    });
+  }
+  var faltan = orden.filter(function(k) { return !out[k].enHoja; });
+  if (faltan.length) {
+    try {
+      var ini = pt.getLastRow() + 1;
+      asegurarFilas_(pt, ini + faltan.length - 1);
+      pt.getRange(ini, 1, faltan.length, 7).setValues(faltan.map(function(k) { var t = out[k];
+        return [t.codigo, t.producto, t.vehiculo, t.modelo, t.sistema, t.pieza, t.fuente]; }));
+    } catch (eT) {}
+  }
+  return out;
+}
+// Ejecutar a mano si se mejoran las reglas: rehace las filas AUTO/REVISAR y respeta las que digan otra cosa (MANUAL).
+function reetiquetarCatalogo() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet(), pt = ss.getSheetByName('PRODUCTO_TAGS');
+  if (!pt || pt.getLastRow() < 2) { tagsCatalogo_(ss); return 'Hoja creada'; }
+  var lp = ss.getSheetByName('LISTA DE PRODUCTOS'), cat = {};
+  lp.getRange(3, 1, lp.getLastRow() - 2, 4).getValues().forEach(function(r) { cat[String(r[0] || '').trim().toUpperCase()] = r; });
+  var vals = pt.getRange(2, 1, pt.getLastRow() - 1, 7).getValues(), n = 0;
+  vals.forEach(function(r) {
+    if (!/^(AUTO|REVISAR|)/i.test(String(r[6] || '')) || /MANUAL/i.test(String(r[6] || ''))) return;
+    var c = cat[String(r[0] || '').trim().toUpperCase()]; if (!c) return;
+    var t = etiquetar_(c[2], c[3]);
+    r[1] = String(c[2]).trim(); r[2] = t.vehiculo; r[3] = t.modelo; r[4] = t.sistema; r[5] = t.pieza;
+    r[6] = !t.pieza ? 'REVISAR' : (t.generico ? 'AUTO (generico)' : 'AUTO'); n++;
+  });
+  pt.getRange(2, 1, vals.length, 7).setValues(vals);
+  return 'Reetiquetados: ' + n;
+}
+
+// Listas para la pantalla: las de las reglas + las que se agregaron en DEMANDA_LISTAS + variantes ya usadas.
+function demandaListas_(ss) {
+  var modelos = TAG_MODELOS.map(function(m) { return {v:m[0], padre:m[1]}; }).concat([{v:'UNIVERSAL', padre:''}]);
+  var piezas = [], vistas = {};
+  TAG_PIEZAS.forEach(function(p) { var k = p[0] + '|' + p[1]; if (!vistas[k]) { vistas[k] = 1; piezas.push({v:p[0], padre:p[1]}); } });
+  var vehiculos = TAG_VEHICULOS.slice(), sistemas = TAG_SISTEMAS.slice();
+  var sh = ss.getSheetByName('DEMANDA_LISTAS');
+  if (sh && sh.getLastRow() >= 2) {
+    sh.getRange(2, 1, sh.getLastRow() - 1, 3).getValues().forEach(function(r) {
+      var t = String(r[0] || '').trim().toUpperCase(), v = String(r[1] || '').trim(), pa = String(r[2] || '').trim();
+      if (!v) return;
+      if (t === 'VEHICULO' && vehiculos.indexOf(v) < 0) vehiculos.push(v);
+      if (t === 'SISTEMA' && sistemas.indexOf(v) < 0) sistemas.push(v);
+      if (t === 'MODELO' && !modelos.some(function(m) { return m.v.toUpperCase() === v.toUpperCase(); })) modelos.push({v:v, padre:pa, nuevo:true});
+      if (t === 'PIEZA' && !piezas.some(function(p) { return p.v.toUpperCase() === v.toUpperCase() && p.padre === pa; })) piezas.push({v:v, padre:pa, nuevo:true});
+    });
+  }
+  var variantes = {};
+  var dm = ss.getSheetByName('DEMANDA_NO_ATENDIDA');
+  if (dm && dm.getLastRow() >= 2 && dm.getLastColumn() >= DEM.VARIANTE + 1) {
+    dm.getRange(2, DEM.VARIANTE + 1, dm.getLastRow() - 1, 1).getValues().forEach(function(r) {
+      var v = String(r[0] || '').trim(); if (v) variantes[v.toUpperCase()] = v;
+    });
+  }
+  var tags = tagsCatalogo_(ss), tagsMin = {};
+  Object.keys(tags).forEach(function(c) { var t = tags[c]; tagsMin[c] = [t.vehiculo, t.modelo, t.sistema, t.pieza]; });
+  return {ok:true, vehiculos:vehiculos, modelos:modelos, sistemas:sistemas, piezas:piezas,
+          variantes:Object.keys(variantes).map(function(k) { return variantes[k]; }).sort(),
+          reglas:{modelos:TAG_MODELOS, piezas:TAG_PIEZAS}, tags:tagsMin, estados:DEM_ESTADOS};
+}
+
+function guardarDemanda_(ss, d, quien) {
+  if (d.foto1 && !urlFotoOk_(d.foto1)) d.foto1 = '';
+  if (d.foto2 && !urlFotoOk_(d.foto2)) d.foto2 = '';
+  var sh = hojaDemanda_(ss);
+  var vendedor = (quien && quien.nombre) || d.vendedor || '';
+  var clave = claveDemanda_(d);
+  var id = String(d.idDemanda || '').trim();
+  var ahora = new Date(), hoy = Utilities.formatDate(ahora, TZ_VE, 'yyyy-MM-dd');
+  var veces = 0, ultima = '', repetido = false, hace = null;
+  if (sh.getLastRow() >= 2) {
+    var ancho = Math.max(sh.getLastColumn(), DEM.ID + 1);
+    sh.getRange(2, 1, sh.getLastRow() - 1, ancho).getValues().forEach(function(r) {
+      if (id && String(r[DEM.ID]).trim() === id) repetido = true;     // reintento del mismo envio: no se duplica
+      var k = String(r[DEM.CLAVE] || '').trim(); if (!k || k !== clave) return;
+      if (String(r[DEM.ESTADO] || '').toUpperCase() === 'DUPLICADO') return;
+      veces++; var f = iso_(r[DEM.FECHA]); if (f > ultima) ultima = f;
+      // v28.17 — Posible doble toque: lo mismo, el mismo vendedor, en los ultimos 15 minutos. NO se descarta: se
+      // pregunta si es otra persona (dos clientes pueden pedir lo mismo el mismo dia y las dos cuentan).
+      if (f === hoy && String(r[DEM.VENDEDOR]).trim() === vendedor) {
+        var t = instante_(r[DEM.FECHA], r[DEM.HORA]), lim = Utilities.formatDate(new Date(ahora.getTime() - 15 * 60000), TZ_VE, 'yyyy-MM-dd HH:mm');
+        if (t && t >= lim) hace = t.slice(11);
+      }
+    });
+  }
+  if (repetido) return {ok:true, tipo:'demanda', repetido:true, clave:clave, veces:veces};
+  if (hace && !d.otraPersona) return {ok:true, tipo:'demanda', confirmar:true, hace:hace, clave:clave, veces:veces};
+  // Opciones nuevas de las listas (cualquiera puede agregar; queda quien y cuando)
+  if (d.nuevas && d.nuevas.length) {
+    var sl = hojaAp_(ss, 'DEMANDA_LISTAS', ['TIPO','VALOR','PADRE','AGREGADO_POR','FECHA']);
+    var existentes = {};
+    if (sl.getLastRow() >= 2) sl.getRange(2, 1, sl.getLastRow() - 1, 3).getValues().forEach(function(r) {
+      existentes[String(r[0]).toUpperCase() + '|' + String(r[1]).toUpperCase() + '|' + String(r[2]).toUpperCase()] = 1; });
+    d.nuevas.forEach(function(n) {
+      var t = String(n.tipo || '').toUpperCase(), v = String(n.valor || '').trim(), pa = String(n.padre || '').trim();
+      if (['VEHICULO','MODELO','SISTEMA','PIEZA'].indexOf(t) < 0 || !v || v.length > 60) return;
+      var k = t + '|' + v.toUpperCase() + '|' + pa.toUpperCase();
+      if (existentes[k]) return; existentes[k] = 1;
+      sl.appendRow([t, v, pa, vendedor, ahora]);
+    });
+  }
+  var fila = [d.fecha, d.hora, vendedor, d.producto, d.categoria || d.vehiculo || '', d.cantidad,
+    d.cliNombre || '', d.cliTel || '', d.notificar || 'NO', d.foto1 || '', d.foto2 || '', d.notas || '',
+    d.proveedor1 || '', d.precio1 || '', d.proveedor2 || '', d.precio2 || '', 'PENDIENTE',
+    String(d.codigo || '').trim(), d.origen || 'MANUAL', d.vehiculo || '', d.modelo || '', d.sistema || '', d.pieza || '',
+    d.variante || '', clave, id];
+  var n = sh.getLastRow() + 1;
+  asegurarFilas_(sh, n);
+  sh.getRange(n, 1, 1, fila.length).setValues([fila]);
+  return {ok:true, tipo:'demanda', repetido:false, clave:clave, veces:veces + 1, anterior:ultima};
+}
+
+// Cambia el estado de TODAS las solicitudes abiertas de una clave (EN PEDIDO, LLEGO, AVISADO, DESCARTADO, PENDIENTE).
+function estadoDemanda_(ss, d, quien) {
+  var est = String(d.estado || '').toUpperCase();
+  if (DEM_ESTADOS.indexOf(est) < 0 || est === 'DUPLICADO') throw rechazo_('Estado invalido');
+  var clave = String(d.clave || '').trim(); if (!clave) throw rechazo_('Falta la clave');
+  var sh = hojaDemanda_(ss), n = 0;
+  if (sh.getLastRow() < 2) return {ok:true, cambiadas:0};
+  var vals = sh.getRange(2, 1, sh.getLastRow() - 1, Math.max(sh.getLastColumn(), DEM.ID + 1)).getValues();
+  vals.forEach(function(r, i) {
+    if (String(r[DEM.CLAVE] || '').trim() !== clave) return;
+    var ant = String(r[DEM.ESTADO] || 'PENDIENTE').toUpperCase();
+    if (ant === 'DUPLICADO' || ant === est) return;
+    if ((ant === 'AVISADO' || ant === 'DESCARTADO') && est !== 'PENDIENTE') return;     // cerradas se quedan cerradas
+    sh.getRange(i + 2, DEM.ESTADO + 1).setValue(est);
+    var nota = String(r[DEM.NOTAS] || '');
+    sh.getRange(i + 2, DEM.NOTAS + 1).setValue((nota ? nota + ' | ' : '') + est + ' ' + Utilities.formatDate(new Date(), TZ_VE, 'dd/MM') + ' ' + ((quien && quien.nombre) || ''));
+    n++;
+  });
+  return {ok:true, tipo:'demanda_estado', clave:clave, estado:est, cambiadas:n};
+}
+
+// Analisis: solicitudes agrupadas por clave, por modelo y por sistema, cruzadas con las ventas del mismo periodo.
+function demandaAnalisis_(ss, dias) {
+  dias = Math.max(7, Math.min(400, Number(dias) || 90));
+  var desde = Utilities.formatDate(new Date(new Date().getTime() - dias * 86400000), TZ_VE, 'yyyy-MM-dd');
+  var tags = tagsCatalogo_(ss);
+  var grupos = {}, porModelo = {}, porSistema = {}, total = 0, esperando = 0;
+  // v28.17 — MAPA DE CALOR: 8 semanas hacia atras (la 0 es la semana en curso, ultimos 7 dias). El "calor" pesa
+  // cada solicitud por lo reciente que es (se reduce a la mitad cada 10 dias): 5 en una semana calientan mucho
+  // mas que 1 al mes.
+  var SEM = 8, hoyMs = new Date(Utilities.formatDate(new Date(), TZ_VE, 'yyyy-MM-dd') + 'T12:00:00').getTime();
+  function edadDias(f) { return Math.max(0, Math.round((hoyMs - new Date(f + 'T12:00:00').getTime()) / 86400000)); }
+  function semana(f) { var e = Math.floor(edadDias(f) / 7); return e < SEM ? e : -1; }
+  function peso(f) { return Math.pow(0.5, edadDias(f) / 10); }
+  function acum(mapa, k, campo, n) { if (!k) k = '(sin dato)'; mapa[k] = mapa[k] || {nombre:k, pedidos:0, ventas:0, unidades:0, productos:0, semanas:[0,0,0,0,0,0,0,0], calor:0}; mapa[k][campo] += n; return mapa[k]; }
+  var sh = ss.getSheetByName('DEMANDA_NO_ATENDIDA');
+  if (sh && sh.getLastRow() >= 2) {
+    var ancho = Math.max(sh.getLastColumn(), DEM.ID + 1);
+    sh.getRange(2, 1, sh.getLastRow() - 1, ancho).getValues().forEach(function(r) {
+      var f = iso_(r[DEM.FECHA]); if (!f || f < desde) return;
+      var est = String(r[DEM.ESTADO] || 'PENDIENTE').toUpperCase() || 'PENDIENTE';
+      if (est === 'DUPLICADO') return;
+      var clave = String(r[DEM.CLAVE] || '').trim() || ('TXT:' + String(r[DEM.PRODUCTO] || '').trim().toUpperCase());
+      var g = grupos[clave];
+      if (!g) g = grupos[clave] = {clave:clave, nombre:String(r[DEM.PRODUCTO] || ''), codigo:String(r[DEM.CODIGO] || ''),
+        origen:String(r[DEM.ORIGEN] || ''), vehiculo:String(r[DEM.VEHICULO] || ''), modelo:String(r[DEM.MODELO] || ''),
+        sistema:String(r[DEM.SISTEMA] || ''), pieza:String(r[DEM.PIEZA] || ''), variante:String(r[DEM.VARIANTE] || ''),
+        veces:0, cantidad:0, primera:f, ultima:f, clientes:[], proveedores:{}, estados:{}, fotos:[],
+        semanas:[0,0,0,0,0,0,0,0], v7:0, v30:0, calor:0};
+      g.veces++; g.cantidad += Number(r[DEM.CANTIDAD]) || 1; total++;
+      var sm = semana(f), ed = edadDias(f), pe = peso(f);
+      if (sm >= 0) g.semanas[sm]++;
+      if (ed < 7) g.v7++; if (ed < 30) g.v30++;
+      g.calor += pe;
+      if (f < g.primera) g.primera = f; if (f > g.ultima) { g.ultima = f; g.nombre = String(r[DEM.PRODUCTO] || g.nombre); }
+      g.estados[est] = (g.estados[est] || 0) + 1;
+      if (r[DEM.PROV1]) g.proveedores[String(r[DEM.PROV1])] = Number(r[DEM.PRECIO1]) || 0;
+      if (r[DEM.PROV2]) g.proveedores[String(r[DEM.PROV2])] = Number(r[DEM.PRECIO2]) || 0;
+      if (r[9] && g.fotos.length < 2) g.fotos.push(String(r[9]));
+      var abierta = est === 'PENDIENTE' || est === 'EN PEDIDO' || est === 'LLEGO';
+      if (String(r[DEM.NOTIFICAR]).toUpperCase() === 'SI' && String(r[DEM.TEL] || '').trim() && abierta) {
+        g.clientes.push({nombre:String(r[DEM.CLI] || ''), tel:String(r[DEM.TEL] || ''), fecha:f}); esperando++;
+      }
+      [acum(porModelo, g.modelo, 'pedidos', 1), acum(porSistema, g.sistema, 'pedidos', 1)].forEach(function(x) {
+        if (sm >= 0) x.semanas[sm]++; x.calor += pe; });
+    });
+  }
+  // Ventas del mismo periodo, por modelo y sistema del producto vendido
+  var vd = ss.getSheetByName(SH_DETALLE || 'VENTAS_DETALLE');
+  if (vd && vd.getLastRow() >= 2) {
+    vd.getRange(2, 1, vd.getLastRow() - 1, 8).getValues().forEach(function(r) {
+      var f = iso_(r[1]); if (!f || f < desde) return;
+      var t = tags[String(r[5] || '').trim().toUpperCase()] || etiquetar_(r[6], '');
+      acum(porModelo, t.modelo, 'ventas', 1); acum(porModelo, t.modelo, 'unidades', Number(r[7]) || 0);
+      acum(porSistema, t.sistema, 'ventas', 1); acum(porSistema, t.sistema, 'unidades', Number(r[7]) || 0);
+    });
+  }
+  Object.keys(tags).forEach(function(c) { acum(porModelo, tags[c].modelo, 'productos', 1); acum(porSistema, tags[c].sistema, 'productos', 1); });
+  // Stock de lo que se pidio y si esta en la lista (agotado)
+  var codigos = Object.keys(grupos).map(function(k) { return grupos[k].codigo; }).filter(Boolean);
+  var stock = {};
+  if (codigos.length) (calcularStock_(ss, codigos).productos || []).forEach(function(p) { stock[String(p.codigo).toUpperCase()] = p.stock; });
+  var lista = Object.keys(grupos).map(function(k) {
+    var g = grupos[k];
+    var est = ['LLEGO', 'EN PEDIDO', 'PENDIENTE', 'AVISADO', 'DESCARTADO'].filter(function(e) { return g.estados[e]; })[0] || 'PENDIENTE';
+    g.estado = est;
+    g.proveedores = Object.keys(g.proveedores).map(function(p) { return {proveedor:p, precio:g.proveedores[p]}; });
+    if (g.codigo) g.stock = stock[g.codigo.toUpperCase()] === undefined ? null : stock[g.codigo.toUpperCase()];
+    g.calor = Math.round(g.calor * 100) / 100;
+    // Ritmo: solicitudes por semana en el tramo en que se viene pidiendo (minimo una semana)
+    g.porSemana = Math.round(g.veces / Math.max(1, (edadDias(g.primera) - edadDias(g.ultima) + 1) / 7) * 10) / 10;
+    return g;
+  }).sort(function(a, b) { return (b.calor - a.calor) || (b.veces - a.veces) || (b.clientes.length - a.clientes.length); });
+  function arr(m) { return Object.keys(m).map(function(k) { m[k].calor = Math.round(m[k].calor * 100) / 100; return m[k]; })
+    .filter(function(x) { return x.pedidos || x.ventas; })
+    .sort(function(a, b) { return (b.calor - a.calor) || (b.pedidos - a.pedidos) || (b.ventas - a.ventas); }); }
+  var etiquetas = [];
+  for (var w = 0; w < SEM; w++) {
+    var fin = new Date(hoyMs - w * 7 * 86400000), ini = new Date(hoyMs - (w * 7 + 6) * 86400000);
+    etiquetas.push(Utilities.formatDate(ini, TZ_VE, 'dd/MM') + '-' + Utilities.formatDate(fin, TZ_VE, 'dd/MM'));
+  }
+  return {ok:true, dias:dias, desde:desde, total:total, distintos:lista.length, esperando:esperando, semanas:etiquetas,
+          enLista:lista.filter(function(g) { return g.codigo; }).length, grupos:lista, porModelo:arr(porModelo), porSistema:arr(porSistema)};
 }
 
 // ============================================================

@@ -1,5 +1,26 @@
 # CHANGELOG — Repuesto BoParts
 
+## Apps Script v28.17 + demanda v10.1 — build 2026-11-06.2 — mapa de calor y dos clientes pidiendo lo mismo
+
+- Lo mismo, mismo vendedor, en 15 minutos: ya no se descarta. El servidor responde confirmar:true y la pantalla
+  pregunta "¿Es otra persona?"; si si, se guarda (otraPersona:true) y cuenta. Solo el reintento del mismo envio
+  (mismo ID) no se duplica.
+- Analisis: semanas[0..7], v7, v30, porSemana y calor (peso que se reduce a la mitad cada 10 dias) por producto,
+  modelo y sistema; orden por calor. Pantalla: mapa de calor de 8 semanas y ritmo ("3 en 7 dias").
+
+## Apps Script v28.16 + demanda v10.0 — build 2026-11-06.1 — demanda estructurada y analisis
+
+- Reglas de clasificacion en Code.gs (TAG_MODELOS, TAG_PIEZAS, etiquetar_): vehiculo, modelo, sistema, pieza.
+- PRODUCTO_TAGS: se crea sola la primera vez con las etiquetas de los ~1.000 productos (FUENTE AUTO, AUTO (generico),
+  REVISAR). Para corregir: cambiar la fila y poner MANUAL en FUENTE. reetiquetarCatalogo() rehace las AUTO.
+- DEMANDA_NO_ATENDIDA: columnas R..Z (CODIGO, ORIGEN, VEHICULO, MODELO, SISTEMA, PIEZA, VARIANTE, CLAVE, ID_DEMANDA).
+  DEMANDA_LISTAS guarda las opciones agregadas con "+ Otro..." (quien y cuando). Freno al doble toque (15 min).
+- action=demanda_listas, action=demanda_analisis (por clave, por modelo y por sistema, cruzado con ventas),
+  tipo=demanda_estado (PENDIENTE, EN PEDIDO, LLEGO, AVISADO, DESCARTADO).
+- boparts_demanda.html v10.0: buscador unico (tu lista + proveedores), clasificacion con listas, nombre armado,
+  "ya lo pidieron N veces", pestana Analisis con estados y aviso por WhatsApp.
+- Hoja (hecho directo): los 42 registros viejos clasificados; 6 dobles toques marcados DUPLICADO.
+
 ## Apps Script v28.15 + cobros v3.5 — build 2026-11-05.2 — cedula corregida = una sola cuenta
 
 - guardarCliente_: si la cedula/RIF cambia, se reemplaza (celda exacta) en CXC_MOV, VENTAS, COMISIONES, APARTADOS,
