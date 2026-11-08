@@ -1,7 +1,12 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_cobros.html
-  VERSION: v3.5 (2026-11-05) | build 2026-11-06.2 | requiere Apps Script v28.15
+  VERSION: v3.6 (2026-11-07) | build 2026-11-07.2 | requiere Apps Script v28.18
+  v3.6: CUENTAS EN $ REF BCV. Si el cliente esta marcado en Gerencia, su saldo y sus notas se ven en $ Ref BCV (fijos
+  del dia de la venta), el abono se descuenta en $ BCV al BCV de hoy, "Pagar esta" llena los Bs al BCV de hoy, y el
+  WhatsApp de cobro sale en $ Ref BCV con su equivalente en Bs. Cada abono muestra lo que entro por dentro y el
+  diferencial cambiario.
+  VERSION anterior: v3.5 (2026-11-05) | build 2026-11-05.2 | requiere Apps Script v28.15
   v3.5: cada cuenta se elige por nombre + cedula. Dos cuentas con el mismo nombre ya no se tapan (antes se abria
   siempre la primera) y la lista avisa cuando pasa.
   VERSION anterior: v3.4 (2026-11-05) | build 2026-11-05.1 | requiere Apps Script v28.14
@@ -362,7 +367,7 @@ select option{background:#1E1E1E;color:var(--ink)}
   </div>
 </div>
 
-<script src="boparts_sesion.js?v=2026-11-06.2"></script>
+<script src="boparts_sesion.js?v=2026-11-07.2"></script>
 <script>
 
 
@@ -471,29 +476,32 @@ function cobrar(clave) {
   var bloques = [];
   c.notas.filter(function(n) { return n.estado !== 'PAGADA'; }).forEach(function(n) {
     var det = detalleProductos(n.productos);
+    var bcvC = esBcv(c);
     var monto = Number(n.montoUSD) || 0, abonado = Number(n.abonadoUSD) || 0;
     var parcial = abonado > 0.009;
 
     // La nota tiene que cuadrar sola. Los precios de la lista son SIN IVA y la nota puede traer IVA 16%
     // o algun recargo, asi que la suma de los renglones casi nunca es el monto de la nota. Si el cliente
     // suma y le falta plata, llama a reclamar. La diferencia se muestra como un renglon con nombre.
-    var ajuste = (det.suma === null) ? 0 : Math.round((monto - det.suma) * 100) / 100;
+    var ajuste = (det.suma === null || bcvC) ? 0 : Math.round((monto - det.suma) * 100) / 100;
     var extras = [];
     if (Math.abs(ajuste) > 0.009) extras.push((ajuste > 0 ? 'IVA y cargos ' : 'Descuento ') + fmtUSD(Math.abs(ajuste)));
-    if (parcial) extras.push('abonado ' + fmtUSD(abonado));
+    if (parcial) extras.push(bcvC ? 'abonado ' + fmtUSD(totalNota(n, c) - debeNota(n, c)) + ' Ref BCV' : 'abonado ' + fmtUSD(abonado));
+    if (bcvC) extras.unshift('total ' + fmtUSD(totalNota(n, c)) + ' Ref BCV (BCV ' + (n.bcvVenta || '-') + ')');
 
     var simple = !extras.length;   // sin ajustes ni abonos el monto va en el encabezado y no hace falta pie
     var cab = '📄 *' + (n.nota ? 'Nota ' + ('000' + n.nota).slice(-4) : 'Entrega') + '* · ' + fechaCorta(n.fecha) +
-              (simple ? ' · *' + fmtUSD(n.pendienteUSD) + '*' : '');
+              (simple ? ' · *' + fmtCli(debeNota(n, c), c) + '*' : '');
     var pie = simple ? '' :
       '\n_' + extras.join(' · ') + '_' +
-      '\n👉 *' + (parcial ? 'Pendiente: ' : 'Total: ') + fmtUSD(n.pendienteUSD) + '*';
+      '\n👉 *' + (parcial ? 'Pendiente: ' : 'Total: ') + fmtCli(debeNota(n, c), c) + '*';
     bloques.push(cab + det.txt + pie);
   });
   var msg = '*REPUESTO BoParts* 🔧' +
     '\n\nHola ' + primerNombre(c.cliente) + ' 👋' +
-    '\n\nSu saldo pendiente es de *' + fmtUSD(c.saldoUSD) + '*' +
-    (TASA ? '\n💵 ' + fmtBS(c.saldoUSD * TASA) + ' (tasa ' + TASA + ')' : '') +
+    '\n\nSu saldo pendiente es de *' + fmtCli(saldoCli(c), c) + '*' +
+    (esBcv(c) ? (BCV ? '\n💵 ' + fmtBS(c.saldoBCV * BCV) + ' a tasa BCV de hoy (' + BCV + ')' : '')
+              : (TASA ? '\n💵 ' + fmtBS(c.saldoUSD * TASA) + ' (tasa ' + TASA + ')' : '')) +
     (bloques.length ? '\n\n━━━━━━━━━━━━━━\n' + bloques.join('\n\n') + '\n━━━━━━━━━━━━━━' : '') +
     '\n\n✅ ¿Ya pagó? Mándenos el comprobante y lo descargamos de una vez.' +
     '\n📲 ¿Todavía no? Nos dice cómo le queda mejor y lo coordinamos con gusto.' +
@@ -514,7 +522,7 @@ function primerNombre(n) {
 }
 var ultimo = null;   // ultimo abono registrado (para el mensaje de WhatsApp)
 
-var APP_VERSION = 'v3.5';
+var APP_VERSION = 'v3.6';
 document.getElementById('fechaHdr').textContent = APP_VERSION + ' · ' + new Date().toLocaleDateString('es-VE', {weekday:'long', day:'numeric', month:'long'});
 
 // Metodos de pago (sin CREDITO)
@@ -532,6 +540,7 @@ function cargar() {
     .then(function(d) {
       if (!d || !d.ok) throw new Error(d && d.error ? d.error : 'sin respuesta');
       if (!TASA && d.tasa > 1) TASA = d.tasa;
+      BCV = Number(d.bcv) || 0;                    // v3.6: para las cuentas en $ Ref BCV
       document.getElementById('tasaLbl').textContent = TASA ? 'Tasa ' + TASA : 'Sin tasa';
       CLIENTES = d.clientes || [];
       renderLista();
@@ -540,8 +549,17 @@ function cargar() {
     .catch(function(e) { document.getElementById('cliList').innerHTML = '<div class="empty" style="color:var(--red)">No se pudo cargar (' + e.message + '). Revisa la conexion.</div>'; });
 }
 
+// v3.6 — CUENTAS EN $ REF BCV. El cliente debe en $ BCV (fijo del dia de cada venta) y paga en Bs al BCV del dia;
+// por dentro la deuda sigue en dolares de trabajo. Estas funciones dicen que mostrar segun el tipo de cuenta.
+var BCV = 0;
+function esBcv(c) { return !!(c && c.cuentaBcv); }
+function saldoCli(c) { return esBcv(c) ? (c.saldoBCV || 0) : c.saldoUSD; }
+function debeNota(n, c) { return esBcv(c) ? (n.pendienteBCV || 0) : n.pendienteUSD; }
+function totalNota(n, c) { return esBcv(c) ? (n.montoBCV || 0) : n.montoUSD; }
+function fmtCli(x, c) { return fmtUSD(x) + (esBcv(c) ? ' Ref BCV' : ''); }
+function bsCli(x, c) { return esBcv(c) ? (BCV ? fmtBS(x * BCV) + ' a BCV ' + BCV : '') : (TASA ? fmtBS(x * TASA) : ''); }
 function renderLista() {
-  var conSaldo = CLIENTES.filter(function(c) { return c.saldoUSD > 0.009; });
+  var conSaldo = CLIENTES.filter(function(c) { return saldoCli(c) > 0.009; });
   if (!conSaldo.length) { document.getElementById('cliList').innerHTML = '<div class="empty">Nadie debe nada. 🎉</div>'; return; }
   var h = '';
   conSaldo.forEach(function(c) {
@@ -549,7 +567,7 @@ function renderLista() {
     var mismoNombre = conSaldo.filter(function(x) { return x.cliente === c.cliente; }).length > 1;
     h += '<div class="ccard' + (sel && claveDe(sel) === claveDe(c) ? ' sel' : '') + '" onclick="elegir(\'' + escAttr(claveDe(c)) + '\')">' +
       '<div><div class="cn">' + escHtml(c.cliente) + '</div><div class="cr">' + pend + ' nota' + (pend === 1 ? '' : 's') + ' pendiente' + (pend === 1 ? '' : 's') + (c.rif ? ' · ' + escHtml(c.rif) : '') + '</div></div>' +
-      '<div class="right"><div class="cs">' + fmtUSD(c.saldoUSD) + '<small>' + (TASA ? fmtBS(c.saldoUSD * TASA) : '') + '</small></div>' +
+      '<div class="right"><div class="cs">' + fmtUSD(saldoCli(c)) + (esBcv(c) ? '<small style="color:var(--brand)">Ref BCV</small>' : '') + '<small>' + bsCli(saldoCli(c), c) + '</small></div>' +
       '<button class="cobrar" onclick="event.stopPropagation();cobrar(\'' + escAttr(claveDe(c)) + '\')">Cobrar</button></div></div>' +
       (mismoNombre ? '<div class="cominfo" style="margin:-4px 0 8px;color:var(--red)">Hay otra cuenta con el mismo nombre y otra cedula (' + escHtml(c.rif || 'sin cedula') + '). Revisa la cedula en Gerencia &gt; Clientes.</div>' : '');
   });
@@ -570,7 +588,13 @@ function elegirNota(idVenta) {
   ABONO_A = (n && (!ABONO_A || ABONO_A.idVenta !== idVenta)) ? n : null;
   if (ABONO_A) {
     var mon = document.getElementById('abMoneda').value;
-    document.getElementById('abMonto').value = mon === 'BS' ? (TASA ? Math.round(ABONO_A.pendienteUSD * TASA * 100) / 100 : '') : ABONO_A.pendienteUSD;
+    if (esBcv(sel) && BCV) {
+      // Lo que falta en $ BCV, en Bs al BCV de hoy; en dolares, esos Bs a tasa de trabajo
+      var bsHoy = Math.round(ABONO_A.pendienteBCV * BCV * 100) / 100;
+      document.getElementById('abMonto').value = mon === 'BS' ? bsHoy : (TASA ? Math.round(bsHoy / TASA * 100) / 100 : '');
+    } else {
+      document.getElementById('abMonto').value = mon === 'BS' ? (TASA ? Math.round(ABONO_A.pendienteUSD * TASA * 100) / 100 : '') : ABONO_A.pendienteUSD;
+    }
   }
   renderDetalle(true);
   if (ABONO_A) document.getElementById('abMonto').scrollIntoView({behavior:'smooth', block:'center'});
@@ -578,7 +602,7 @@ function elegirNota(idVenta) {
 function pintarDestino() {
   var el = document.getElementById('abDestino');
   el.innerHTML = ABONO_A
-    ? '<div class="destino"><div>Paga la nota <b>NE-' + ('000' + ABONO_A.nota).slice(-4) + '</b> · debe <b>' + fmtUSD(ABONO_A.pendienteUSD) + '</b></div>' +
+    ? '<div class="destino"><div>Paga la nota <b>NE-' + ('000' + ABONO_A.nota).slice(-4) + '</b> · debe <b>' + fmtCli(debeNota(ABONO_A, sel), sel) + '</b></div>' +
       '<button class="pagar" onclick="elegirNota(\'' + escAttr(ABONO_A.idVenta) + '\')">Quitar</button></div>'
     : '<div class="cominfo" style="margin:0 0 10px">Abono general: se aplica a las notas mas viejas. Para pagar una nota en particular, toca <b>Pagar esta</b> en la nota.</div>';
 }
@@ -588,8 +612,11 @@ function renderDetalle(conservar) {
   document.getElementById('detalle').style.display = 'block';
   document.getElementById('btnAbono').style.display = 'block';
   document.getElementById('detNombre').textContent = sel.cliente;
-  document.getElementById('detSaldo').textContent = fmtUSD(sel.saldoUSD);
-  document.getElementById('detSaldoBs').textContent = (TASA ? fmtBS(sel.saldoUSD * TASA) + ' a tasa ' + TASA + ' · ' : '') + 'Cargos ' + fmtUSD(sel.cargosUSD) + ' · Abonos ' + fmtUSD(sel.abonosUSD);
+  document.getElementById('detSaldo').textContent = fmtCli(saldoCli(sel), sel);
+  document.getElementById('detSaldoBs').textContent = esBcv(sel)
+    ? (BCV ? fmtBS(sel.saldoBCV * BCV) + ' a BCV ' + BCV + ' hoy · ' : '') + 'por dentro ' + fmtUSD(sel.saldoUSD) + ' a tasa de trabajo' +
+      (sel.diferencialUSD ? ' · diferencial cambiario ' + (sel.diferencialUSD > 0 ? '+' : '') + fmtUSD(sel.diferencialUSD) : '')
+    : (TASA ? fmtBS(sel.saldoUSD * TASA) + ' a tasa ' + TASA + ' · ' : '') + 'Cargos ' + fmtUSD(sel.cargosUSD) + ' · Abonos ' + fmtUSD(sel.abonosUSD);
   if (!conservar) { ABONO_A = null; VER_PAGADAS = false; }
   if (ABONO_A) ABONO_A = sel.notas.filter(function(x) { return x.idVenta === ABONO_A.idVenta && x.estado !== 'PAGADA'; })[0] || null;
   var h = '', pagadas = sel.notas.filter(function(n) { return n.estado === 'PAGADA'; });
@@ -599,8 +626,9 @@ function renderDetalle(conservar) {
     var cls = pagada ? 'b-pag' : (n.estado === 'PARCIAL' ? 'b-parc' : 'b-pend');
     var elegida = ABONO_A && ABONO_A.idVenta === n.idVenta;
     h += '<div class="nrow' + (elegida ? ' sel' : '') + '"' + (pagada ? ' style="opacity:.55"' : '') + '><div style="flex:1;padding-right:8px"><b>' + (n.nota ? 'NE-' + ('000' + n.nota).slice(-4) : 'Sin nota') + '</b> · ' + fechaCorta(n.fecha) +
-      '<br><span style="color:var(--ink-muted)">' + (pagada ? fmtUSD(n.montoUSD) : 'debe <b style="color:var(--ink)">' + fmtUSD(n.pendienteUSD) + '</b>' +
-        (n.estado === 'PARCIAL' ? ' de ' + fmtUSD(n.montoUSD) : '')) + '</span>' +
+      '<br><span style="color:var(--ink-muted)">' + (pagada ? fmtCli(totalNota(n, sel), sel) : 'debe <b style="color:var(--ink)">' + fmtCli(debeNota(n, sel), sel) + '</b>' +
+        (n.estado === 'PARCIAL' ? ' de ' + fmtUSD(totalNota(n, sel)) : '')) +
+        (esBcv(sel) && n.bcvVenta ? ' · BCV ' + n.bcvVenta : '') + '</span>' +
       (n.productos ? '<div style="font-size:11px;color:var(--ink-soft);margin-top:4px;line-height:1.4">' + escHtml(limpiarProductos(n.productos)) + '</div>' : '') +
       (!pagada && n.idVenta ? '<button class="pagar' + (elegida ? ' on' : '') + '" onclick="elegirNota(\'' + escAttr(n.idVenta) + '\')">' + (elegida ? 'Pagando esta' : 'Pagar esta') + '</button>' : '') +
       '</div><span class="badge ' + cls + '">' + n.estado + '</span></div>';
@@ -613,7 +641,10 @@ function renderDetalle(conservar) {
   var ha = '';
   ab.forEach(function(m) {
     ha += '<div class="nrow"><div>' + fechaCorta(m.fecha) + ' · ' + escHtml(m.metodo) + (m.banco ? ' ' + escHtml(m.banco) : '') +
-      (m.notaAplicada && (m.aplicaA || m.notaDev) ? '<br><span style="color:var(--brand)">a la nota NE-' + ('000' + m.notaAplicada).slice(-4) + '</span>' : '') + '</div><div>' + fmtUSD(m.montoUSD) + (m.moneda === 'BS' ? '<br><span style="color:var(--ink-muted)">' + fmtBS(m.montoPagado) + '</span>' : '') + '</div></div>';
+      (m.notaAplicada && (m.aplicaA || m.notaDev) ? '<br><span style="color:var(--brand)">a la nota NE-' + ('000' + m.notaAplicada).slice(-4) + '</span>' : '') +
+      (m.difUSD ? '<br><span style="color:' + (m.difUSD > 0 ? 'var(--green)' : 'var(--red)') + '">diferencial ' + (m.difUSD > 0 ? '+' : '') + fmtUSD(m.difUSD) + '</span>' : '') +
+      '</div><div>' + (m.usdBcv ? fmtUSD(m.usdBcv) + ' Ref BCV<br><span style="color:var(--ink-muted)">entraron ' + fmtUSD(m.montoUSD) + '</span>' : fmtUSD(m.montoUSD)) +
+      (m.moneda === 'BS' ? '<br><span style="color:var(--ink-muted)">' + fmtBS(m.montoPagado) + '</span>' : '') + '</div></div>';
   });
   document.getElementById('detAbonos').innerHTML = ha || '<div class="empty">Sin abonos todavia</div>';
   pintarDestino();
@@ -632,13 +663,24 @@ function calcAbono() {
   var usd = moneda === 'BS' ? (TASA ? monto / TASA : 0) : monto;
   var bs = moneda === 'BS' ? monto : monto * TASA;
   var com = (m && moneda === 'BS') ? m.fijo + monto * m.pct / 100 : (m ? (m.fijo + bs * m.pct / 100) : 0);
-  return {monto:monto, moneda:moneda, m:m, usd:Math.round(usd * 100) / 100, bs:Math.round(bs), com:Math.round(com)};
+  // v3.6: en una cuenta en $ BCV el abono se descuenta en $ BCV del dia: Bs / BCV (o dolares x tasa / BCV)
+  var bcvUsd = (esBcv(sel) && BCV) ? Math.round(bs / BCV * 100) / 100 : null;
+  return {monto:monto, moneda:moneda, m:m, usd:Math.round(usd * 100) / 100, bs:Math.round(bs), com:Math.round(com), bcvUsd:bcvUsd};
 }
 
 function previewAbono() {
   var a = calcAbono(); var el = document.getElementById('abPreview');
   if (!a.monto) { el.style.display = 'none'; return; }
   el.style.display = 'block';
+  if (esBcv(sel)) {
+    if (!BCV) { el.innerHTML = '<span style="color:var(--red)">No hay tasa BCV del dia: actualizala en Gerencia antes de cobrar.</span>'; return; }
+    el.innerHTML = 'Se descuentan <b>' + fmtUSD(a.bcvUsd) + ' Ref BCV</b> (BCV ' + BCV + ') ' + (ABONO_A ? 'de la nota NE-' + ('000' + ABONO_A.nota).slice(-4) : 'de la deuda') +
+      ' · por dentro entran ' + fmtUSD(a.usd) + ' (tasa ' + TASA + ')' + (a.com ? ' · comision ' + fmtBS(a.com) : '') +
+      (ABONO_A ? ' · la nota quedaria en <b>' + fmtUSD(Math.max(0, ABONO_A.pendienteBCV - a.bcvUsd)) + ' Ref BCV</b>' +
+                 (a.bcvUsd > ABONO_A.pendienteBCV + 0.05 ? ' <span style="color:var(--red)">(pasa de lo que debe esa nota)</span>' : '') : '') +
+      ' · saldo total quedaria en <b>' + fmtUSD(Math.max(0, sel.saldoBCV - a.bcvUsd)) + ' Ref BCV</b>';
+    return;
+  }
   el.innerHTML = 'Se abonan <b>' + fmtUSD(a.usd) + '</b> ' + (ABONO_A ? 'a la nota NE-' + ('000' + ABONO_A.nota).slice(-4) : 'a la deuda') + (a.moneda === 'BS' ? ' (tasa ' + TASA + ')' : '') +
     (a.com ? ' · comision ' + fmtBS(a.com) : '') +
     (ABONO_A ? ' · la nota quedaria en <b>' + fmtUSD(Math.max(0, ABONO_A.pendienteUSD - a.usd)) + '</b>' +
@@ -678,8 +720,12 @@ function guardarAbono() {
   if (!a.monto || a.monto <= 0) { toast('Indica el monto', 'err'); return; }
   if (!a.m) { toast('Selecciona el metodo de pago', 'err'); return; }
   if (a.moneda === 'BS' && !TASA) { toast('No hay tasa cargada. Abre Lista de Precios y fijala.', 'err'); return; }
-  if (a.usd > sel.saldoUSD + 0.05) { toast('El abono (' + fmtUSD(a.usd) + ') supera el saldo (' + fmtUSD(sel.saldoUSD) + ')', 'err'); return; }
-  if (ABONO_A && a.usd > ABONO_A.pendienteUSD + 0.05) { toast('El abono (' + fmtUSD(a.usd) + ') pasa de lo que debe la nota NE-' + ('000' + ABONO_A.nota).slice(-4) + ' (' + fmtUSD(ABONO_A.pendienteUSD) + '). Quita la nota para abonar en general.', 'err'); return; }
+  if (esBcv(sel)) {
+    if (!BCV) { toast('No hay tasa BCV del dia: actualizala en Gerencia antes de cobrar', 'err'); return; }
+    if (a.bcvUsd > sel.saldoBCV + 0.05) { toast('El abono (' + fmtUSD(a.bcvUsd) + ' Ref BCV) supera el saldo (' + fmtUSD(sel.saldoBCV) + ' Ref BCV)', 'err'); return; }
+    if (ABONO_A && a.bcvUsd > ABONO_A.pendienteBCV + 0.05) { toast('El abono pasa de lo que debe la nota NE-' + ('000' + ABONO_A.nota).slice(-4) + ' (' + fmtUSD(ABONO_A.pendienteBCV) + ' Ref BCV)', 'err'); return; }
+  } else if (a.usd > sel.saldoUSD + 0.05) { toast('El abono (' + fmtUSD(a.usd) + ') supera el saldo (' + fmtUSD(sel.saldoUSD) + ')', 'err'); return; }
+  if (!esBcv(sel) && ABONO_A && a.usd > ABONO_A.pendienteUSD + 0.05) { toast('El abono (' + fmtUSD(a.usd) + ') pasa de lo que debe la nota NE-' + ('000' + ABONO_A.nota).slice(-4) + ' (' + fmtUSD(ABONO_A.pendienteUSD) + '). Quita la nota para abonar en general.', 'err'); return; }
   var now = new Date();
   var payload = {
     tipo:'abono', cliente:sel.cliente, rif:sel.rif || '',
@@ -688,7 +734,8 @@ function guardarAbono() {
     montoUSD:a.usd, moneda:a.moneda, montoPagado:a.monto, tasa:TASA,
     metodo:a.m.metodo, banco:a.m.banco, comision:a.com,
     registradoPor:quien, notas:document.getElementById('abNotas').value,
-    aplicaA:ABONO_A ? ABONO_A.idVenta : ''        // v3.4: abono a una nota en particular
+    aplicaA:ABONO_A ? ABONO_A.idVenta : '',       // v3.4: abono a una nota en particular
+    tasaBCV:BCV                                   // v3.6: para cuentas en $ Ref BCV
   };
   var btn = document.getElementById('btnAbono');
   btn.disabled = true; btn.textContent = 'Guardando...';
@@ -698,14 +745,14 @@ function guardarAbono() {
       btn.disabled = false; btn.textContent = 'Registrar Abono';
       if (!d || d.ok !== true) { var er = new Error(d && d.error ? d.error : 'Respuesta invalida'); er.rechazo = !!(d && d.rechazada); throw er; }
       olvidarIdAbono();   // quedo confirmado: el proximo cobro empieza con ID nuevo
-      ultimo = {cliente:sel.cliente, usd:a.usd, moneda:a.moneda, monto:a.monto, metodo:a.m.label, saldo:d.saldoUSD};
+      ultimo = {cliente:sel.cliente, usd:a.usd, moneda:a.moneda, monto:a.monto, metodo:a.m.label, saldo:d.saldoUSD, bcvUsd:a.bcvUsd};
       // v26: el servidor avisa cuando ese abono YA estaba registrado. Se dice, en vez de dejar
       // creer que entro un segundo pago.
       document.getElementById('successMsg').textContent =
         (d.repetido ? 'Ese abono YA estaba registrado. No se duplico.\n\n' : '') +
-        sel.cliente + ' - ' + fmtUSD(a.usd) + (a.moneda === 'BS' ? ' (' + fmtBS(a.monto) + ')' : '') +
+        sel.cliente + ' - ' + (esBcv(sel) ? fmtUSD(a.bcvUsd) + ' Ref BCV' : fmtUSD(a.usd)) + (a.moneda === 'BS' ? ' (' + fmtBS(a.monto) + ')' : '') +
         (ABONO_A ? '\na la nota NE-' + ('000' + ABONO_A.nota).slice(-4) : '') +
-        '\nSaldo: ' + fmtUSD(d.saldoUSD) +
+        '\nSaldo: ' + (esBcv(sel) && d.saldoBCV !== null && d.saldoBCV !== undefined ? fmtUSD(d.saldoBCV) + ' Ref BCV' : fmtUSD(d.saldoUSD)) +
         (d.comisionesLiberadas ? '\n\nSe liberaron ' + d.comisionesLiberadas + ' comision(es) de aliado: la nota quedo pagada.' : '');
       document.getElementById('success').classList.add('open');
       cargar();
@@ -725,13 +772,13 @@ function enviarEstado() {
   var lineas = '';
   c.notas.forEach(function(n) {
     if (n.estado === 'PAGADA') return;
-    lineas += '\n* ' + (n.nota ? 'NE-' + ('000' + n.nota).slice(-4) : 'Nota') + ' ' + fechaCorta(n.fecha) + ': ' + fmtUSD(n.pendienteUSD) + (n.estado === 'PARCIAL' ? ' (parcial)' : '') +
+    lineas += '\n* ' + (n.nota ? 'NE-' + ('000' + n.nota).slice(-4) : 'Nota') + ' ' + fechaCorta(n.fecha) + ': ' + fmtCli(debeNota(n, c), c) + (n.estado === 'PARCIAL' ? ' (parcial)' : '') +
       (n.productos ? '\n  ' + limpiarProductos(n.productos) : '');
   });
   var msg = 'Repuesto BoParts\nEstado de cuenta - ' + c.cliente + '\n' +
-    (ultimo ? '\nAbono recibido: ' + fmtUSD(ultimo.usd) + (ultimo.moneda === 'BS' ? ' (' + fmtBS(ultimo.monto) + ')' : '') + ' via ' + ultimo.metodo + '\n' : '') +
+    (ultimo ? '\nAbono recibido: ' + (esBcv(c) && ultimo.bcvUsd ? fmtUSD(ultimo.bcvUsd) + ' Ref BCV' : fmtUSD(ultimo.usd)) + (ultimo.moneda === 'BS' ? ' (' + fmtBS(ultimo.monto) + ')' : '') + ' via ' + ultimo.metodo + '\n' : '') +
     (lineas ? '\nPendiente:' + lineas : '') +
-    '\n\nSALDO: ' + fmtUSD(c.saldoUSD) + (TASA ? ' (' + fmtBS(c.saldoUSD * TASA) + ' a tasa ' + TASA + ')' : '') +
+    '\n\nSALDO: ' + fmtCli(saldoCli(c), c) + (esBcv(c) ? (BCV ? ' (' + fmtBS(c.saldoBCV * BCV) + ' a BCV ' + BCV + ')' : '') : (TASA ? ' (' + fmtBS(c.saldoUSD * TASA) + ' a tasa ' + TASA + ')' : '')) +
     '\n\n0412-3185778 / 0414-9536708';
   window.open('https://wa.me/?text=' + encodeURIComponent(msg), '_blank');
 }

@@ -1,7 +1,10 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_documentos.html
-  VERSION: v1.2 (2026-11-04) | build 2026-11-04.5 | requiere Apps Script v28.13, boparts_pdf.js y boparts_clientes.js
+  VERSION: v1.3 (2026-11-07) | build 2026-11-07.2 | requiere Apps Script v28.19
+  v1.3: boton "Cambiar cliente (error de registro)" en cada nota sin factura, solo socios: busca el cliente correcto,
+  pide el motivo y mueve la nota, su deuda en Cobros y la comision de aliado que no corresponde.
+  VERSION anterior: v1.2 (2026-11-04) | build 2026-11-04.5 | requiere Apps Script v28.13, boparts_pdf.js y boparts_clientes.js
   v1.2: boton "Facturar" (solo socios) en las notas sin factura: pide los datos fiscales del cliente y emite la factura
   digital desglosando el IVA que ya trae el precio. Lo confirmado se guarda en la ficha del cliente.
   VERSION anterior: v1.1 (2026-11-02) | build 2026-11-02.8 | requiere Apps Script v28.6 y boparts_pdf.js v1.1
@@ -318,6 +321,22 @@ select option{background:#1E1E1E;color:var(--ink)}
   </div>
 </div>
 
+<!-- v1.3: cambiar el cliente de una nota (solo socios) -->
+<div class="overlay" id="ccOv" onclick="if(event.target===this)cerrarCC()">
+  <div class="sheet">
+    <div class="sheet-title" id="ccTit">Cambiar cliente</div>
+    <div class="cominfo" id="ccSub" style="margin-bottom:12px"></div>
+    <div class="field" style="position:relative"><label>Cliente correcto *</label>
+      <input type="search" id="ccBuscar" placeholder="Nombre, cedula o telefono..." autocomplete="off" oninput="buscarCC()">
+      <div id="ccDrop" style="max-height:220px;overflow:auto"></div>
+    </div>
+    <div class="cominfo" id="ccSel" style="display:none;margin-bottom:10px"></div>
+    <div class="field"><label>Motivo *</label><input type="text" id="ccMotivo" placeholder="Ej: Reinaldo lo registro al cliente equivocado"></div>
+    <button class="tab on" id="ccBtn" style="width:100%;padding:12px;margin-top:8px" onclick="confirmarCC()">Cambiar cliente</button>
+    <button class="tab" style="width:100%;padding:12px;margin-top:8px" onclick="cerrarCC()">Cancelar</button>
+  </div>
+</div>
+
 <div class="toast" id="toast" onclick="this.className='toast'"></div>
 <!-- FAB NAV -->
 <button class="fab" onclick="toggleNav()">
@@ -396,13 +415,13 @@ select option{background:#1E1E1E;color:var(--ink)}
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
-<script src="boparts_pdf.js?v=2026-11-06.2"></script>
-<script src="boparts_sesion.js?v=2026-11-06.2"></script>
-<script src="boparts_clientes.js?v=2026-11-06.2"></script>
+<script src="boparts_pdf.js?v=2026-11-07.2"></script>
+<script src="boparts_sesion.js?v=2026-11-07.2"></script>
+<script src="boparts_clientes.js?v=2026-11-07.2"></script>
 <script>
 var SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
 var SCRIPT_URL_SESION = SCRIPT_URL;
-var APP_VERSION = 'v1.2', VER_SCRIPT = '?';
+var APP_VERSION = 'v1.3', VER_SCRIPT = '?';
 var periodo = '30', DOCS = [], LOGO = '', tBusca = null, pedido = 0;
 cargarLogoPDF(function(d) { LOGO = d; });
 
@@ -477,7 +496,9 @@ function pintar() {
         (x.factura ? '<button class="tab" style="flex:1" onclick="reimprimir(' + i + ',\'factura\')">Factura</button>'
                    : (socio && soySocio() ? '<button class="tab" style="flex:1" onclick="abrirFact(' + i + ')">Facturar</button>' : '')) +
         (socio ? '<a class="tab" style="flex:1;text-align:center;text-decoration:none" href="boparts_devoluciones.html?nota=' + x.nota + '">Devolucion / cambio</a>' : '') +
-      '</div></div></div>';
+      '</div>' +
+      (socio && soySocio() && !x.factura ? '<button class="tab" style="width:100%;margin-top:8px;font-size:12px" onclick="abrirCC(' + i + ')">Cambiar cliente (error de registro)</button>' : '') +
+      '</div></div>';
   }).join('');
 }
 
@@ -564,6 +585,61 @@ function emitirFactura() {
     btn.disabled = false; btn.textContent = 'Emitir factura';
     if (e && e.message !== 'SESION') toast('No se emitio: ' + e.message, 'err');
   });
+}
+
+// ============================================================
+// v1.3 — CAMBIAR EL CLIENTE DE UNA NOTA (error de registro, solo socios)
+// ============================================================
+var CC = null, CC_CLI = null, CC_LISTA = null;
+function abrirCC(i) {
+  var x = DOCS[i]; if (!x) return;
+  CC = x; CC_CLI = null;
+  document.getElementById('ccTit').textContent = 'Cambiar cliente de NE-' + ('000' + x.nota).slice(-4);
+  document.getElementById('ccSub').innerHTML = 'Hoy esta a nombre de <b>' + escHtml(x.cliente || 'sin cliente') + '</b>' + (x.rif ? ' (' + escHtml(x.rif) + ')' : '') +
+    '. Se mueve la nota' + (x.credito ? ', <b>su deuda en Cobros</b>' : '') + ' y se quita la comision de aliado que no corresponda.';
+  document.getElementById('ccBuscar').value = ''; document.getElementById('ccMotivo').value = '';
+  document.getElementById('ccDrop').innerHTML = ''; document.getElementById('ccSel').style.display = 'none';
+  document.getElementById('ccOv').classList.add('open');
+  if (!CC_LISTA) fetch(SCRIPT_URL + '?action=clientes&t=' + Date.now()).then(leerJSON).then(function(d) {
+    CC_LISTA = ((d && d.clientes) || []).map(function(r) { return {nombre:String(r[0] || ''), rif:String(r[1] || ''), tel:String(r[2] || '')}; })
+      .filter(function(c) { return c.nombre && !/^particular$/i.test(c.nombre); });
+  }).catch(function() { CC_LISTA = []; });
+}
+function buscarCC() {
+  var q = String(document.getElementById('ccBuscar').value || '').toLowerCase().trim(), box = document.getElementById('ccDrop');
+  if (q.length < 2 || !CC_LISTA) { box.innerHTML = ''; return; }
+  var r = CC_LISTA.filter(function(c) { return (c.nombre + ' ' + c.rif + ' ' + c.tel).toLowerCase().indexOf(q) >= 0; }).slice(0, 12);
+  box.innerHTML = r.length ? r.map(function(c, j) {
+    return '<div style="padding:9px 10px;border-bottom:1px solid var(--border);cursor:pointer;font-size:13px" onclick="elegirCC(' + CC_LISTA.indexOf(c) + ')"><b>' + escHtml(c.nombre) + '</b>' +
+      '<div style="font-size:11px;color:var(--ink-muted)">' + escHtml(c.rif || 'sin cedula') + (c.tel ? ' · ' + escHtml(c.tel) : '') + '</div></div>';
+  }).join('') : '<div style="padding:9px;font-size:12px;color:var(--ink-muted)">Sin resultados. Si es nuevo, crealo primero en Registrar venta.</div>';
+}
+function elegirCC(k) {
+  CC_CLI = CC_LISTA[k]; if (!CC_CLI) return;
+  document.getElementById('ccDrop').innerHTML = ''; document.getElementById('ccBuscar').value = CC_CLI.nombre;
+  var el = document.getElementById('ccSel'); el.style.display = 'block';
+  el.innerHTML = 'Pasa a: <b>' + escHtml(CC_CLI.nombre) + '</b> (' + escHtml(CC_CLI.rif || 'sin cedula') + ')';
+}
+function cerrarCC() { document.getElementById('ccOv').classList.remove('open'); CC = null; CC_CLI = null; }
+function confirmarCC() {
+  if (!CC) return;
+  if (!CC_CLI) { toast('Elige el cliente correcto de la lista', 'err'); return; }
+  var motivo = document.getElementById('ccMotivo').value.trim();
+  if (motivo.length < 3) { toast('Escribe el motivo', 'err'); return; }
+  var btn = document.getElementById('ccBtn'); btn.disabled = true; btn.textContent = 'Cambiando...';
+  fetch(SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'},
+    body:JSON.stringify({tipo:'cambiar_cliente', idVenta:CC.idVenta, nuevo:{nombre:CC_CLI.nombre, rif:CC_CLI.rif}, motivo:motivo})})
+    .then(leerJSON).then(function(d) {
+      btn.disabled = false; btn.textContent = 'Cambiar cliente';
+      if (!d || !d.ok) throw new Error(d && d.error ? d.error : 'no se cambio');
+      cerrarCC();
+      toast(d.sinCambio ? 'Ya estaba a nombre de ese cliente' : 'NE-' + ('000' + d.nota).slice(-4) + ' ahora es de ' + d.a +
+        (d.cargos ? ' · deuda movida' : '') + (d.comisionesQuitadas ? ' · comision quitada' : '') + (d.comisionPagada ? ' · OJO: tenia comision ya pagada' : ''), 'ok');
+      cargar();
+    }).catch(function(e) {
+      btn.disabled = false; btn.textContent = 'Cambiar cliente';
+      if (e && e.message !== 'SESION') toast('No se cambio: ' + e.message, 'err');
+    });
 }
 
 function alEntrar() { cargar(); }

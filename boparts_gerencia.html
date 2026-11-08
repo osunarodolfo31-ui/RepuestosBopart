@@ -1,7 +1,10 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_gerencia.html
-  VERSION: v3.6 (2026-11-04) | build 2026-11-06.2 | requiere Apps Script v28.11 y boparts_clientes.js
+  VERSION: v3.7 (2026-11-07) | build 2026-11-07.2 | requiere Apps Script v28.18
+  v3.7: la ficha del cliente activa "Cuenta en $ Ref BCV". El resumen suma el DIFERENCIAL CAMBIARIO de esas
+  cuentas (ganancia o perdida entre lo que entro a tasa de trabajo y la parte de la nota que se cancelo).
+  VERSION anterior: v3.6 (2026-11-04) | build 2026-11-04.3 | requiere Apps Script v28.11 y boparts_clientes.js
   v3.6: la ficha del cliente edita cedula/RIF (validado), telefono y direccion por partes. Region predeterminada
   (estado y ciudad) editable arriba de la lista de clientes.
   VERSION anterior: v3.5 (2026-11-02) | build 2026-11-02.8 | requiere Apps Script v28.7
@@ -526,8 +529,8 @@ select option{background:#1E1E1E;color:var(--ink)}
   </div>
 </div>
 
-<script src="boparts_sesion.js?v=2026-11-06.2"></script>
-<script src="boparts_clientes.js?v=2026-11-06.2"></script>
+<script src="boparts_sesion.js?v=2026-11-07.2"></script>
+<script src="boparts_clientes.js?v=2026-11-07.2"></script>
 <script>
 
 
@@ -540,7 +543,7 @@ function sellarVersion(d) {
   if (t) t.textContent = 'app ' + APP_VERSION + ' \u00b7 script ' + VER_SCRIPT;
   return d;
 }
-var APP_VERSION = 'v3.6';
+var APP_VERSION = 'v3.7';
 var TASA = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
 var periodo = 'hoy', DATA = null;
 
@@ -980,7 +983,8 @@ function cargarClientes() {
               aliado:String(r[9] || '').toUpperCase() === 'SI', pct:num(r[10]), negocio:r[11] || '',
               // v3.6: direccion por partes
               dir:r[3] || '', correo:r[12] || '', estado:r[13] || '', ciudad:r[14] || '', sector:r[15] || '',
-              calle:r[16] || '', local:r[17] || '', referencia:r[18] || ''};
+              calle:r[16] || '', local:r[17] || '', referencia:r[18] || '',
+              cuentaBcv:String(r[19] || '').toUpperCase() === 'SI'};       // v3.7
     }).filter(function(x) { return x.nombre; });
     STATS = {};
     (st && st.clientes ? st.clientes : []).forEach(function(s) { STATS[s.cliente.trim().toUpperCase()] = s; });
@@ -1041,6 +1045,10 @@ function pintarClientes() {
           '<div><label style="font-size:11px">Credito</label><select id="cr-' + idSafe(c.nombre) + '"><option value="NO"' + (c.credito ? '' : ' selected') + '>No</option><option value="SI"' + (c.credito ? ' selected' : '') + '>Si</option></select></div>' +
           '<div><label style="font-size:11px">Limite USD</label><input type="number" step="1" id="lm-' + idSafe(c.nombre) + '" value="' + (c.limite || '') + '" placeholder="0"></div>' +
           '<div><label style="font-size:11px">Dias</label><input type="number" step="1" id="di-' + idSafe(c.nombre) + '" value="' + (c.dias || '') + '" placeholder="0" style="width:64px"></div>' +
+        '</div>' +
+        // v3.7: cuenta en $ Ref BCV — la deuda queda en $ BCV del dia de la venta y se cobra al BCV del dia del pago
+        '<div class="cfg" style="margin-top:8px">' +
+          '<div style="flex:1"><label style="font-size:11px">Cuenta en $ Ref BCV</label><select id="bc-' + idSafe(c.nombre) + '"><option value="NO"' + (c.cuentaBcv ? '' : ' selected') + '>No: en dolares de lista</option><option value="SI"' + (c.cuentaBcv ? ' selected' : '') + '>Si: en $ Ref BCV</option></select></div>' +
         '</div>' +
         // v2.6: el aliado es este mismo cliente. Su cedula es lo que une la comision con la deuda.
         '<div class="cfg" style="margin-top:8px">' +
@@ -1103,6 +1111,8 @@ function guardarCli(nombre) {
   var ali = document.getElementById('al-' + id).value === 'SI';
   var pct = num(document.getElementById('pc-' + id).value);
   var neg = document.getElementById('ng-' + id).value.trim();
+  var bcvSel = document.getElementById('bc-' + id), ctaBcv = bcvSel ? bcvSel.value === 'SI' : undefined;
+  if (ctaBcv && !c.cuentaBcv && !confirm('Desde hoy las notas pendientes de ' + c.nombre + ' se cobran en $ Ref BCV (cada una al BCV del dia en que se vendio) y los abonos se descuentan al BCV del dia del pago. ¿Activar?')) return;
   // v3.6: cedula/RIF, telefono y direccion
   var vr = validarRif(document.getElementById('rf-' + id).value);
   if (!vr.ok) { toast('Cedula/RIF: ' + vr.error, 'err'); return; }
@@ -1118,7 +1128,7 @@ function guardarCli(nombre) {
   if (ali && !pct) { toast('Ponle el porcentaje de comision', 'err'); return; }
   fetch(SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'},
     body:JSON.stringify({tipo:'cliente', nombre:c.nombre, rif:c.ced, rifAnterior:rifAnt, tel:c.tel, credito:cred, limite:lim, dias:dias,
-                         aliado:ali, comisionPct:pct, negocio:neg, fecha:new Date().toLocaleDateString('es-VE'),
+                         aliado:ali, comisionPct:pct, negocio:neg, fecha:new Date().toLocaleDateString('es-VE'), cuentaBcv:ctaBcv,
                          estado:dd.estado, ciudad:dd.ciudad, sector:dd.sector, calle:dd.calle, local:dd.local, referencia:dd.referencia})})
     .then(function(r) { return r.text(); })
     .then(function(t) { var d; try { d = JSON.parse(t); } catch (e) { throw new Error('respuesta rara'); }
@@ -1128,6 +1138,7 @@ function guardarCli(nombre) {
       c = c._ref; c.ced = srv.rif || vr.valor; c.tel = srv.tel || telN;
       ['dir','estado','ciudad','sector','calle','local','referencia'].forEach(function(k) { if (srv[k] !== undefined) c[k] = srv[k]; });
       c.credito = (srv.credito !== undefined) ? srv.credito : cred;
+      if (srv.cuentaBcv !== undefined) c.cuentaBcv = srv.cuentaBcv; else if (ctaBcv !== undefined) c.cuentaBcv = ctaBcv;
       c.limite = (srv.limite !== undefined) ? srv.limite : lim;
       c.dias = (srv.dias !== undefined) ? srv.dias : dias;
       c.aliado = (srv.aliado !== undefined) ? srv.aliado : ali;
@@ -1149,11 +1160,14 @@ function cargar() {
   var r = rango();
   document.getElementById('cuerpo').innerHTML = '<div class="cart-empty">Cargando...</div>';
   document.getElementById('periodoLbl').textContent = fechaES(r.d1) + ' a ' + fechaES(r.d2);
+  // v3.7: el diferencial cambiario de las cuentas en $ BCV va en su propia llamada (no pesa sobre action=ventas)
+  var difP = fetch(SCRIPT_URL + '?action=cxc_diferencial&desde=' + r.d1 + '&hasta=' + r.d2 + '&t=' + Date.now())
+    .then(leerJSON).catch(function() { return null; });
   fetch(SCRIPT_URL + '?action=ventas&desde=' + r.d1 + '&hasta=' + r.d2 + '&t=' + Date.now())
     .then(leerJSON)
     .then(function(d) {
       if (!d || !d.ok) throw new Error(d && d.error ? d.error : 'sin datos');
-      DATA = d; render(r);
+      return difP.then(function(df) { d.diferencial = (df && df.ok) ? df : {total:0, items:[]}; DATA = d; render(r); });
     })
     .catch(function(e) {
       document.getElementById('cuerpo').innerHTML = '<div class="section"><div class="cart-empty" style="color:var(--red)">No se pudo cargar: ' + escHtml(e.message) + '</div></div>';
@@ -1184,7 +1198,8 @@ function render(r) {
   });
   var comUSD = TASA ? comisionBs / TASA : 0, aliUSD = TASA ? aliadoBs / TASA : 0;
   var gastosUSD = 0; G.forEach(function(g) { g[3] = num(g[3]); g[4] = num(g[4]); gastosUSD += g[3]; });
-  var resultado = util - comUSD - aliUSD - gastosUSD;
+  var difUSD = DATA.diferencial ? Number(DATA.diferencial.total) || 0 : 0, difN = DATA.diferencial ? DATA.diferencial.items.length : 0;
+  var resultado = util - comUSD - aliUSD - gastosUSD + difUSD;
   var totalRef = vend || vendVentas;
 
   var h = '';
@@ -1194,7 +1209,8 @@ function render(r) {
     kpi('Costo de lo vendido', usd(costo), unidades + ' unidades') +
     kpi('Comisiones', usd(comUSD + aliUSD), 'punto ' + usd(comUSD) + ' · aliados ' + usd(aliUSD)) +
     kpi('Gastos del periodo', usd(gastosUSD), G.length + ' registros') +
-    kpi('Resultado', usd(resultado), 'utilidad - comisiones - gastos', resultado >= 0 ? 'pos' : 'neg') +
+    (difN ? kpi('Diferencial cambiario', (difUSD >= 0 ? '+' : '') + usd(difUSD), difN + ' abono(s) de cuentas en $ Ref BCV', difUSD >= 0 ? 'pos' : 'neg') : '') +
+    kpi('Resultado', usd(resultado), 'utilidad - comisiones - gastos' + (difN ? ' ± diferencial' : ''), resultado >= 0 ? 'pos' : 'neg') +
     kpi('Ticket promedio', tickets ? usd(totalRef / tickets) : '$0.00', unidades && tickets ? (unidades / tickets).toFixed(1) + ' items por venta' : '') +
     '</div>';
   if (Lsoc.length || Vsoc.length) {

@@ -1,5 +1,23 @@
 # CHANGELOG — Repuesto BoParts
 
+## Apps Script v28.19 + documentos v1.3 — build 2026-11-07.2 — cambiar el cliente de una nota
+
+- POST tipo=cambiar_cliente (solo SOCIO) {idVenta, nuevo:{nombre, rif}, motivo}.
+- Mueve VENTAS Z/AA, los CARGO de CXC_MOV de esa venta (y recalcula o borra su $ BCV segun el cliente nuevo).
+- Borra la comision de aliado PENDIENTE de esa venta y limpia VENTAS S..V. Si ya estaba pagada, no la toca y avisa.
+- Se niega si la nota tiene factura (se anula con nota de credito) o abonos dirigidos a ella.
+- Todo queda en la hoja CAMBIOS_CLIENTE (quien, de, a, motivo, comision borrada completa).
+- Documentos: boton "Cambiar cliente (error de registro)" en cada nota sin factura, solo socios.
+
+## Apps Script v28.18 + cobros v3.6 + gerencia v3.7 — build 2026-11-07.1 — cuentas por cobrar en $ Ref BCV
+
+- CLIENTES T CUENTA_BCV / U BCV_DESDE. Gerencia > Clientes: "Cuenta en $ Ref BCV".
+- Cada nota a credito de esos clientes vale en $ BCV del dia de la venta (CXC_MOV S USD_BCV, T BCV; las viejas se
+  calculan con VENTAS AI). Abonos desde la activacion: Bs / BCV del dia (en dolares: dolares x tasa / BCV).
+- Por dentro: la nota sigue en dolares de trabajo; se cancela en proporcion. Diferencial cambiario = lo que entro
+  (H) - la parte de la nota cancelada. action=cxc_diferencial; Gerencia lo suma al resultado.
+- Cobros: saldo, notas, "Pagar esta", vista previa y WhatsApp en $ Ref BCV con Bs al BCV de hoy.
+
 ## Apps Script v28.17 + demanda v10.1 — build 2026-11-06.2 — mapa de calor y dos clientes pidiendo lo mismo
 
 - Lo mismo, mismo vendedor, en 15 minutos: ya no se descarta. El servidor responde confirmar:true y la pantalla

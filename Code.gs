@@ -1,6 +1,21 @@
 /**
  * Repuesto BoParts — Code.gs
- * VERSION: v28.17 (2026-11-06) | demanda: mapa de calor y dos clientes pidiendo lo mismo
+ * VERSION: v28.19 (2026-11-07) | cambiar el cliente de una nota
+ *
+ * v28.19 — tipo=cambiar_cliente (solo socios): mueve la nota al cliente correcto en VENTAS, CXC_MOV (y su $ BCV si el
+ *   nuevo cliente lleva cuenta en $ BCV) y quita la comision de aliado que no corresponde. Constancia en
+ *   CAMBIOS_CLIENTE. No se permite con factura ni con abonos dirigidos a la nota.
+ *
+ * VERSION anterior: v28.18 (2026-11-07) | cuentas por cobrar en $ Ref BCV
+ *
+ * v28.18 — CUENTA EN $ REF BCV por cliente (CLIENTES T CUENTA_BCV, U BCV_DESDE). Cada nota a credito queda en $ BCV
+ *   del dia de la venta (Bs / BCV; CXC_MOV S USD_BCV, T BCV). Cada abono desde la activacion se convierte con el
+ *   BCV del dia del pago y se descuenta en $ BCV. Por dentro la nota sigue valiendo sus dolares de trabajo: lo que
+ *   entra de verdad (H, a tasa de trabajo) menos la parte de la nota que se cancelo es el DIFERENCIAL CAMBIARIO
+ *   (ganancia si sube el BCV, perdida si la calle se separa). action=cxc_diferencial lo resume para Gerencia.
+ *   Los abonos de antes de activar la cuenta siguen contando en dolares de trabajo.
+ *
+ * VERSION anterior: v28.17 (2026-11-06) | demanda: mapa de calor y dos clientes pidiendo lo mismo
  *
  * v28.17 — Lo mismo registrado por el mismo vendedor en 15 minutos ya no se descarta: se devuelve confirmar:true y
  *   la pantalla pregunta si es otra persona (otraPersona:true lo guarda). El analisis trae por grupo, modelo y
@@ -504,16 +519,18 @@ var U_NOMBRE = 1, U_ROL = 2, U_ACTIVO = 3, U_PIN_NUEVO = 4, U_HASH = 5, U_TOKEN 
 
 // CLIENTES: A NOMBRE, B RIF, C TEL, D DIR, E NOTA, F CREADO, G CREDITO, H LIMITE, I DIAS,
 //           J ALIADO (SI/NO), K COMISION_PCT, L NEGOCIO     <- las tres ultimas, v22
-var CLI_COLS = 19, CLI_ALIADO = 10, CLI_PCT = 11, CLI_NEGOCIO = 12;
+var CLI_COLS = 21, CLI_ALIADO = 10, CLI_PCT = 11, CLI_NEGOCIO = 12;
 // v28.11 — M CORREO (v28.5) y la direccion por partes. D DIRECCION queda como la direccion COMPLETA, armada de las
 // partes: es la que leen la nota, la factura y todo lo viejo. La referencia no entra en D (no es domicilio fiscal).
 var CLI_CORREO = 13, CLI_ESTADO = 14, CLI_CIUDAD = 15, CLI_SECTOR = 16, CLI_CALLE = 17, CLI_LOCAL = 18, CLI_REF = 19;
+// v28.18 — T CUENTA_BCV (SI = su deuda se lleva en $ Ref BCV) y U BCV_DESDE (cuando se activo)
+var CLI_BCV = 20, CLI_BCV_DESDE = 21;
 
 // Se asegura de que CLIENTES tenga las tres columnas nuevas, con su encabezado.
 function prepararClientes_(ss) {
   var sh = ss.getSheetByName('CLIENTES');
   if (!sh) return null;
-  var cab = ['ALIADO', 'COMISION_PCT', 'NEGOCIO', 'CORREO', 'ESTADO', 'CIUDAD', 'SECTOR', 'CALLE', 'LOCAL', 'REFERENCIA'];
+  var cab = ['ALIADO', 'COMISION_PCT', 'NEGOCIO', 'CORREO', 'ESTADO', 'CIUDAD', 'SECTOR', 'CALLE', 'LOCAL', 'REFERENCIA', 'CUENTA_BCV', 'BCV_DESDE'];
   for (var i = 0; i < cab.length; i++) {
     var col = CLI_ALIADO + i;
     if (!String(sh.getRange(1, col).getValue() || '').trim()) sh.getRange(1, col).setValue(cab[i]);
@@ -559,7 +576,7 @@ function listaAliados_(ss) {
 var PERMISOS_GET = {
   config:'VENDEDOR', nextNota:'VENDEDOR', nextCot:'VENDEDOR', nextFactura:'VENDEDOR', nota:'VENDEDOR',
   apartados:'VENDEDOR', proveedores:'VENDEDOR', stock:'VENDEDOR', conteos:'VENDEDOR', clientes:'VENDEDOR',
-  cxc:'VENDEDOR', productos:'VENDEDOR', catalogo:'VENDEDOR', metodos:'VENDEDOR', equivalencias:'VENDEDOR', cuentas:'VENDEDOR',
+  cxc:'VENDEDOR', cxc_diferencial:'SOCIO', productos:'VENDEDOR', catalogo:'VENDEDOR', metodos:'VENDEDOR', equivalencias:'VENDEDOR', cuentas:'VENDEDOR',
   tareas:'VENDEDOR',
   producto:'SOCIO',
   ventas:'SOCIO', socios:'SOCIO', cxp:'SOCIO', cliente_stats:'SOCIO', compras:'SOCIO', diag:'SOCIO',
@@ -573,7 +590,7 @@ var PERMISOS_POST = {
   tarea_marcar:'VENDEDOR', tarea_propia:'VENDEDOR', demanda_estado:'VENDEDOR',
   costeo:'SOCIO', cxp_abono:'SOCIO', conteo_revision:'SOCIO', devolucion:'SOCIO', apartado_cerrar:'SOCIO',
   tasa:'SOCIO', bcv_auto:'SOCIO', socio:'SOCIO', liquidar_aliado:'SOCIO', precio:'SOCIO', tarea_def:'SOCIO',
-  anular_venta:'SOCIO', mov_cuenta:'SOCIO', anular_gasto:'SOCIO', consumo_interno:'SOCIO', region:'SOCIO'
+  anular_venta:'SOCIO', mov_cuenta:'SOCIO', anular_gasto:'SOCIO', consumo_interno:'SOCIO', region:'SOCIO', cambiar_cliente:'SOCIO'
 };
 
 // v27 — FALLA CERRADO (auditoria #5). Antes, si CONFIG no se podia leer o B15 traia cualquier cosa
@@ -803,7 +820,7 @@ function claveDePost_(data) {
 // OJO: esta constante es lo que ven las apps en el menu. Se habia quedado en v21.4 mientras el
 // encabezado ya decia v24, asi que el sello de version — que existe justamente para saber si lo
 // desplegado es lo que crees — estaba mintiendo. Cada version nueva se cambia AQUI tambien.
-var VERSION_SCRIPT = 'v28.17';
+var VERSION_SCRIPT = 'v28.19';
 
 function json_(obj) {
   // La version viaja en cada respuesta: es la forma rapida de saber si lo desplegado es lo que crees
@@ -1032,7 +1049,10 @@ function rutearGet_(e) {
   }
   if (e.parameter.action === 'cxc') {
     var ss2 = SpreadsheetApp.getActiveSpreadsheet();
-    return json_({ok:true, tasa:leerTasa_(ss2), clientes:estadoCxc_(ss2, e.parameter.cliente || '')});
+    return json_({ok:true, tasa:leerTasa_(ss2), bcv:Number(leerConfig_(ss2).bcv) || 0, clientes:estadoCxc_(ss2, e.parameter.cliente || '')});
+  }
+  if (e.parameter.action === 'cxc_diferencial') {
+    return json_(diferencialCxc_(SpreadsheetApp.getActiveSpreadsheet(), e.parameter.desde || '', e.parameter.hasta || ''));
   }
   return json_({ok:false});
 }
@@ -1318,6 +1338,13 @@ function doPost(e) {
       return json_({ok:true, tipo:'region', estado:est, ciudad:ciu});
     }
 
+    // ---- CAMBIAR EL CLIENTE DE UNA NOTA (v28.19) ----
+    if (data.tipo === 'cambiar_cliente') {
+      var lockCC = LockService.getScriptLock(); lockCC.waitLock(20000);
+      try { return json_(cambiarClienteNota_(ss, data, quien)); }
+      finally { SpreadsheetApp.flush(); lockCC.releaseLock(); }
+    }
+
     // ---- ANULAR GASTO y CONSUMO INTERNO (v28.8) ----
     if (data.tipo === 'anular_gasto') {
       var lockAG = LockService.getScriptLock(); lockAG.waitLock(20000);
@@ -1545,9 +1572,13 @@ function guardarVenta_(ss, data) {
   // Cargo en cuentas por cobrar (v9)
   if (esCredito) {
     var cx = hojaCxc_(ss);
+    // v28.18 — cliente con cuenta en $ BCV: la deuda queda fija en $ BCV del dia de la venta (Bs / BCV)
+    var bcvCli = clienteBcv_(ss, data.cliente.rif), bcvV = Number(data.tasaBCV) || Number(leerConfig_(ss).bcv) || 0;
+    var credBcv = (bcvCli && bcvV) ? round2_((Number(data.creditoUSD) || 0) * (Number(data.tasa) || 0) / bcvV) : '';
     cx.appendRow([
       fechaV, data.hora, data.cliente.nombre, data.cliente.rif||'', 'CARGO', idVenta, '',
-      Number(data.creditoUSD)||0, '', '', Number(data.tasa)||0, 'Credito', '', 0, data.vendedor||'', data.notas||'', data.productos||''
+      Number(data.creditoUSD)||0, '', '', Number(data.tasa)||0, 'Credito', '', 0, data.vendedor||'', data.notas||'', data.productos||'',
+      '', credBcv, credBcv === '' ? '' : bcvV
     ]);
     cx.getRange(cx.getLastRow(), 7).setValue(numNota);
     formatoFecha_(cx, cx.getLastRow(), 1);
@@ -1673,7 +1704,11 @@ function hojaCxc_(ss) {
     sh.setFrozenRows(1);
   }
   // v28.14 — R APLICA_A: el ID_VENTA de la nota a la que va un abono dirigido
-  try { if (!String(sh.getRange(1, 18).getValue() || '').trim()) sh.getRange(1, 18).setValue('APLICA_A'); } catch (eR) {}
+  // v28.18 — S USD_BCV (el monto en $ Ref BCV) y T BCV (la tasa usada), solo para clientes con cuenta en $ BCV
+  try {
+    var cabX = sh.getRange(1, 18, 1, 3).getValues()[0];
+    ['APLICA_A', 'USD_BCV', 'BCV'].forEach(function(t, i) { if (!String(cabX[i] || '').trim()) sh.getRange(1, 18 + i).setValue(t); });
+  } catch (eR) {}
   return sh;
 }
 
@@ -1693,11 +1728,166 @@ function abonoYaRegistrado_(cx, idAbono) {
 }
 
 // v27 — el saldo de la cuenta del abono: la de esa cedula si viene; si no, la primera.
-function saldoDeCuenta_(est, rif) {
-  if (!est || !est.length) return 0;
+// ============================================================
+// v28.19 — CAMBIAR EL CLIENTE DE UNA NOTA (error de registro). Solo socios.
+// ============================================================
+// Mueve la nota completa al cliente correcto: VENTAS (Z cliente, AA cedula), su cargo en CXC_MOV (si fue a credito)
+// y la comision de aliado que haya generado (se quita: era del aliado del cliente equivocado). Queda constancia en
+// CAMBIOS_CLIENTE. No se permite si la nota tiene factura (eso se corrige con nota de credito) o si ya tiene
+// abonos dirigidos a ella (esos pagos son del cliente que la pago: hay que verlo a mano).
+function cambiarClienteNota_(ss, d, quien) {
+  var idV = String(d.idVenta || '').trim(); if (!idV) throw rechazo_('Falta la venta');
+  var nuevo = d.nuevo || {}, nom = String(nuevo.nombre || '').trim();
+  if (!nom) throw rechazo_('Elige el cliente correcto');
+  var motivo = String(d.motivo || '').trim(); if (motivo.length < 3) throw rechazo_('Escribe el motivo');
+  var vr = validarRif_(nuevo.rif || ''); if (!vr.ok) throw rechazo_('Cedula/RIF del cliente nuevo: ' + vr.error);
+  var rifN = vr.valor;
+  var v = ventaPorId_(ss, idV); if (!v) throw rechazo_('No se encontro la venta');
+  var sh = ss.getSheetByName(SH_VENTAS);
+  var row = sh.getRange(v.fila, 1, 1, Math.max(sh.getLastColumn(), 37)).getValues()[0];
+  var nomA = String(row[25] || ''), rifA = String(row[26] || '');
+  if (String(row[35] || '').trim()) throw rechazo_('Esa nota tiene la factura ' + row[35] + ': una factura no se cambia de cliente, se anula con nota de credito.');
+  if (soloDigitos_(rifA) && soloDigitos_(rifA) === soloDigitos_(rifN) && nomA.trim().toUpperCase() === nom.toUpperCase())
+    return {ok:true, tipo:'cambiar_cliente', sinCambio:true};
+  var cx = ss.getSheetByName(SH_CXC), filasCargo = [], dirigidos = 0;
+  if (cx && cx.getLastRow() >= 2) {
+    cx.getRange(2, 1, cx.getLastRow() - 1, Math.max(18, Math.min(cx.getLastColumn(), 20))).getValues().forEach(function(r, i) {
+      if (String(r[4]).toUpperCase() === 'CARGO' && String(r[5]).trim() === idV) filasCargo.push(i + 2);
+      if (String(r[4]).toUpperCase() === 'ABONO' && String(r[17] || '').trim() === idV) dirigidos++;
+    });
+  }
+  if (dirigidos) throw rechazo_('Esa nota ya tiene ' + dirigidos + ' abono(s) dirigido(s). Revisalo a mano: esos pagos los hizo alguien.');
+  // 1) Venta
+  sh.getRange(v.fila, 26, 1, 2).setValues([[nom, rifN]]);
+  // 2) Cuenta por cobrar: el cargo pasa al cliente correcto (y su $ BCV si el nuevo lleva cuenta en $ BCV)
+  var bcvN = clienteBcv_(ss, rifN);
+  filasCargo.forEach(function(f) {
+    cx.getRange(f, 3, 1, 2).setValues([[nom, rifN]]);
+    if (bcvN) {
+      var r = cx.getRange(f, 1, 1, 20).getValues()[0];
+      if (!Number(r[18])) {
+        var bcvV = Number(row[34]) || 0, tasaT = Number(r[10]) || 0;
+        if (bcvV && tasaT) cx.getRange(f, 19, 1, 2).setValues([[round2_((Number(r[7]) || 0) * tasaT / bcvV), bcvV]]);
+      }
+    } else {
+      cx.getRange(f, 19, 1, 2).setValues([['', '']]);
+    }
+  });
+  // 3) Comision de aliado de esa venta: era del cliente equivocado. Si ya se pago, no se toca y se avisa.
+  var comQuitada = 0, comPagada = false, kc = ss.getSheetByName('COMISIONES');
+  if (kc && kc.getLastRow() >= 2) {
+    var kv = kc.getRange(2, 1, kc.getLastRow() - 1, 12).getValues();
+    for (var i = kv.length - 1; i >= 0; i--) {
+      if (String(kv[i][11]).trim() !== idV) continue;
+      if (/PAGAD|LIQUID/i.test(String(kv[i][9]))) { comPagada = true; continue; }
+      hojaAp_(ss, 'CAMBIOS_CLIENTE', ['FECHA','QUIEN','ID_VENTA','NOTA','DE','DE_RIF','A','A_RIF','MOTIVO','DETALLE'])
+        .appendRow([new Date(), (quien && quien.nombre) || '', idV, v.numNota, nomA, rifA, nom, rifN, 'comision quitada',
+                    JSON.stringify(kv[i].map(function(x) { return esFecha_(x) ? iso_(x) : x; }))]);
+      kc.deleteRow(i + 2); comQuitada++;
+    }
+  }
+  if (comQuitada && !comPagada) sh.getRange(v.fila, 19, 1, 4).setValues([['', '', 0, 0]]);
+  hojaAp_(ss, 'CAMBIOS_CLIENTE', ['FECHA','QUIEN','ID_VENTA','NOTA','DE','DE_RIF','A','A_RIF','MOTIVO','DETALLE'])
+    .appendRow([new Date(), (quien && quien.nombre) || '', idV, v.numNota, nomA, rifA, nom, rifN, motivo,
+                'cargos CXC movidos: ' + filasCargo.length + (comQuitada ? ' · comisiones quitadas: ' + comQuitada : '') + (comPagada ? ' · OJO: comision ya pagada, no se toco' : '')]);
+  return {ok:true, tipo:'cambiar_cliente', nota:v.numNota, de:nomA, a:nom, cargos:filasCargo.length, comisionesQuitadas:comQuitada, comisionPagada:comPagada};
+}
+
+// ============================================================
+// v28.18 — CUENTAS EN $ REF BCV
+// ============================================================
+// Clientes marcados en CLIENTES T = SI. Devuelve {digitosCedula: {desde:'yyyy-MM-dd'}}.
+function clientesBcv_(ss) {
+  var out = {}, sh = ss.getSheetByName('CLIENTES');
+  if (!sh || sh.getLastRow() < 2 || sh.getLastColumn() < CLI_BCV) return out;
+  sh.getRange(2, 1, sh.getLastRow() - 1, CLI_BCV_DESDE).getValues().forEach(function(r) {
+    if (String(r[CLI_BCV - 1] || '').trim().toUpperCase() !== 'SI') return;
+    var dig = soloDigitos_(r[1]); if (dig.length < 5) return;
+    out[dig] = {desde:iso_(r[CLI_BCV_DESDE - 1]) || '2000-01-01'};
+  });
+  return out;
+}
+function clienteBcv_(ss, rif) { var dig = soloDigitos_(rif); return dig.length >= 5 ? (clientesBcv_(ss)[dig] || null) : null; }
+// BCV con que se hizo cada venta (VENTAS X = ID, AI = TASA_BCV), para las notas viejas que no guardaron su $ BCV.
+function bcvDeVentas_(ss) {
+  var out = {}, sh = ss.getSheetByName(SH_VENTAS);
+  if (!sh || sh.getLastRow() < 2) return out;
+  sh.getRange(2, 24, sh.getLastRow() - 1, 12).getValues().forEach(function(r) {
+    var id = String(r[0] || '').trim(); if (id) out[id] = Number(r[11]) || 0;
+  });
+  return out;
+}
+// Reparte los abonos de una cuenta en $ BCV. Cada nota tiene dos valores: lo que el cliente debe en $ BCV
+// (montoBCV, fijo del dia de la venta) y lo que vale por dentro en dolares de trabajo (montoUSD). Se lleva la
+// FRACCION que falta de cada nota: un abono en $ BCV la reduce en abono/montoBCV; un abono de antes de activar la
+// cuenta (en dolares de trabajo) la reduce en abono/montoUSD. Primero el abono dirigido a su nota, despues las mas viejas.
+function cuentaBcvEstado_(c, cb, bcvVentas) {
+  c.notas.forEach(function(n) {
+    var m = n.mov, tasaT = m.tasa || 0, bcvV = m.bcv || bcvVentas[n.idVenta] || 0;
+    n.montoBCV = m.usdBcv ? round2_(m.usdBcv) : (tasaT && bcvV ? round2_(n.montoUSD * tasaT / bcvV) : n.montoUSD);
+    n.bcvVenta = m.usdBcv ? m.bcv : bcvV;
+    n.resta = 1;                                   // fraccion de la nota que falta por pagar
+  });
+  var aFavorBCV = 0, aFavorUSD = 0, difTotal = 0;
+  c.movs.forEach(function(m) {
+    if (m.tipo !== 'ABONO') return;
+    var enBcv = !!m.usdBcv && (!cb.desde || m.fechaIso >= cb.desde);
+    var monto = enBcv ? m.usdBcv : m.montoUSD, canceladoUSD = 0;
+    var dest = null;
+    if (m.aplicaA) dest = c.notas.filter(function(n) { return String(n.idVenta).trim() === m.aplicaA; })[0];
+    else if (m.notaDev) dest = c.notas.filter(function(n) { return String(n.nota) === m.notaDev; })[0];
+    var orden = (dest ? [dest] : []).concat(c.notas.filter(function(n) { return n !== dest; }));
+    orden.forEach(function(n) {
+      if (monto <= 0.0001 || n.resta <= 0.00001) return;
+      var base = enBcv ? n.montoBCV : n.montoUSD; if (!(base > 0)) return;
+      var cabe = n.resta * base, toma = Math.min(cabe, monto), frac = toma / base;
+      n.resta -= frac; monto -= toma; canceladoUSD += frac * n.montoUSD;
+      if (!m.notaAplicada) m.notaAplicada = n.nota;
+    });
+    if (monto > 0.0001) { if (enBcv) aFavorBCV += monto; else aFavorUSD += monto; }
+    if (enBcv) {
+      m.difUSD = round2_(m.montoUSD - canceladoUSD - (monto > 0.0001 ? monto * (m.bcv || 0) / (m.tasa || 1) : 0));
+      difTotal += m.difUSD;
+    }
+  });
+  var pendUSD = 0, pendBCV = 0;
+  c.notas.forEach(function(n) {
+    n.resta = Math.max(0, n.resta);
+    n.pendienteUSD = round2_(n.montoUSD * n.resta);
+    n.pendienteBCV = round2_(n.montoBCV * n.resta);
+    n.abonadoUSD = round2_(n.montoUSD - n.pendienteUSD);
+    n.estado = n.pendienteBCV <= 0.009 ? 'PAGADA' : (n.resta < 0.9999 ? 'PARCIAL' : 'PENDIENTE');
+    if (n.estado === 'PAGADA') { n.pendienteUSD = 0; n.pendienteBCV = 0; }
+    pendUSD += n.pendienteUSD; pendBCV += n.pendienteBCV;
+    delete n.resta;
+  });
+  c.cargosUSD = round2_(c.cargosUSD); c.abonosUSD = round2_(c.abonosUSD);
+  c.cuentaBcv = true; c.bcvDesde = cb.desde;
+  c.saldoBCV = round2_(pendBCV - aFavorBCV);
+  c.saldoUSD = round2_(pendUSD - aFavorUSD);                 // por dentro, en dolares de trabajo (limites, comisiones)
+  c.diferencialUSD = round2_(difTotal);
+}
+// Diferencial cambiario de las cuentas en $ BCV entre dos fechas (yyyy-MM-dd), para Gerencia.
+function diferencialCxc_(ss, desde, hasta) {
+  var items = [], total = 0;
+  estadoCxc_(ss, '').forEach(function(c) {
+    if (!c.cuentaBcv) return;
+    c.movs.forEach(function(m) {
+      if (m.difUSD === undefined) return;
+      if ((desde && m.fechaIso < desde) || (hasta && m.fechaIso > hasta)) return;
+      items.push({fecha:m.fechaIso, cliente:c.cliente, montoUSD:m.montoUSD, usdBcv:m.usdBcv, bcv:m.bcv, tasa:m.tasa, difUSD:m.difUSD});
+      total += m.difUSD;
+    });
+  });
+  return {ok:true, total:round2_(total), items:items};
+}
+
+function saldoDeCuenta_(est, rif, campo) {
+  campo = campo || 'saldoUSD';
+  if (!est || !est.length) return campo === 'saldoUSD' ? 0 : null;
   var dig = soloDigitos_(rif);
-  if (dig.length >= 5) for (var i = 0; i < est.length; i++) if (soloDigitos_(est[i].rif) === dig) return est[i].saldoUSD;
-  return est[0].saldoUSD;
+  if (dig.length >= 5) for (var i = 0; i < est.length; i++) if (soloDigitos_(est[i].rif) === dig) return est[i][campo] === undefined ? null : est[i][campo];
+  return est[0][campo] === undefined ? null : est[0][campo];
 }
 
 function guardarAbono_(ss, d) {
@@ -1710,7 +1900,7 @@ function guardarAbono_(ss, d) {
     // Ya estaba. No se escribe nada y se devuelve el saldo real, con aviso para que la pantalla
     // pueda decirlo en vez de dejar creer que se registro un segundo abono.
     var estR = estadoCxc_(ss, d.cliente);
-    return {saldoUSD:saldoDeCuenta_(estR, d.rif), repetido:true};
+    return {saldoUSD:saldoDeCuenta_(estR, d.rif), saldoBCV:saldoDeCuenta_(estR, d.rif, 'saldoBCV'), repetido:true};
   }
 
   // v28.14 — ABONO DIRIGIDO: el cliente paga una nota en particular. Tiene que ser una nota de ese cliente con
@@ -1723,13 +1913,25 @@ function guardarAbono_(ss, d) {
     });
     if (!nd) throw rechazo_('Esa nota no esta en la cuenta de ' + d.cliente);
     if (nd.pendienteUSD <= 0.009) throw rechazo_('La nota ' + nd.nota + ' ya esta pagada');
-    if (montoUSD > nd.pendienteUSD + 0.05) throw rechazo_('El abono ($' + montoUSD + ') pasa de lo que falta de la nota ' + nd.nota + ' ($' + nd.pendienteUSD + ')');
     notaDest = nd.nota || '';
+  }
+  // v28.18 — CUENTA EN $ BCV: el abono se convierte a $ Ref BCV con el BCV del dia del pago. En Bs: Bs / BCV.
+  // En dolares (efectivo, OB): cada dolar vale la tasa de trabajo en Bs, o sea tasa / BCV dolares BCV.
+  var usdBcv = '', bcvHoy = '';
+  if (clienteBcv_(ss, d.rif)) {
+    bcvHoy = Number(d.tasaBCV) || Number(leerConfig_(ss).bcv) || 0;
+    if (!bcvHoy) throw rechazo_('No hay tasa BCV del dia: actualizala antes de cobrar a un cliente en $ BCV');
+    var bsEq = String(d.moneda || 'USD').toUpperCase() === 'BS' ? (Number(d.montoPagado) || 0) : montoUSD * (Number(d.tasa) || leerTasa_(ss));
+    usdBcv = round2_(bsEq / bcvHoy);
+    if (nd && nd.pendienteBCV !== undefined && usdBcv > nd.pendienteBCV + 0.05)
+      throw rechazo_('El abono ($' + usdBcv + ' Ref BCV) pasa de lo que falta de la nota ' + nd.nota + ' ($' + nd.pendienteBCV + ' Ref BCV)');
+  } else if (nd && montoUSD > nd.pendienteUSD + 0.05) {
+    throw rechazo_('El abono ($' + montoUSD + ') pasa de lo que falta de la nota ' + nd.nota + ' ($' + nd.pendienteUSD + ')');
   }
   cx.appendRow([
     fechaVE_(d.fecha), d.hora, d.cliente, d.rif||'', 'ABONO', d.idAbono||'', notaDest,
     montoUSD, d.moneda||'USD', Number(d.montoPagado)||0, Number(d.tasa)||0,
-    d.metodo||'', d.banco||'', Number(d.comision)||0, d.registradoPor||'', d.notas||'', '', aplicaA
+    d.metodo||'', d.banco||'', Number(d.comision)||0, d.registradoPor||'', d.notas||'', '', aplicaA, usdBcv, bcvHoy
   ]);
   formatoFecha_(cx, cx.getLastRow(), 1);
   var est = estadoCxc_(ss, d.cliente);
@@ -1740,7 +1942,7 @@ function guardarAbono_(ss, d) {
   est.forEach(function(c) { todasNotas = todasNotas.concat(c.notas || []); });
   var liberadas = liberarComisionesCobradas_(ss, todasNotas);
 
-  return {saldoUSD:saldoDeCuenta_(est, d.rif), repetido:false, comisionesLiberadas:liberadas};
+  return {saldoUSD:saldoDeCuenta_(est, d.rif), saldoBCV:saldoDeCuenta_(est, d.rif, 'saldoBCV'), repetido:false, comisionesLiberadas:liberadas};
 }
 
 // v26 — LA COMISION DEL ALIADO SE DESCONGELA CUANDO EL CLIENTE PAGA
@@ -1776,8 +1978,9 @@ function liberarComisionesCobradas_(ss, notas) {
 function estadoCxc_(ss, soloCliente) {
   var sh = ss.getSheetByName(SH_CXC);
   if (!sh || sh.getLastRow() < 2) return [];
-  var rows = sh.getRange(2, 1, sh.getLastRow() - 1, 18).getValues();
+  var rows = sh.getRange(2, 1, sh.getLastRow() - 1, 20).getValues();
   completarProductos_(ss, sh, rows);
+  var cuentasBcv = clientesBcv_(ss), bcvVentas = null;
   // v27 — LA CUENTA ES DE LA CEDULA, NO DEL NOMBRE. Se agrupaba por nombre escrito: cuando "Taller Diesel
   // Luis" paso a llamarse "TALLER DIESEL", su cuenta se partio en dos y cada mitad mostraba solo parte de
   // la deuda (la venta a credito comparaba el limite contra la mitad). Ahora manda la cedula/RIF; el
@@ -1819,16 +2022,27 @@ function estadoCxc_(ss, soloCliente) {
     var monto = Number(r[7]) || 0;
     var mov = {fecha:fmtFecha_(r[0]), hora:String(r[1]||''), tipo:String(r[4]), idVenta:String(r[5]||''), nota:r[6]||'', montoUSD:monto,
                moneda:String(r[8]||''), montoPagado:Number(r[9])||0, tasa:Number(r[10])||0, metodo:String(r[11]||''), banco:String(r[12]||''),
-               productos:String(r[16]||''), aplicaA:String(r[17]||'').trim()};
+               productos:String(r[16]||''), aplicaA:String(r[17]||'').trim(),
+               usdBcv:Number(r[18]) || 0, bcv:Number(r[19]) || 0, fechaIso:iso_(r[0])};
     // v28.14 — una devolucion con saldo a favor (DEV-n) va contra la nota devuelta.
     if (mov.tipo === 'ABONO' && !mov.aplicaA && /^DEV-/.test(mov.idVenta) && mov.nota) mov.notaDev = String(mov.nota);
     c.movs.push(mov);
-    if (mov.tipo === 'CARGO') { c.cargosUSD += monto; c.notas.push({idVenta:mov.idVenta, nota:mov.nota, fecha:mov.fecha, montoUSD:monto, abonadoUSD:0, productos:mov.productos}); }
+    if (mov.tipo === 'CARGO') { c.cargosUSD += monto; c.notas.push({idVenta:mov.idVenta, nota:mov.nota, fecha:mov.fecha, montoUSD:monto, abonadoUSD:0, productos:mov.productos, mov:mov}); }
     else if (mov.tipo === 'ABONO') c.abonosUSD += monto;
   });
   var out = [];
   Object.keys(porCliente).forEach(function(k) {
     var c = porCliente[k];
+    var cb = cuentasBcv[soloDigitos_(c.rif)];
+    if (cb) {
+      if (!bcvVentas) bcvVentas = bcvDeVentas_(ss);
+      cuentaBcvEstado_(c, cb, bcvVentas);
+      c.notas.forEach(function(n) { delete n.mov; });
+      c.tambienComo = Object.keys(c.nombres).filter(function(n) { return n !== c.cliente; }); delete c.nombres;
+      out.push(c);
+      return;
+    }
+    c.notas.forEach(function(n) { delete n.mov; });
     // v28.14 — Primero los abonos DIRIGIDOS van a su nota (lo que sobre pasa al monto general). Despues el resto
     // se aplica a las notas mas viejas primero (orden de registro), como siempre.
     var resto = 0;
@@ -2765,7 +2979,11 @@ function guardarCliente_(ss, d) {
                conserva(d.negocio, CLI_NEGOCIO),
                conserva(d.correo, CLI_CORREO),
                conserva(d.estado, CLI_ESTADO), conserva(d.ciudad, CLI_CIUDAD), conserva(d.sector, CLI_SECTOR),
-               conserva(d.calle, CLI_CALLE), conserva(d.local, CLI_LOCAL), conserva(d.referencia, CLI_REF)];
+               conserva(d.calle, CLI_CALLE), conserva(d.local, CLI_LOCAL), conserva(d.referencia, CLI_REF),
+               d.cuentaBcv === undefined ? (fila ? String(sh.getRange(fila, CLI_BCV).getValue() || '') : '') : (d.cuentaBcv ? 'SI' : 'NO'),
+               fila ? sh.getRange(fila, CLI_BCV_DESDE).getValue() : ''];
+  // v28.18 — al activar la cuenta en $ BCV queda la fecha: los abonos desde ahi se descuentan en $ BCV.
+  if (String(datos[CLI_BCV - 1]).toUpperCase() === 'SI' && !datos[CLI_BCV_DESDE - 1]) datos[CLI_BCV_DESDE - 1] = new Date();
   // La direccion completa (D) se arma de las partes cuando las hay; si no, queda la que vino o la que habia.
   var partes = {estado:datos[CLI_ESTADO - 1], ciudad:datos[CLI_CIUDAD - 1], sector:datos[CLI_SECTOR - 1],
                 calle:datos[CLI_CALLE - 1], local:datos[CLI_LOCAL - 1]};
@@ -2788,7 +3006,8 @@ function guardarCliente_(ss, d) {
                    comisionPct:Number(final[CLI_PCT-1]) || 0, negocio:String(final[CLI_NEGOCIO-1]||''),
                    dir:String(final[3]||''), correo:String(final[CLI_CORREO-1]||''),
                    estado:String(final[CLI_ESTADO-1]||''), ciudad:String(final[CLI_CIUDAD-1]||''), sector:String(final[CLI_SECTOR-1]||''),
-                   calle:String(final[CLI_CALLE-1]||''), local:String(final[CLI_LOCAL-1]||''), referencia:String(final[CLI_REF-1]||'')}};
+                   calle:String(final[CLI_CALLE-1]||''), local:String(final[CLI_LOCAL-1]||''), referencia:String(final[CLI_REF-1]||''),
+                   cuentaBcv:String(final[CLI_BCV-1]||'').toUpperCase() === 'SI'}};
 }
 
 // v28.15 — Reemplaza la cedula vieja por la nueva (celda completa, exacta) en las hojas que agrupan por cedula.
