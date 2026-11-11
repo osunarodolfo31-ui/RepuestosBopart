@@ -1,6 +1,13 @@
 /**
  * Repuesto BoParts — Code.gs
- * VERSION: v28.20 (2026-11-10) | precio Cashea
+ * VERSION: v28.21 (2026-11-11) | tasa negociada con OB
+ *
+ * v28.21 — TASA NEGOCIADA CON OB. Un cambio con OB sigue yendo a la tasa de trabajo, salvo que un SOCIO mande
+ *   tasaNegociada (> 0, hasta 30% lejos de la de trabajo) con un motivo en notas. MOV_CUENTAS gana Q TASA_TRABAJO
+ *   y R DIF_USD: cuanto gano la tienda (+) o le dio de mas a OB (-) contra la tasa de trabajo, en dolares.
+ *   action=dinero devuelve ob.difUSD (suma del periodo) y cada cambio trae tasaTrabajo y difUSD.
+ *
+ * VERSION anterior: v28.20 (2026-11-10) | precio Cashea
  *
  * v28.20 — PRECIO CASHEA. CONFIG B18 CASHEA_RECARGO (% sobre el precio de lista, 30 si esta vacio), B19
  *   CASHEA_COM_TOTAL (% que cobra Cashea sobre el total de la venta, 4) y B20 CASHEA_COM_FIN (% sobre lo
@@ -828,7 +835,7 @@ function claveDePost_(data) {
 // OJO: esta constante es lo que ven las apps en el menu. Se habia quedado en v21.4 mientras el
 // encabezado ya decia v24, asi que el sello de version — que existe justamente para saber si lo
 // desplegado es lo que crees — estaba mintiendo. Cada version nueva se cambia AQUI tambien.
-var VERSION_SCRIPT = 'v28.20';
+var VERSION_SCRIPT = 'v28.21';
 
 function json_(obj) {
   // La version viaja en cada respuesta: es la forma rapida de saber si lo desplegado es lo que crees
@@ -5299,9 +5306,11 @@ function listaCuentas_(ss, conInactivas) {
 }
 function hojaMovCuentas_(ss) {
   var sh = hojaAp_(ss, 'MOV_CUENTAS', ['ID','FECHA','HORA','TIPO','CUENTA_ORIGEN','MONTO_ORIGEN','MONEDA_ORIGEN',
-    'CUENTA_DESTINO','MONTO_DESTINO','MONEDA_DESTINO','TASA','SOCIO','REGISTRADO_POR','NOTAS','METODO_SALIDA','COMISION_ORIGEN']);
-  // v28.3: la hoja ya existia con 14 columnas
+    'CUENTA_DESTINO','MONTO_DESTINO','MONEDA_DESTINO','TASA','SOCIO','REGISTRADO_POR','NOTAS','METODO_SALIDA','COMISION_ORIGEN',
+    'TASA_TRABAJO','DIF_USD']);
+  // v28.3: la hoja ya existia con 14 columnas; v28.21: con 16
   try { if (!String(sh.getRange(1, 15).getValue() || '').trim()) sh.getRange(1, 15, 1, 2).setValues([['METODO_SALIDA','COMISION_ORIGEN']]); } catch (e) {}
+  try { if (!String(sh.getRange(1, 17).getValue() || '').trim()) sh.getRange(1, 17, 1, 2).setValues([['TASA_TRABAJO','DIF_USD']]); } catch (e) {}
   return sh;
 }
 var TIPOS_MOV_CUENTA = {SALDO_INICIAL:'D', TRASPASO:'OD', AJUSTE_ENTRA:'D', AJUSTE_SALE:'O',
@@ -5343,13 +5352,27 @@ function movCuenta_(ss, d, quien) {
   // servidor; nadie lo escribe, asi no puede quedar distinto.
   var esOB = !!((o && o.ob) || (dd && dd.ob));
   if (tipo === 'CAMBIO_OB' && !esOB) throw new Error('Un cambio con OB tiene que salir de OB o entrar a OB');
+  var tasaTrab = '', difUSD = '';
   if (esOB && o && dd && o.moneda !== dd.moneda) {
     var tasaT = leerConfig_(ss).tasa;
     if (!(tasaT > 0)) throw new Error('No hay tasa de trabajo cargada en Gerencia: no se puede cambiar con OB');
-    if (dd.ob) { mo = monto(d.montoOrigen, 'que sale'); md = round2_(o.moneda === 'BS' ? mo / tasaT : mo * tasaT); }
-    else       { md = monto(d.montoDestino, 'que entra'); mo = round2_(dd.moneda === 'BS' ? md / tasaT : md * tasaT); }
+    // v28.21 — tasa negociada: solo un socio, con motivo, y no mas lejos de 30% de la tasa de trabajo.
+    var tasaU = tasaT, tn = Number(d.tasaNegociada);
+    if (d.tasaNegociada !== undefined && d.tasaNegociada !== '' && d.tasaNegociada !== null && tn !== tasaT) {
+      if (!(tn > 0) || !isFinite(tn)) throw new Error('Tasa negociada invalida');
+      if (!quien || quien.rol !== 'SOCIO') throw new Error('Solo un socio puede usar una tasa distinta a la de trabajo');
+      if (Math.abs(tn - tasaT) / tasaT > 0.30) throw new Error('La tasa ' + tn + ' esta a mas de 30% de la de trabajo (' + tasaT + '). Revisa el numero.');
+      if (String(d.notas || '').trim().length < 3) throw new Error('Con otra tasa hay que escribir el motivo en notas');
+      tasaU = tn;
+    }
+    if (dd.ob) { mo = monto(d.montoOrigen, 'que sale'); md = round2_(o.moneda === 'BS' ? mo / tasaU : mo * tasaU); }
+    else       { md = monto(d.montoDestino, 'que entra'); mo = round2_(dd.moneda === 'BS' ? md / tasaU : md * tasaU); }
     if (!(mo > 0) || !(md > 0)) throw new Error('Monto invalido');
-    d.tasa = tasaT;
+    d.tasa = tasaU;
+    tasaTrab = tasaT;
+    // Ganancia de la tienda en dolares contra la tasa de trabajo (+ gana la tienda, - gana OB).
+    var bsOp = o.moneda === 'BS' ? mo : md;
+    difUSD = tasaU === tasaT ? 0 : round2_(dd.ob ? (md - bsOp / tasaT) : (bsOp / tasaT - mo));
   } else {
     if (o) mo = monto(d.montoOrigen, 'que sale');
     if (dd && tipo === 'SALDO_INICIAL') {
@@ -5392,7 +5415,8 @@ function movCuenta_(ss, d, quien) {
   var ahora = new Date();
   sh.appendRow([id, fechaVE_(d.fecha), d.hora || Utilities.formatDate(ahora, TZ_VE, 'HH:mm'), tipo,
                 o ? o.cuenta : '', o ? mo : '', o ? o.moneda : '', dd ? dd.cuenta : '', dd ? md : '', dd ? dd.moneda : '',
-                tasa, socio, (quien && quien.nombre) || d.registradoPor || '', String(d.notas || '').slice(0, 300), metSal, comO]);
+                tasa, socio, (quien && quien.nombre) || d.registradoPor || '', String(d.notas || '').slice(0, 300), metSal, comO,
+                tasaTrab, difUSD]);
   formatoFecha_(sh, sh.getLastRow(), 2);
 
   // Los movimientos con socio tambien van a su cuenta corriente, que es donde se ve cuanto se le debe.
@@ -5403,7 +5427,8 @@ function movCuenta_(ss, d, quien) {
                    origen:id, descripcion:(o ? 'Sale de ' + o.cuenta : 'Entra a ' + dd.cuenta) + (d.notas ? ' - ' + d.notas : ''),
                    registradoPor:(quien && quien.nombre) || ''});
   }
-  return {ok:true, tipo:'mov_cuenta', id:id, repetido:false, montoOrigen:mo, montoDestino:md, tasa:tasa, metodo:metSal, comision:comO};
+  return {ok:true, tipo:'mov_cuenta', id:id, repetido:false, montoOrigen:mo, montoDestino:md, tasa:tasa, metodo:metSal, comision:comO,
+          tasaTrabajo:tasaTrab, difUSD:difUSD};
 }
 
 // ============================================================
@@ -6350,7 +6375,7 @@ function estadoDinero_(ss, desde, hasta) {
   // 9) MOV_CUENTAS: saldo inicial, traspasos, cambios con OB, ajustes y socios
   var iniciales = {};   // CUENTA -> {fecha, monto}
   var opsOB = [];
-  filas('MOV_CUENTAS', 16).forEach(function(r) {
+  filas('MOV_CUENTAS', 18).forEach(function(r) {
     var f = iso_(r[1]); if (!f) return;
     var tipo = String(r[3] || '').toUpperCase();
     var o = porNombre[String(r[4] || '').trim().toUpperCase()], dd = porNombre[String(r[7] || '').trim().toUpperCase()];
@@ -6373,7 +6398,7 @@ function estadoDinero_(ss, desde, hasta) {
     if ((o && o.ob) || (dd && dd.ob)) {
       opsOB.push({fecha:f, id:String(r[0] || ''), tipo:etq, sale:o ? o.cuenta : '', montoSale:mo, monedaSale:o ? o.moneda : '',
                   entra:dd ? dd.cuenta : '', montoEntra:md, monedaEntra:dd ? dd.moneda : '', tasa:tasa,
-                  quien:String(r[12] || ''), notas:String(r[13] || '')});
+                  quien:String(r[12] || ''), notas:String(r[13] || ''), tasaTrabajo:n_(r[16]), difUSD:n_(r[17])});
     }
   });
 
@@ -6436,6 +6461,8 @@ function estadoDinero_(ss, desde, hasta) {
   var ob = {cuenta:CUENTA_OB, saldo:ctaOB ? ctaOB.saldo : null, fechaInicial:ctaOB ? ctaOB.fechaInicial : '',
             cambios:opsOB.filter(function(x) { return x.fecha >= d1 && x.fecha <= d2; }).sort(function(a, b) { return b.fecha.localeCompare(a.fecha); }),
             movimientos:obMovs};
+  ob.difUSD = round2_(ob.cambios.reduce(function(s, x) { return s + (Number(x.difUSD) || 0); }, 0));   // v28.21
+  ob.nNegociadas = ob.cambios.filter(function(x) { return x.tasaTrabajo && x.tasa && x.tasa !== x.tasaTrabajo; }).length;
 
   var sinIni = listaRes.filter(function(r) { return r.activa && r.saldoInicial === null; }).map(function(r) { return r.cuenta; });
   if (sinIni.length) avisos.push('Sin saldo inicial: ' + sinIni.join(', ') + '. Esas cuentas muestran entradas y salidas, no saldo.');

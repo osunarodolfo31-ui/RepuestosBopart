@@ -1,7 +1,10 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_dinero.html
-  VERSION: v1.5 (2026-11-04) | build 2026-11-04.4 | requiere Apps Script v28.12
+  VERSION: v1.6 (2026-11-11) | build 2026-11-11.1 | requiere Apps Script v28.21
+  v1.6: un cambio con OB puede usar OTRA TASA (negociada) en vez de la de trabajo, con motivo obligatorio. Se ve
+  cuanto gano la tienda o le dio de mas a OB contra la tasa de trabajo, y la tarjeta de OB suma esas diferencias.
+  VERSION anterior: v1.5 (2026-11-04) | build 2026-11-04.4 | requiere Apps Script v28.12
   v1.5: las cuentas POR COBRAR (Cashea) se muestran al final, marcadas, y no suman al total disponible.
   VERSION anterior: v1.4 (2026-11-02) | build 2026-11-02.9 | requiere Apps Script v28.3
   v1.4: Montos en Bs con 2 decimales (antes se redondeaban a entero y el saldo no cuadraba a la vista con el banco).
@@ -361,6 +364,10 @@ select option{background:#1E1E1E;color:var(--ink)}
       <div class="field"><label id="mvLblD">Monto que entra *</label><input type="number" id="mvMontoD" step="0.01" placeholder="0.00" oninput="pintarMov()"></div>
     </div>
     <div id="mvSalida" class="field" style="display:none"><label>Sale por *</label><select id="mvMet" onchange="pintarMov()"></select></div>
+    <div id="mvTasaBox" class="field" style="display:none">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="mvOtraTasa" onchange="pintarMov()" style="width:auto"> Usar otra tasa (negociada con OB)</label>
+      <input type="number" id="mvTasaN" step="0.01" placeholder="Ej: 1000" oninput="pintarMov()" style="display:none;margin-top:6px">
+    </div>
     <div id="mvSocio" class="field" style="display:none"><label>Socio *</label>
       <select id="mvSoc"><option value="">Seleccionar...</option><option value="RODOLFO">Rodolfo</option><option value="JAVIER">Javier</option></select>
     </div>
@@ -466,11 +473,11 @@ select option{background:#1E1E1E;color:var(--ink)}
 </div>
 
 
-<script src="boparts_sesion.js?v=2026-11-10.1"></script>
+<script src="boparts_sesion.js?v=2026-11-11.1"></script>
 <script>
 var SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
 var SCRIPT_URL_SESION = SCRIPT_URL;
-var APP_VERSION = 'v1.5';
+var APP_VERSION = 'v1.6';
 var VER_SCRIPT = '?';
 var periodo = 'mes', DIN = null, CXP = [], LIQ = [], liqTasa = 0, SALIDAS = [], CUENTAS = [];
 var VER_PAGADAS = {}, FACT_ABIERTA = '', PAGO_PEND = {}, ID_MOV = '', ARQ = null, FILTRO_CTA = '';
@@ -653,7 +660,9 @@ function pintarOB() {
   var h = '<div class="section"><div class="stitle">Cuenta con OB International</div><div class="kpis">' +
     kpi(ob.saldo === null || ob.saldo === undefined ? 'Sin saldo inicial' : (ob.saldo >= 0 ? 'OB le guarda a la tienda' : 'La tienda le debe a OB'),
         ob.saldo === null || ob.saldo === undefined ? '—' : usd(Math.abs(ob.saldo)),
-        ob.fechaInicial ? 'desde ' + fechaES(ob.fechaInicial) : 'carga el saldo inicial de OB', 'big') + '</div>';
+        ob.fechaInicial ? 'desde ' + fechaES(ob.fechaInicial) : 'carga el saldo inicial de OB', 'big') +
+    (ob.nNegociadas ? kpi('Fuera de la tasa de trabajo', usd(Math.abs(ob.difUSD || 0)),
+        ob.nNegociadas + ' cambio' + (ob.nNegociadas > 1 ? 's' : '') + ' · ' + ((ob.difUSD || 0) >= 0 ? 'lo puso OB a favor de la tienda' : 'la tienda le dio de mas a OB')) : '') + '</div>';
   var cs = ob.cambios || [];
   if (cs.length) {
     h += '<table class="tbl" style="margin-top:10px"><tr><th>Fecha</th><th>Operacion</th><th class="n">Tasa</th></tr>';
@@ -662,7 +671,10 @@ function pintarOB() {
         (x.sale ? escHtml(x.sale) + ' ' + enMon(x.montoSale, x.monedaSale) : '') + (x.sale && x.entra ? ' &#8594; ' : '') +
         (x.entra ? escHtml(x.entra) + ' ' + enMon(x.montoEntra, x.monedaEntra) : '') +
         (x.quien ? '<br><span style="color:var(--ink-muted);font-size:11px">' + escHtml(x.quien) + (x.notas ? ' · ' + escHtml(x.notas) : '') + '</span>' : '') +
-        '</td><td class="n">' + (x.tasa || '—') + '</td></tr>';
+        '</td><td class="n">' + (x.tasa || '—') +
+        (x.tasaTrabajo && x.tasa && x.tasa !== x.tasaTrabajo ? '<div style="font-size:10px;color:var(--ink-muted)">trabajo ' + x.tasaTrabajo + '</div>' +
+          '<div style="font-size:11px;font-weight:700;color:' + (x.difUSD >= 0 ? 'var(--green)' : 'var(--red)') + '">' + (x.difUSD >= 0 ? '+' : '-') + usd(Math.abs(x.difUSD || 0)) + '</div>' : '') +
+        '</td></tr>';
     });
     h += '</table>';
   } else {
@@ -678,7 +690,7 @@ function pintarOB() {
     });
   }
   h += '<div class="aviso">Lo que entra o sale por ' + (ctaOBpartes() || 'las cuentas de OB') + ' se acredita o debita a OB en dolares a la tasa de esa operacion: el riesgo del bolivar es de OB. ' +
-       'Toda operacion entre Bs y OB va a la tasa de trabajo; la tasa queda guardada y ambos socios la ven aqui.</div>' +
+       'Toda operacion entre Bs y OB va a la tasa de trabajo, salvo que un socio use una tasa negociada con motivo: la diferencia contra la de trabajo queda guardada y ambos socios la ven aqui.</div>' +
        '<button class="tab on" style="width:100%;margin-top:8px;padding:10px" onclick="prepararCambioOB()">Registrar cambio con OB</button></div>';
   document.getElementById('obBox').innerHTML = h;
 }
@@ -865,13 +877,26 @@ function pintarMov() {
   inO.readOnly = false; inD.readOnly = false; inO.style.opacity = ''; inD.style.opacity = '';
   var info = document.getElementById('mvInfo'), txt = '';
   var conOB = o && d && (o.ob || d.ob) && o.moneda !== d.moneda;
+  document.getElementById('mvTasaBox').style.display = conOB ? 'block' : 'none';
   if (conOB) {
-    // El lado de OB lo calcula el servidor a la tasa de trabajo: aqui solo se muestra.
+    // El lado de OB lo calcula el servidor (tasa de trabajo, o la negociada si un socio la escribe): aqui solo se muestra.
     var lado = d.ob ? inD : inO, otro = d.ob ? inO : inD, ctaOtro = d.ob ? o : d;
     lado.readOnly = true; lado.style.opacity = '0.6';
+    var otra = document.getElementById('mvOtraTasa').checked, tn = num(document.getElementById('mvTasaN').value);
+    document.getElementById('mvTasaN').style.display = otra ? 'block' : 'none';
+    var tUso = (otra && tn > 0) ? tn : tasa;
     var v = num(otro.value);
-    lado.value = (v && tasa) ? (ctaOtro.moneda === 'BS' ? (v / tasa) : (v * tasa)).toFixed(2) : '';
-    txt = 'Cambio con OB a la tasa de trabajo <b>' + (tasa || '?') + '</b>. Escribe solo el monto de ' + escHtml(ctaOtro.cuenta) + ': el de OB lo calcula el sistema.';
+    lado.value = (v && tUso) ? (ctaOtro.moneda === 'BS' ? (v / tUso) : (v * tUso)).toFixed(2) : '';
+    if (otra && tn > 0 && tasa && tn !== tasa) {
+      var dif = difContraTrabajo(d.ob, v, tn, tasa);
+      txt = 'Cambio con OB a tasa negociada <b>' + tn + '</b> (la de trabajo es ' + tasa + ').' +
+        (v ? '<br>Contra la tasa de trabajo: <b style="color:' + (dif >= 0 ? 'var(--green)' : 'var(--red)') + '">' +
+             (dif >= 0 ? 'la tienda gana ' + usd(dif) + ' (los pone OB)' : 'la tienda le da ' + usd(-dif) + ' de mas a OB') + '</b>' : '') +
+        '<br><b>Escribe en notas el motivo.</b>' +
+        (Math.abs(tn - tasa) / tasa > 0.3 ? '<br><b style="color:var(--red)">Esta a mas de 30% de la tasa de trabajo: el sistema no la acepta.</b>' : '');
+    } else {
+      txt = 'Cambio con OB a la tasa de trabajo <b>' + (tasa || '?') + '</b>. Escribe solo el monto de ' + escHtml(ctaOtro.cuenta) + ': el de OB lo calcula el sistema.';
+    }
   } else if (t === 'CAMBIO_OB') {
     txt = 'Uno de los dos lados tiene que ser OB International.';
   } else if (t === 'TRASPASO' && o && d && o.moneda !== d.moneda) {
@@ -892,6 +917,11 @@ function pintarMov() {
   }
   info.style.display = txt ? 'block' : 'none'; info.innerHTML = txt;
 }
+// v1.6 — dolares que gana la tienda (+) o le da de mas a OB (-) contra la tasa de trabajo. bs = monto en Bs del movimiento.
+function difContraTrabajo(haciaOB, bs, tn, tt) {
+  if (!(bs > 0) || !(tn > 0) || !(tt > 0)) return 0;
+  return Math.round((haciaOB ? (bs / tn - bs / tt) : (bs / tt - bs / tn)) * 100) / 100;
+}
 function guardarMov() {
   var t = document.getElementById('mvTipo').value, f = FORMA_MOV[t];
   if (!f) { toast('Elige que pasa', 'err'); return; }
@@ -908,15 +938,20 @@ function guardarMov() {
   if (t.indexOf('SOCIO') >= 0 && !socio) { toast('Indica el socio', 'err'); return; }
   var metSal = document.getElementById('mvSalida').style.display !== 'none' ? document.getElementById('mvMet').value : '';
   if (document.getElementById('mvSalida').style.display !== 'none' && !metSal) { toast('Indica por donde sale el dinero', 'err'); return; }
+  var otraT = conOB && document.getElementById('mvOtraTasa').checked, tasaN = num(document.getElementById('mvTasaN').value);
+  if (otraT && !(tasaN > 0)) { toast('Escribe la tasa negociada', 'err'); return; }
+  if (otraT && document.getElementById('mvNotas').value.trim().length < 3) { toast('Con otra tasa, escribe el motivo en Notas', 'err'); return; }
   var fe = document.getElementById('mvFecha').value.split('-');
   if (!ID_MOV) ID_MOV = nuevoId('M');
   var payload = {tipo:'mov_cuenta', idMov:ID_MOV, tipoMov:t, fecha:parseInt(fe[2]) + '/' + parseInt(fe[1]) + '/' + fe[0], hora:horaAhora(),
     origen:o ? o.cuenta : '', montoOrigen:mo, destino:d ? d.cuenta : '', montoDestino:md, socio:socio, tasa:DIN ? DIN.tasa : 0, metodo:metSal,
     notas:document.getElementById('mvNotas').value.trim()};
+  if (otraT) payload.tasaNegociada = tasaN;
   var resumen = document.getElementById('mvTipo').selectedOptions[0].text +
     (o ? '\nSale de ' + o.cuenta + (metSal ? ' por ' + metSal : '') + ': ' + (mo ? enMon(mo, o.moneda) : '(lo calcula el sistema)') : '') +
     (o && metSal && mo ? (function() { var c = comisionDe(salidasDe(o).filter(function(m) { return m.metodo === metSal; })[0], mo); return c ? '\nComision del banco: ' + enMon(c, o.moneda) : ''; })() : '') +
-    (d ? '\nEntra a ' + d.cuenta + ': ' + (md ? enMon(md, d.moneda) : '(lo calcula el sistema)') : '') + '\n\nConfirmas?';
+    (d ? '\nEntra a ' + d.cuenta + ': ' + (md ? enMon(md, d.moneda) : '(lo calcula el sistema)') : '') +
+    (otraT ? '\n\nTASA NEGOCIADA ' + tasaN + ' (trabajo ' + (DIN ? DIN.tasa : '?') + ')' : '') + '\n\nConfirmas?';
   if (!confirm(resumen)) return;
   var btn = document.getElementById('btnMov'); btn.disabled = true; btn.textContent = 'Guardando...';
   post(payload).then(function(r) {
@@ -925,8 +960,10 @@ function guardarMov() {
     ID_MOV = '';
     toast(r.repetido ? 'Ese movimiento YA estaba registrado. No se duplico.' :
           'Registrado' + (r.tasa ? ' a tasa ' + r.tasa : '') + (o && d ? ': ' + enMon(r.montoOrigen, o.moneda) + ' → ' + enMon(r.montoDestino, d.moneda) : '') +
-          (r.comision ? ' · comision ' + enMon(r.comision, o.moneda) : ''), 'ok');
-    ['mvMontoO', 'mvMontoD', 'mvNotas'].forEach(function(id) { document.getElementById(id).value = ''; });
+          (r.comision ? ' · comision ' + enMon(r.comision, o.moneda) : '') +
+          (r.difUSD ? ' · ' + (r.difUSD > 0 ? 'la tienda gana ' : 'la tienda da de mas ') + usd(Math.abs(r.difUSD)) : ''), 'ok');
+    ['mvMontoO', 'mvMontoD', 'mvNotas', 'mvTasaN'].forEach(function(id) { document.getElementById(id).value = ''; });
+    document.getElementById('mvOtraTasa').checked = false;
     cargarDinero();
   }).catch(function(e) {
     btn.disabled = false; btn.textContent = 'Registrar movimiento';

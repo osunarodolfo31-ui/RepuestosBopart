@@ -1,5 +1,13 @@
 # CHANGELOG — Repuesto BoParts
 
+## Apps Script v28.21 + dinero v1.6 — build 2026-11-11.1 — tasa negociada con OB
+
+- Cambio con OB: casilla "Usar otra tasa (negociada con OB)". Solo socios, motivo obligatorio en Notas, maximo 30%
+  lejos de la tasa de trabajo. Sin la casilla, todo sigue a la tasa de trabajo.
+- MOV_CUENTAS Q TASA_TRABAJO y R DIF_USD: dolares que gana la tienda (+) o le da de mas a OB (-) contra la de trabajo.
+- Dinero > OB: la tabla muestra tasa usada, la de trabajo y la diferencia; KPI "Fuera de la tasa de trabajo" del periodo.
+- Registrado a mano 11/11: Bancamiga Bs 75.000 (Pago Movil, comision Bs 225) -> OB $75 a tasa 1000 (+$6,82 tienda).
+
 ## Apps Script v28.20 + ventas v15.7 + gerencia v3.8 + pdf v1.3 — build 2026-11-10.1 — precio Cashea
 
 - Ventas: interruptor "Venta con Cashea". Cada linea = lista + recargo (CONFIG B18, 30%). Enciende la factura
