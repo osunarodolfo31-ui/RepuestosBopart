@@ -1,6 +1,14 @@
 /**
  * Repuesto BoParts — Code.gs
- * VERSION: v28.19 (2026-11-07) | cambiar el cliente de una nota
+ * VERSION: v28.20 (2026-11-10) | precio Cashea
+ *
+ * v28.20 — PRECIO CASHEA. CONFIG B18 CASHEA_RECARGO (% sobre el precio de lista, 30 si esta vacio), B19
+ *   CASHEA_COM_TOTAL (% que cobra Cashea sobre el total de la venta, 4) y B20 CASHEA_COM_FIN (% sobre lo
+ *   financiado, 4). action=config los devuelve; tipo=cashea_config (solo socios) los cambia. La venta Cashea
+ *   guarda ademas AP CASHEA_FIN_BCV (lo que Cashea debe, en $ BCV: es lo que va a liquidar) y AQ
+ *   CASHEA_RECARGO_PCT (el recargo con que se vendio, por si despues cambia).
+ *
+ * VERSION anterior: v28.19 (2026-11-07) | cambiar el cliente de una nota
  *
  * v28.19 — tipo=cambiar_cliente (solo socios): mueve la nota al cliente correcto en VENTAS, CXC_MOV (y su $ BCV si el
  *   nuevo cliente lleva cuenta en $ BCV) y quita la comision de aliado que no corresponde. Constancia en
@@ -590,7 +598,7 @@ var PERMISOS_POST = {
   tarea_marcar:'VENDEDOR', tarea_propia:'VENDEDOR', demanda_estado:'VENDEDOR',
   costeo:'SOCIO', cxp_abono:'SOCIO', conteo_revision:'SOCIO', devolucion:'SOCIO', apartado_cerrar:'SOCIO',
   tasa:'SOCIO', bcv_auto:'SOCIO', socio:'SOCIO', liquidar_aliado:'SOCIO', precio:'SOCIO', tarea_def:'SOCIO',
-  anular_venta:'SOCIO', mov_cuenta:'SOCIO', anular_gasto:'SOCIO', consumo_interno:'SOCIO', region:'SOCIO', cambiar_cliente:'SOCIO'
+  anular_venta:'SOCIO', mov_cuenta:'SOCIO', anular_gasto:'SOCIO', consumo_interno:'SOCIO', region:'SOCIO', cambiar_cliente:'SOCIO', cashea_config:'SOCIO'
 };
 
 // v27 — FALLA CERRADO (auditoria #5). Antes, si CONFIG no se podia leer o B15 traia cualquier cosa
@@ -820,7 +828,7 @@ function claveDePost_(data) {
 // OJO: esta constante es lo que ven las apps en el menu. Se habia quedado en v21.4 mientras el
 // encabezado ya decia v24, asi que el sello de version — que existe justamente para saber si lo
 // desplegado es lo que crees — estaba mintiendo. Cada version nueva se cambia AQUI tambien.
-var VERSION_SCRIPT = 'v28.19';
+var VERSION_SCRIPT = 'v28.20';
 
 function json_(obj) {
   // La version viaja en cada respuesta: es la forma rapida de saber si lo desplegado es lo que crees
@@ -1328,6 +1336,16 @@ function doPost(e) {
       finally { SpreadsheetApp.flush(); lockG.releaseLock(); }
     }
 
+    // ---- PRECIO CASHEA (v28.20) ----
+    if (data.tipo === 'cashea_config') {
+      var rc = Number(data.recargo), ct = Number(data.comTotal), cf = Number(data.comFin);
+      if (!(rc >= 0 && rc <= 100)) throw rechazo_('El recargo Cashea debe estar entre 0 y 100%');
+      if (!(ct >= 0 && ct <= 30) || !(cf >= 0 && cf <= 30)) throw rechazo_('La comision de Cashea debe estar entre 0 y 30%');
+      var cfgC = ss.getSheetByName('CONFIG');
+      cfgC.getRange('A18:B20').setValues([['CASHEA_RECARGO', rc], ['CASHEA_COM_TOTAL', ct], ['CASHEA_COM_FIN', cf]]);
+      return json_({ok:true, tipo:'cashea_config', casheaRecargo:rc, casheaComTotal:ct, casheaComFin:cf});
+    }
+
     // ---- REGION PREDETERMINADA de los clientes (v28.11) ----
     if (data.tipo === 'region') {
       var est = String(data.estado || '').trim(), ciu = String(data.ciudad || '').trim();
@@ -1528,8 +1546,12 @@ function guardarVenta_(ss, data) {
     Number(data.casheaInicial) || 0,                         // AL CASHEA_INICIAL_USD
     Number(data.casheaFinanciado) || 0,                      // AM CASHEA_FINANCIADO_USD
     Number(data.casheaComision) || 0,                        // AN CASHEA_COMISION_USD
-    Number(data.casheaNeto) || 0                             // AO CASHEA_NETO_USD
+    Number(data.casheaNeto) || 0,                            // AO CASHEA_NETO_USD
+    Number(data.casheaFinBCV) || 0,                          // AP CASHEA_FIN_BCV (v28.20: lo que Cashea liquida)
+    Number(data.casheaRecargo) || 0                          // AQ CASHEA_RECARGO_PCT
   ]);
+  if (Number(data.casheaFinBCV) > 0 && !String(sheet.getRange(1, 42).getValue() || '').trim())
+    sheet.getRange(1, 38, 1, 6).setValues([['CASHEA_INICIAL_USD','CASHEA_FINANCIADO_USD','CASHEA_COMISION_USD','CASHEA_NETO_USD','CASHEA_FIN_BCV','CASHEA_RECARGO_PCT']]);
   formatoFecha_(sheet, sheet.getLastRow(), 1);
 
   const esCredito = Number(data.creditoUSD) > 0;
@@ -2405,7 +2427,11 @@ function leerConfig_(ss) {
   // v28.11 — region predeterminada para la direccion de los clientes (CONFIG B16 / B17)
   var estadoDef = cfg ? String(cfg.getRange('B16').getValue() || '').trim() : '';
   var ciudadDef = cfg ? String(cfg.getRange('B17').getValue() || '').trim() : '';
+  // v28.20 — precio Cashea (CONFIG B18:B20). Celda vacia = valor por defecto.
+  var cas = cfg ? cfg.getRange('B18:B20').getValues() : [[''], [''], ['']];
+  var casN = function(v, def) { return (v === '' || v === null || isNaN(Number(v))) ? def : Number(v); };
   return {ok:true, tasa:tasa, fecha:fecha, quien:quien, bcv:bcv, bcvFecha:bcvFecha,
+          casheaRecargo:casN(cas[0][0], 30), casheaComTotal:casN(cas[1][0], 4), casheaComFin:casN(cas[2][0], 4),
           estadoDefecto:estadoDef || 'Lara', ciudadDefecto:estadoDef ? ciudadDef : 'Barquisimeto',
           factura:factura, control:control, controlHasta:controlHasta,
           controlRestantes:(controlHasta && control) ? (controlHasta - control) : 0};

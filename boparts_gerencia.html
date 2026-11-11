@@ -1,7 +1,10 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_gerencia.html
-  VERSION: v3.7 (2026-11-07) | build 2026-11-07.2 | requiere Apps Script v28.18
+  VERSION: v3.8 (2026-11-10) | build 2026-11-10.1 | requiere Apps Script v28.20
+  v3.8: Configuracion > Cashea: recargo sobre la lista y comision de Cashea (CONFIG B18:B20), con lo que le queda a
+  la tienda por cada $100 de lista despues de IVA y comision.
+  VERSION anterior: v3.7 (2026-11-07) | build 2026-11-07.2 | requiere Apps Script v28.18
   v3.7: la ficha del cliente activa "Cuenta en $ Ref BCV". El resumen suma el DIFERENCIAL CAMBIARIO de esas
   cuentas (ganancia o perdida entre lo que entro a tasa de trabajo y la parte de la nota que se cancelo).
   VERSION anterior: v3.6 (2026-11-04) | build 2026-11-04.3 | requiere Apps Script v28.11 y boparts_clientes.js
@@ -373,6 +376,15 @@ select option{background:#1E1E1E;color:var(--ink)}
 
   <div class="stitle" style="margin-top:14px">Numeracion fiscal</div>
   <div class="aviso" id="factInfo"></div>
+
+  <div class="stitle" style="margin-top:14px">Cashea</div>
+  <div class="rango">
+    <div style="flex:1"><div style="font-size:10px;color:var(--ink-muted)">Recargo %</div><input type="number" id="casRec" step="0.5" style="width:100%"></div>
+    <div style="flex:1"><div style="font-size:10px;color:var(--ink-muted)">Com. total %</div><input type="number" id="casComT" step="0.1" style="width:100%"></div>
+    <div style="flex:1"><div style="font-size:10px;color:var(--ink-muted)">Com. financ. %</div><input type="number" id="casComF" step="0.1" style="width:100%"></div>
+    <button class="tab on" onclick="guardarCashea()">Fijar</button>
+  </div>
+  <div class="aviso" id="casInfo"></div>
 </div>
 
 <div class="container">
@@ -529,8 +541,8 @@ select option{background:#1E1E1E;color:var(--ink)}
   </div>
 </div>
 
-<script src="boparts_sesion.js?v=2026-11-07.2"></script>
-<script src="boparts_clientes.js?v=2026-11-07.2"></script>
+<script src="boparts_sesion.js?v=2026-11-10.1"></script>
+<script src="boparts_clientes.js?v=2026-11-10.1"></script>
 <script>
 
 
@@ -543,7 +555,7 @@ function sellarVersion(d) {
   if (t) t.textContent = 'app ' + APP_VERSION + ' \u00b7 script ' + VER_SCRIPT;
   return d;
 }
-var APP_VERSION = 'v3.7';
+var APP_VERSION = 'v3.8';
 var TASA = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
 var periodo = 'hoy', DATA = null;
 
@@ -688,6 +700,7 @@ function cargarTasa() {
         ? 'Proxima factura <b>F-' + ('00000' + (num(d.factura) + 1)).slice(-6) + '</b> · proximo control <b>' + (num(d.control) + 1) + '</b>' +
           (d.controlHasta ? ' · rango hasta ' + d.controlHasta + (num(d.controlRestantes) < 50 ? ' <span style="color:var(--red)">(quedan ' + d.controlRestantes + ')</span>' : ' (quedan ' + d.controlRestantes + ')') : ' · sin rango tope definido')
         : 'Sin numeracion configurada. Escribe en CONFIG: B12 el ultimo numero de factura usado, B13 el ultimo numero de control usado y B14 el ultimo del rango que autorizo la imprenta.';
+      pintarCasheaCfg(d);
       var dias = d.fecha ? Math.floor((Date.now() - new Date(d.fecha.replace(' ', 'T')).getTime()) / 86400000) : -1;
       document.getElementById('tasaInfo').innerHTML = TASA
         ? 'Tasa que usan todas las apps: <b>' + TASA + '</b>' + (d.fecha ? ' · fijada el ' + d.fecha + (d.quien ? ' por ' + escHtml(d.quien) : '') : '') +
@@ -695,6 +708,28 @@ function cargarTasa() {
         : 'Todavia no hay tasa fijada. Escribela y toca Fijar.';
     })
     .catch(function() { document.getElementById('tasaInfo').textContent = 'No se pudo leer la tasa.'; });
+}
+
+// v3.8 — Cashea (CONFIG B18:B20): recargo sobre el precio de lista y comision que cobra Cashea.
+// Muestra cuanto le queda a la tienda por cada $100 de lista, con inicial de 40%, para ver si el recargo alcanza.
+function pintarCasheaCfg(d) {
+  var r = num(d.casheaRecargo), ct = num(d.casheaComTotal), cf = num(d.casheaComFin);
+  if (d.casheaRecargo === undefined) { document.getElementById('casInfo').textContent = 'El script todavia no es v28.20.'; return; }
+  document.getElementById('casRec').value = r; document.getElementById('casComT').value = ct; document.getElementById('casComF').value = cf;
+  var tot = 100 * (1 + r / 100), neto = tot - tot * ct / 100 - tot * 0.6 * cf / 100 - (tot - tot / 1.16);
+  document.getElementById('casInfo').innerHTML = 'Producto de $100 de lista: el cliente paga <b>$' + tot.toFixed(2) + '</b> (con IVA). ' +
+    'Menos IVA y comision de Cashea (con inicial de 40%) a la tienda le quedan <b>$' + neto.toFixed(2) + '</b>: ' +
+    '<b style="color:' + (neto < 100 ? 'var(--red)' : neto < 103 ? 'var(--brand)' : 'inherit') + '">' + (neto >= 100 ? '+' : '') + (neto - 100).toFixed(1) + '%</b> sobre la lista. ' +
+    'Ese margen es el colchon contra la brecha BCV mientras Cashea paga.';
+}
+function guardarCashea() {
+  var b = {tipo:'cashea_config', recargo:num(document.getElementById('casRec').value),
+           comTotal:num(document.getElementById('casComT').value), comFin:num(document.getElementById('casComF').value)};
+  fetch(SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body:JSON.stringify(b)})
+    .then(leerJSON).then(function(d) {
+      if (!d || !d.ok) throw new Error(d && d.error ? d.error : 'no se guardo');
+      pintarCasheaCfg(d); toast('Cashea: recargo ' + d.casheaRecargo + '%', 'ok');
+    }).catch(function(e) { if (e && e.message === 'SESION') return; toast('No se guardo: ' + e.message, 'err'); });
 }
 
 function guardarBCV() {

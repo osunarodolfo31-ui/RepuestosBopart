@@ -1,7 +1,12 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_ventas.html
-  VERSION: v15.6 (2026-11-04) | build 2026-11-07.2 | requiere boparts_clientes.js v1.0 y Apps Script v28.11
+  VERSION: v15.7 (2026-11-10) | build 2026-11-10.1 | requiere boparts_pdf.js v1.3 y Apps Script v28.20
+  v15.7: VENTA CON CASHEA. Un interruptor sube cada linea al precio de lista + el recargo de CONFIG (30%), enciende la
+  factura (IVA incluido, desglosado) y muestra en grande el monto que se carga en la app de Cashea, en $ BCV
+  (total Bs / BCV). El vendedor escribe la inicial que pide la app y un boton arma las dos formas de pago: inicial
+  en Bs y el resto con Cashea. La comision de Cashea (4% del total + 4% de lo financiado) sale de CONFIG.
+  VERSION anterior: v15.6 (2026-11-04) | build 2026-11-07.2 | requiere boparts_clientes.js v1.0 y Apps Script v28.11
   v15.6: cliente con direccion por partes (estado y ciudad con predeterminado, calle, local, sector, referencia) y
   cedula/RIF validada con su digito verificador. La factura pide el domicilio por partes y lo guarda en la ficha.
   VERSION anterior: v15.5 (2026-11-04) | build 2026-11-04.2 | requiere boparts_pdf.js v1.2 y Apps Script v28.10
@@ -249,7 +254,7 @@ select option{background:#1E1E1E;color:var(--ink)}
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
-<script src="boparts_pdf.js?v=2026-11-07.2"></script>
+<script src="boparts_pdf.js?v=2026-11-10.1"></script>
 </head>
 <body>
 
@@ -319,6 +324,18 @@ select option{background:#1E1E1E;color:var(--ink)}
       <div class="drop" id="prodDrop"></div>
     </div>
     <div id="cartEl"><div class="cart-empty">Sin productos aun</div></div>
+  </div>
+
+  <!-- CASHEA (v15.7) -->
+  <div class="section" id="secCashea">
+    <div class="togwrap">
+      <div>
+        <div class="toglbl">Venta con Cashea</div>
+        <div class="togsub" id="casSub">Precio de lista + 30%, con factura</div>
+      </div>
+      <button class="tog" id="casTog" onclick="toggleCashea()"></button>
+    </div>
+    <div id="casBox" style="display:none"></div>
   </div>
 
   <!-- TOTALES -->
@@ -559,8 +576,8 @@ select option{background:#1E1E1E;color:var(--ink)}
   </div>
 </div>
 
-<script src="boparts_sesion.js?v=2026-11-07.2"></script>
-<script src="boparts_clientes.js?v=2026-11-07.2"></script>
+<script src="boparts_sesion.js?v=2026-11-10.1"></script>
+<script src="boparts_clientes.js?v=2026-11-10.1"></script>
 <script>
 
 
@@ -576,7 +593,7 @@ function sellarVersion(d) {
   if (t) t.textContent = 'app ' + APP_VERSION + ' \u00b7 script ' + VER_SCRIPT;
   return d;
 }
-var APP_VERSION = 'v15.6';
+var APP_VERSION = 'v15.7';
 var TASA        = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
 var TASA_ORIGEN = TASA ? 'guardada' : 'ninguna';
 
@@ -591,6 +608,7 @@ function sincronizarTasa() {
     .then(function(d) {
       if (!d || !d.ok) return;
       fijarRegionDesdeConfig(d);      // v15.6: estado y ciudad predeterminados de los clientes
+      fijarCasheaDesdeConfig(d);      // v15.7: recargo y comision de Cashea
       if (d.bcv > 0) {
         TASA_BCV = d.bcv; BCV_FECHA = d.bcvFecha || '';
         try { localStorage.setItem('boparts_bcv', String(TASA_BCV)); localStorage.setItem('boparts_bcv_fecha', BCV_FECHA); } catch (e) {}
@@ -898,7 +916,7 @@ function addToCart(idx) {
       renderCart(); updateTotals(); return;
     }
   }
-  cart.push({producto:p.producto, codigo:p.codigo, precio:(modoSocio ? (p.costo || 0) : p.precio), costo:p.costo||0, cantidad:1});
+  cart.push({producto:p.producto, codigo:p.codigo, precio:(modoSocio ? (p.costo || 0) : precioCashea(p.precio)), costo:p.costo||0, cantidad:1});
   prodSearch.value = ''; prodDrop.classList.remove('open');
   renderCart(); updateTotals();
 }
@@ -934,6 +952,7 @@ function renderCart() {
         '</div>' +
         '<div><label>Precio USD</label>' +
           '<input type="number" value="' + c.precio.toFixed(2) + '" step="0.01" onchange="setP(' + i + ',this.value)" style="text-align:center">' +
+          (CASHEA_ON && !modoSocio ? '<div style="font-size:10px;color:var(--ink-muted);text-align:center;margin-top:2px">lista <s>' + fmtUSD(precioLista(c)) + '</s> +' + CAS.recargo + '%</div>' : '') +
         '</div>' +
         '<div><label>Subtotal</label>' +
           '<div class="csub">' + fmtUSD(c.precio * c.cantidad) + '</div>' +
@@ -975,6 +994,7 @@ function updateTotals() {
   document.getElementById('tComRow').style.display = 'none';
   document.getElementById('tNetRow').style.display = 'none';
   if (aliadoSel) updateComPrev();
+  pintarCashea();
 }
 
 // ============================================================
@@ -1177,6 +1197,7 @@ function crearClienteVenta() {
 // Facturar: decide si la venta lleva IVA y si se puede emitir factura fiscal.
 var FACTURAR = false;
 function toggleFacturar() {
+  if (CASHEA_ON && FACTURAR) { toast('Una venta con Cashea siempre va con factura', 'err'); return; }
   FACTURAR = !FACTURAR;
   document.getElementById('factTog').classList.toggle('on', FACTURAR);
   document.getElementById('factSub').textContent = FACTURAR
@@ -1189,6 +1210,7 @@ var modoSocio = false;
 var PIN_HASH_SOCIOS = 911136;   // mismo PIN que Gerencia
 function hashPin(t) { var h = 5381; for (var i = 0; i < t.length; i++) h = ((h * 33) ^ t.charCodeAt(i)) >>> 0; return h % 1000000; }
 function toggleSocio() {
+  if (!modoSocio && CASHEA_ON) { toast('Apaga Cashea antes de vender a un socio', 'err'); return; }
   if (!modoSocio) {
     var pin = prompt('PIN de socios para vender a costo:');   // se pide siempre, no se recuerda
     if (pin === null) return;
@@ -1208,7 +1230,7 @@ function toggleSocio() {
 function aplicarCostos() {
   for (var i = 0; i < cart.length; i++) {
     var c = cart[i];
-    c.precio = modoSocio ? (parseFloat(c.costo) || 0) : precioLista(c);
+    c.precio = modoSocio ? (parseFloat(c.costo) || 0) : precioCashea(precioLista(c));
   }
   renderCart(); updateTotals();
 }
@@ -1307,6 +1329,104 @@ function sumaPagosUSD() {
     t += monto;
   }
   return t;
+}
+
+// ============================================================
+// CASHEA (v15.7): precio de lista + recargo, factura con IVA incluido y monto en $ BCV para la app
+// ============================================================
+var CASHEA_ON = false, CAS_INI = '';
+var CAS = (function() {
+  var c = {recargo:30, comTotal:4, comFin:4};
+  try { var g = JSON.parse(localStorage.getItem('boparts_cashea') || 'null'); if (g && g.recargo >= 0) c = g; } catch (e) {}
+  return c;
+})();
+function fijarCasheaDesdeConfig(d) {
+  if (!d || !(Number(d.casheaRecargo) >= 0) || d.casheaRecargo === undefined) return;
+  var n = {recargo:Number(d.casheaRecargo), comTotal:Number(d.casheaComTotal) || 0, comFin:Number(d.casheaComFin) || 0};
+  var cambio = n.recargo !== CAS.recargo;
+  CAS = n;
+  try { localStorage.setItem('boparts_cashea', JSON.stringify(CAS)); } catch (e) {}
+  document.getElementById('casSub').textContent = 'Precio de lista + ' + CAS.recargo + '%, con factura';
+  if (cambio && CASHEA_ON) aplicarCostos();
+}
+function precioCashea(lista) {
+  lista = parseFloat(lista) || 0;
+  return CASHEA_ON ? Math.round(lista * (1 + CAS.recargo / 100) * 100) / 100 : lista;
+}
+function toggleCashea() {
+  if (!CASHEA_ON && modoSocio) { toast('Una venta a socio no va con Cashea', 'err'); return; }
+  if (!CASHEA_ON && !(TASA_BCV > 0)) { toast('Sin tasa BCV no se puede vender con Cashea. La carga un socio en Gerencia.', 'err'); return; }
+  CASHEA_ON = !CASHEA_ON;
+  document.getElementById('casTog').classList.toggle('on', CASHEA_ON);
+  document.getElementById('casBox').style.display = CASHEA_ON ? 'block' : 'none';
+  if (CASHEA_ON && !FACTURAR) toggleFacturar();                      // Cashea siempre va facturado
+  if (!CASHEA_ON) CAS_INI = '';   // la factura queda encendida: si no va, el vendedor la apaga a mano
+  aplicarCostos();
+}
+function fmtBs2(n) { return 'Bs ' + (Math.round((Number(n) || 0) * 100) / 100).toLocaleString('es-VE', {minimumFractionDigits:2, maximumFractionDigits:2}); }
+function datosCashea() {
+  var usd = baseCarritoUSD(), bs = Math.round(usd * TASA);
+  var base = Math.round(bs / (1 + IVA_PCT / 100) * 100) / 100;
+  var r = {bs:bs, base:base, iva:Math.round((bs - base) * 100) / 100, bcv:0, ini:0, iniBs:0, finBCV:0, finBs:0};
+  if (TASA_BCV > 0) {
+    r.bcv = Math.round(bs / TASA_BCV * 100) / 100;
+    r.ini = Math.min(Math.max(parseFloat(CAS_INI) || 0, 0), r.bcv);
+    r.iniBs = Math.round(r.ini * TASA_BCV * 100) / 100;
+    r.finBs = Math.round((bs - r.iniBs) * 100) / 100;
+    r.finBCV = Math.round((r.bcv - r.ini) * 100) / 100;
+  }
+  return r;
+}
+function pintarCashea() {
+  var box = document.getElementById('casBox');
+  if (!box || !CASHEA_ON) return;
+  if (!cart.length) { box.innerHTML = '<div class="cominfo">Agrega los productos: cada uno sube ' + CAS.recargo + '% sobre la lista.</div>'; return; }
+  var d = datosCashea();
+  if (!d.bcv) { box.innerHTML = '<div class="cominfo" style="border-left-color:var(--red)">Sin tasa BCV no se puede calcular el monto de Cashea.</div>'; return; }
+  var activo = document.activeElement && document.activeElement.id === 'casIni';
+  if (activo) {   // mientras escribe la inicial no se redibuja el campo (perderia el cursor)
+    var r = document.getElementById('casRes'); if (r) r.innerHTML = resCashea(d); return;
+  }
+  box.innerHTML =
+    '<div style="margin-top:10px;background:var(--brand);color:#111;border-radius:12px;padding:14px;text-align:center">' +
+      '<div style="font-size:11px;font-weight:700;letter-spacing:.06em">CARGAR EN LA APP CASHEA</div>' +
+      '<div style="font-size:30px;font-weight:800;margin:2px 0" id="casMonto">$ ' + d.bcv.toFixed(2) + ' <span style="font-size:14px">BCV</span></div>' +
+      '<button onclick="copiarCashea()" style="background:#111;color:var(--brand);border:none;border-radius:8px;padding:6px 14px;font-weight:700;font-size:12px;cursor:pointer">Copiar ' + d.bcv.toFixed(2) + '</button>' +
+    '</div>' +
+    '<div class="cominfo" style="margin-top:8px">Total factura <b>' + fmtBs2(d.bs) + '</b><br>Base imponible ' + fmtBs2(d.base) + ' · IVA ' + IVA_PCT + '% ' + fmtBs2(d.iva) +
+      '<br><span style="color:var(--ink-muted)">BCV ' + TASA_BCV + '</span></div>' +
+    '<div class="field" style="margin-top:8px"><label>Inicial que pide la app ($ BCV)</label>' +
+      '<input type="number" id="casIni" step="0.01" placeholder="0.00" value="' + escHtml(CAS_INI) + '" oninput="CAS_INI=this.value;pintarCashea()"></div>' +
+    '<div id="casRes">' + resCashea(d) + '</div>';
+}
+function resCashea(d) {
+  if (!(d.ini > 0)) return '<div class="cominfo">Escribe la inicial que muestra la app para saber cuanto cobrar en tienda.</div>';
+  return '<div class="cominfo">Cobrar inicial en tienda: <b>' + fmtBs2(d.iniBs) + '</b> ($ ' + d.ini.toFixed(2) + ' BCV)' +
+    '<br>Cashea financia: <b>$ ' + d.finBCV.toFixed(2) + ' BCV</b> (' + fmtBs2(d.finBs) + ')</div>' +
+    '<button class="addpbtn" style="margin-top:6px" onclick="pagosCashea()">Poner en forma de pago</button>';
+}
+function copiarCashea() {
+  var v = datosCashea().bcv.toFixed(2);
+  try { navigator.clipboard.writeText(v).then(function() { toast('Copiado: ' + v, 'ok'); }, function() { toast(v, 'ok'); }); }
+  catch (e) { toast(v, 'ok'); }
+}
+// Arma las dos formas de pago: la inicial en Bs (Pago Movil Bancrecer si existe; el vendedor la cambia si pago
+// distinto) y el resto con Cashea. Reemplaza lo que hubiera.
+function pagosCashea() {
+  var d = datosCashea();
+  if (!(d.ini > 0)) { toast('Escribe la inicial', 'err'); return; }
+  var iCas = -1, iIni = -1;
+  for (var j = 0; j < METODOS.length; j++) {
+    var m = METODOS[j], t = (m.metodo + ' ' + m.banco + ' ' + m.label).toUpperCase();
+    if (iCas < 0 && t.indexOf('CASHEA') >= 0) iCas = j;
+    if (iIni < 0 && !m.credito && m.moneda === 'BS' && t.indexOf('PAGO MOVIL') >= 0 && t.indexOf('BANCRECER') >= 0) iIni = j;
+  }
+  if (iCas < 0) { toast('No hay metodo de pago Cashea en la hoja METODOS_PAGO', 'err'); return; }
+  pid++; var p1 = {id:pid, metodoData:null, metIdx:iIni >= 0 ? String(iIni) : '', monto:d.iniBs.toFixed(2), moneda:'BS'};
+  pid++; var p2 = {id:pid, metodoData:null, metIdx:String(iCas), monto:d.finBs.toFixed(2), moneda:'BS'};
+  pagos = [p1, p2];
+  renderPagos(); updateTotals();
+  toast('Pagos listos: inicial ' + fmtBs2(d.iniBs) + ' + Cashea ' + fmtBs2(d.finBs), 'ok');
 }
 
 // ============================================================
@@ -1459,20 +1579,30 @@ function guardarVenta() {
   creditoUSD = Math.round(creditoUSD * 100) / 100;
 
   // Cashea: el cliente paga la inicial en tienda y Cashea liquida el resto.
-  // Comision: 4% del total de la venta + 4% del monto financiado.
-  var cashea = {inicial:0, financiado:0, comision:0, neto:0};
+  // Comision (v15.7: de CONFIG): CAS.comTotal % del total de la venta + CAS.comFin % del monto financiado.
+  var cashea = {inicial:0, financiado:0, comision:0, neto:0, finBs:0, finBCV:0, iniBs:0, iniBCV:0};
   for (var ci = 0; ci < pagos.length; ci++) {
     var cp = pagos[ci];
     if (!cp.metodoData || String(cp.metodoData.metodo).toUpperCase().indexOf('CASHEA') < 0) continue;
     var cEl = document.getElementById('monto_' + cp.id), coEl = document.getElementById('mon_' + cp.id);
     var cm = cEl ? parseFloat(cEl.value) || 0 : 0;
-    cashea.financiado += (coEl && coEl.value === 'BS') ? cm / TASA : cm;
+    var cBs = (coEl && coEl.value === 'BS') ? cm : cm * TASA;
+    cashea.finBs += cBs;
+    cashea.financiado += cBs / TASA;
   }
+  if (CASHEA_ON && !(cashea.financiado > 0)) { toast('Venta con Cashea: falta la forma de pago Cashea. Escribe la inicial y toca "Poner en forma de pago".', 'err'); return; }
+  if (cashea.financiado > 0 && !CASHEA_ON &&
+      !confirm('Este pago es con Cashea pero el precio NO lleva el recargo de ' + CAS.recargo + '%.\n\nPara cobrarlo, cancela y enciende "Venta con Cashea".\n¿Registrar igual sin recargo?')) return;
   if (cashea.financiado > 0) {
+    if (!(TASA_BCV > 0)) { toast('Sin tasa BCV no se puede vender con Cashea. La carga un socio en Gerencia.', 'err'); return; }
     cashea.financiado = Math.round(cashea.financiado * 100) / 100;
     cashea.inicial = Math.round((usd - cashea.financiado) * 100) / 100;
-    cashea.comision = Math.round((usd * 0.04 + cashea.financiado * 0.04) * 100) / 100;
+    cashea.comision = Math.round((usd * CAS.comTotal / 100 + cashea.financiado * CAS.comFin / 100) * 100) / 100;
     cashea.neto = Math.round((cashea.financiado - cashea.comision) * 100) / 100;
+    cashea.finBs = Math.round(cashea.finBs * 100) / 100;
+    cashea.finBCV = Math.round(cashea.finBs / TASA_BCV * 100) / 100;
+    cashea.iniBs = Math.round((bs - cashea.finBs) * 100) / 100;
+    cashea.iniBCV = Math.round(cashea.iniBs / TASA_BCV * 100) / 100;
   }
 
   var aComBs = aliadoSel ? Math.round(bs * aliadoSel.pct / 100) : 0;
@@ -1496,6 +1626,7 @@ function guardarVenta() {
     facturar:FACTURAR, baseUSD:baseUSD, ivaUSD:ivaUSD, totalConIvaUSD:usd, tasaBCV:TASA_BCV,
     casheaInicial:cashea.inicial, casheaFinanciado:cashea.financiado,
     casheaComision:cashea.comision, casheaNeto:cashea.neto,
+    casheaFinBCV:cashea.finBCV, casheaRecargo:(CASHEA_ON && cashea.financiado > 0) ? CAS.recargo : 0,
     cliente: cliSel ? {nombre:cliSel.nombre, rif:cliSel.rif || '', tel:cliSel.tel || ''} : null,
     creditoUSD: creditoUSD,
     socio: socioSel
@@ -1530,6 +1661,8 @@ function guardarVenta() {
                       '. NO se duplico.\n\n' : '') +
         vendedor + ' - ' + fmtUSD(usd) + ' / ' + fmtBS(bs) +
         (hayCredito ? '\nA credito: ' + fmtUSD(creditoUSD) + ' - ' + cliSel.nombre : '') +
+        (cashea.financiado > 0 ? '\n\nCASHEA: cargar en la app ' + fmtUSD(Math.round(bs / TASA_BCV * 100) / 100) + ' BCV' +
+          ' (financia ' + fmtUSD(cashea.finBCV) + ' BCV)' : '') +
         ((d.avisos && d.avisos.length) ? '\n\n\u26A0 Se vendio mas de lo disponible:\n' + d.avisos.map(function(a) {
           return '- ' + a.producto + ': vendiste ' + a.vendido + ', disponible ' + a.disponible +
                  (a.apartado ? ' (' + a.apartado + ' apartado)' : '');
@@ -1643,6 +1776,9 @@ function resetAll() {
   aliadoOn = false; aliadoSel = null; cliSel = null; lastCredito = null;
   olvidarIdVenta(); FACT = null; try { document.getElementById('btnFactura').textContent = 'Generar FACTURA digital'; } catch (eF) {}
   clienteVenta = null; saldoCliente = 0; saldoConocido = false; pintarClienteVenta();
+  CASHEA_ON = false; CAS_INI = '';
+  var ct = document.getElementById('casTog'); if (ct) ct.classList.remove('on');
+  var cb = document.getElementById('casBox'); if (cb) cb.style.display = 'none';
   FACTURAR = false;
   var ft = document.getElementById('factTog'); if (ft) ft.classList.remove('on');
   var fs = document.getElementById('factSub'); if (fs) fs.textContent = 'Apagado: nota de entrega, sin IVA';

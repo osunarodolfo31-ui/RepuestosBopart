@@ -1,5 +1,17 @@
 # CHANGELOG — Repuesto BoParts
 
+## Apps Script v28.20 + ventas v15.7 + gerencia v3.8 + pdf v1.3 — build 2026-11-10.1 — precio Cashea
+
+- Ventas: interruptor "Venta con Cashea". Cada linea = lista + recargo (CONFIG B18, 30%). Enciende la factura
+  (IVA incluido, desglosado) y muestra en grande el monto para la app: total Bs / BCV, en $ BCV, con boton Copiar.
+- El vendedor escribe la inicial que pide la app ($ BCV): ve cuanto cobrar en Bs y cuanto financia Cashea.
+  "Poner en forma de pago" arma inicial (Pago Movil Bancrecer, cambiable) + Cashea.
+- Usar el metodo Cashea sin el interruptor pide confirmacion (se venderia sin recargo).
+- Comision Cashea desde CONFIG: B19 % sobre el total (4) y B20 % sobre lo financiado (4).
+- VENTAS AP CASHEA_FIN_BCV (lo que Cashea debe liquidar) y AQ CASHEA_RECARGO_PCT.
+- Gerencia > Configuracion > Cashea: cambia recargo y comisiones; muestra cuanto queda por cada $100 de lista.
+- PDF factura: el desglose Cashea sale en Bs y REF $ BCV (antes salia en dolares de trabajo).
+
 ## Apps Script v28.19 + documentos v1.3 — build 2026-11-07.2 — cambiar el cliente de una nota
 
 - POST tipo=cambiar_cliente (solo SOCIO) {idVenta, nuevo:{nombre, rif}, motivo}.

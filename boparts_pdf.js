@@ -1,5 +1,6 @@
 /* =============================================================================
-   boparts_pdf.js — DOCUMENTOS EN PDF COMPARTIDOS (v1.2, 2026-11-04: solo tasa BCV; la de trabajo nunca se imprime)
+   boparts_pdf.js — DOCUMENTOS EN PDF COMPARTIDOS (v1.3, 2026-11-10: desglose Cashea en Bs y REF $ BCV)
+   v1.2 (2026-11-04): solo tasa BCV; la de trabajo nunca se imprime
    v1.1 (2026-11-02): nota de entrega y cotizacion profesionales
    =============================================================================
    Una sola copia de los datos del emisor y de los dibujos de la factura digital y de la nota de entrega.
@@ -123,7 +124,11 @@ function pdfFactura(f, opts) {
       var CA = opts.cashea;
       if (CA && CA.financiado > 0) {
         y += 1; doc.setFont('helvetica','bold'); doc.text('Desglose Cashea', M, y); y += 4; doc.setFont('helvetica','normal');
-        doc.text('Inicial en tienda: USD ' + fNum(CA.inicial, 2) + ' · Financiado por Cashea: USD ' + fNum(CA.financiado, 2), M, y); y += 4;
+        // v1.3: en Bs y REF $ BCV. Antes salia en dolares de la tasa de trabajo, que no se imprime nunca.
+        if (CA.finBs > 0) {
+          doc.text('Inicial en tienda: ' + fBs(CA.iniBs) + ' (REF. $ BCV ' + fNum(CA.iniBCV, 2) + ')', M, y); y += 4;
+          doc.text('Financiado por Cashea: ' + fBs(CA.finBs) + ' (REF. $ BCV ' + fNum(CA.finBCV, 2) + ')', M, y); y += 4;
+        }
       }
       var yPagos = y;
       y = yIni; var lx = W - M - 82;
