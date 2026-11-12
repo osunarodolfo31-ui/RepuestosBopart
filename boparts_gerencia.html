@@ -1,7 +1,10 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_gerencia.html
-  VERSION: v3.8 (2026-11-10) | build 2026-11-11.1 | requiere Apps Script v28.20
+  VERSION: v3.9 (2026-11-12) | build 2026-11-12.1 | requiere Apps Script v28.22
+  v3.9: KPI "Redondeos" del periodo (ventas cobradas en Bs por encima o por debajo de la lista). Ya esta dentro de la
+  utilidad: se muestra para ver cuanto cuesta redondear.
+  VERSION anterior: v3.8 (2026-11-10) | build 2026-11-10.1 | requiere Apps Script v28.20
   v3.8: Configuracion > Cashea: recargo sobre la lista y comision de Cashea (CONFIG B18:B20), con lo que le queda a
   la tienda por cada $100 de lista despues de IVA y comision.
   VERSION anterior: v3.7 (2026-11-07) | build 2026-11-07.2 | requiere Apps Script v28.18
@@ -541,8 +544,8 @@ select option{background:#1E1E1E;color:var(--ink)}
   </div>
 </div>
 
-<script src="boparts_sesion.js?v=2026-11-11.1"></script>
-<script src="boparts_clientes.js?v=2026-11-11.1"></script>
+<script src="boparts_sesion.js?v=2026-11-12.1"></script>
+<script src="boparts_clientes.js?v=2026-11-12.1"></script>
 <script>
 
 
@@ -555,7 +558,7 @@ function sellarVersion(d) {
   if (t) t.textContent = 'app ' + APP_VERSION + ' \u00b7 script ' + VER_SCRIPT;
   return d;
 }
-var APP_VERSION = 'v3.8';
+var APP_VERSION = 'v3.9';
 var TASA = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
 var periodo = 'hoy', DATA = null;
 
@@ -1198,11 +1201,18 @@ function cargar() {
   // v3.7: el diferencial cambiario de las cuentas en $ BCV va en su propia llamada (no pesa sobre action=ventas)
   var difP = fetch(SCRIPT_URL + '?action=cxc_diferencial&desde=' + r.d1 + '&hasta=' + r.d2 + '&t=' + Date.now())
     .then(leerJSON).catch(function() { return null; });
+  var redP = fetch(SCRIPT_URL + '?action=redondeos&desde=' + r.d1 + '&hasta=' + r.d2 + '&t=' + Date.now())
+    .then(leerJSON).catch(function() { return null; });
   fetch(SCRIPT_URL + '?action=ventas&desde=' + r.d1 + '&hasta=' + r.d2 + '&t=' + Date.now())
     .then(leerJSON)
     .then(function(d) {
       if (!d || !d.ok) throw new Error(d && d.error ? d.error : 'sin datos');
-      return difP.then(function(df) { d.diferencial = (df && df.ok) ? df : {total:0, items:[]}; DATA = d; render(r); });
+      return Promise.all([difP, redP]).then(function(x) {
+        var df = x[0], rd = x[1];
+        d.diferencial = (df && df.ok) ? df : {total:0, items:[]};
+        d.redondeos = (rd && rd.ok) ? rd : {totalBs:0, totalUSD:0, items:[]};
+        DATA = d; render(r);
+      });
     })
     .catch(function(e) {
       document.getElementById('cuerpo').innerHTML = '<div class="section"><div class="cart-empty" style="color:var(--red)">No se pudo cargar: ' + escHtml(e.message) + '</div></div>';
@@ -1245,6 +1255,9 @@ function render(r) {
     kpi('Comisiones', usd(comUSD + aliUSD), 'punto ' + usd(comUSD) + ' · aliados ' + usd(aliUSD)) +
     kpi('Gastos del periodo', usd(gastosUSD), G.length + ' registros') +
     (difN ? kpi('Diferencial cambiario', (difUSD >= 0 ? '+' : '') + usd(difUSD), difN + ' abono(s) de cuentas en $ Ref BCV', difUSD >= 0 ? 'pos' : 'neg') : '') +
+    (DATA.redondeos && DATA.redondeos.items.length ? kpi('Redondeos', (DATA.redondeos.totalBs >= 0 ? '+' : '-') + bs(Math.abs(DATA.redondeos.totalBs)),
+        DATA.redondeos.items.length + ' venta(s) · ' + (DATA.redondeos.totalUSD >= 0 ? '+' : '-') + usd(Math.abs(DATA.redondeos.totalUSD)) + ' · ya incluido en la utilidad',
+        DATA.redondeos.totalBs >= 0 ? 'pos' : 'neg') : '') +
     kpi('Resultado', usd(resultado), 'utilidad - comisiones - gastos' + (difN ? ' ± diferencial' : ''), resultado >= 0 ? 'pos' : 'neg') +
     kpi('Ticket promedio', tickets ? usd(totalRef / tickets) : '$0.00', unidades && tickets ? (unidades / tickets).toFixed(1) + ' items por venta' : '') +
     '</div>';

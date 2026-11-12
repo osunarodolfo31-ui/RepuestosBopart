@@ -1,7 +1,12 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_ventas.html
-  VERSION: v15.7 (2026-11-10) | build 2026-11-11.1 | requiere boparts_pdf.js v1.3 y Apps Script v28.20
+  VERSION: v15.8 (2026-11-12) | build 2026-11-12.1 | requiere Apps Script v28.22
+  v15.8: REDONDEO EN Bs. (1) El total en Bs ya no sale de redondear primero los dolares a 2 decimales ($3,4545 daba
+  3.795 en vez de 3.800). (2) Campo "Cobrado en Bs": si se cobro un monto redondeado, se escribe ahi. El precio de
+  lista no cambia en pantalla; la diferencia queda como REDONDEO en la venta y los precios de las lineas se ajustan
+  por dentro para que el margen sea el real. Un vendedor puede redondear hasta el tope de CONFIG (2%).
+  VERSION anterior: v15.7 (2026-11-10) | build 2026-11-10.1 | requiere boparts_pdf.js v1.3 y Apps Script v28.20
   v15.7: VENTA CON CASHEA. Un interruptor sube cada linea al precio de lista + el recargo de CONFIG (30%), enciende la
   factura (IVA incluido, desglosado) y muestra en grande el monto que se carga en la app de Cashea, en $ BCV
   (total Bs / BCV). El vendedor escribe la inicial que pide la app y un boton arma las dos formas de pago: inicial
@@ -254,7 +259,7 @@ select option{background:#1E1E1E;color:var(--ink)}
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
-<script src="boparts_pdf.js?v=2026-11-11.1"></script>
+<script src="boparts_pdf.js?v=2026-11-12.1"></script>
 </head>
 <body>
 
@@ -343,7 +348,12 @@ select option{background:#1E1E1E;color:var(--ink)}
     <div class="trow"><span class="tlbl">Base imponible</span><span class="tval" id="tBase">$0.00</span></div>
     <div class="trow"><span class="tlbl">IVA 16%</span><span class="tval" id="tIVA">$0.00</span></div>
     <div class="trow"><span class="tlbl">Total USD</span><span class="tval" id="tUSD">$0.00</span></div>
+    <div class="trow" id="tListaRow" style="display:none"><span class="tlbl">Segun lista</span><span class="tval" id="tLista"></span></div>
+    <div class="trow" id="tRedRow" style="display:none"><span class="tlbl">Redondeo</span><span class="tval" id="tRed"></span></div>
     <div class="trow"><span class="tlbl">Total Bs</span><span class="tval big" id="tBS">Bs 0</span></div>
+    <div class="field" id="cobBox" style="margin-top:8px"><label>Cobrado en Bs (solo si se redondeo)</label>
+      <input type="number" id="cobBs" step="1" inputmode="decimal" placeholder="Ej: 3800" oninput="setCobrado(this.value)"></div>
+    <div class="cominfo" id="cobAviso" style="display:none"></div>
     <div class="trow" id="tComRow" style="display:none"><span class="tlbl">Comision punto</span><span class="tval red" id="tCom"></span></div>
     <div class="trow" id="tNetRow" style="display:none"><span class="tlbl">Neto recibido</span><span class="tval" id="tNet"></span></div>
   </div>
@@ -576,8 +586,8 @@ select option{background:#1E1E1E;color:var(--ink)}
   </div>
 </div>
 
-<script src="boparts_sesion.js?v=2026-11-11.1"></script>
-<script src="boparts_clientes.js?v=2026-11-11.1"></script>
+<script src="boparts_sesion.js?v=2026-11-12.1"></script>
+<script src="boparts_clientes.js?v=2026-11-12.1"></script>
 <script>
 
 
@@ -593,7 +603,7 @@ function sellarVersion(d) {
   if (t) t.textContent = 'app ' + APP_VERSION + ' \u00b7 script ' + VER_SCRIPT;
   return d;
 }
-var APP_VERSION = 'v15.7';
+var APP_VERSION = 'v15.8';
 var TASA        = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
 var TASA_ORIGEN = TASA ? 'guardada' : 'ninguna';
 
@@ -609,6 +619,10 @@ function sincronizarTasa() {
       if (!d || !d.ok) return;
       fijarRegionDesdeConfig(d);      // v15.6: estado y ciudad predeterminados de los clientes
       fijarCasheaDesdeConfig(d);      // v15.7: recargo y comision de Cashea
+      if (Number(d.redondeoTope) >= 0 && d.redondeoTope !== undefined) {   // v15.8
+        RED_TOPE = Number(d.redondeoTope);
+        try { localStorage.setItem('boparts_red_tope', String(RED_TOPE)); } catch (e) {}
+      }
       if (d.bcv > 0) {
         TASA_BCV = d.bcv; BCV_FECHA = d.bcvFecha || '';
         try { localStorage.setItem('boparts_bcv', String(TASA_BCV)); localStorage.setItem('boparts_bcv_fecha', BCV_FECHA); } catch (e) {}
@@ -973,7 +987,7 @@ function updateTotals() {
   var usd = baseCarritoUSD();
   var base = FACTURAR ? baseDeTotal(usd) : usd;
   var iva = FACTURAR ? Math.round((usd - base) * 100) / 100 : 0;
-  var bs = Math.round(usd * TASA);
+  var rTot = redondeoActual(), bs = rTot.activo ? COBRADO_BS : Math.round(usd * TASA);
   document.getElementById('tBase').textContent = fmtUSD(base);
   document.getElementById('tIVA').textContent  = fmtUSD(iva);
   document.getElementById('tBase').parentNode.style.display = FACTURAR ? 'flex' : 'none';
@@ -995,6 +1009,7 @@ function updateTotals() {
   document.getElementById('tNetRow').style.display = 'none';
   if (aliadoSel) updateComPrev();
   pintarCashea();
+  pintarRedondeo();
 }
 
 // ============================================================
@@ -1023,10 +1038,58 @@ function syncPagosDesdeDOM() {
     if (monEl) p.moneda = monEl.value;
   }
 }
-function baseCarritoUSD() {
+// v15.8 — 4 decimales: redondear a 2 aqui hacia que $3,4545 x 1100 diera 3.795 Bs en vez de 3.800.
+function listaCarritoUSD() {
   var b = 0;
   for (var i = 0; i < cart.length; i++) b += cart[i].precio * cart[i].cantidad;
-  return Math.round(b * 100) / 100;
+  return Math.round(b * 10000) / 10000;
+}
+// Lo que paga el cliente: la lista, o lo "Cobrado en Bs" si se redondeo.
+function baseCarritoUSD() {
+  var r = redondeoActual();
+  return r.activo ? Math.round(COBRADO_BS / TASA * 10000) / 10000 : listaCarritoUSD();
+}
+// ============================================================
+// REDONDEO (v15.8)
+// ============================================================
+var COBRADO_BS = 0, COB_LISTA = 0;
+var RED_TOPE = (function() { try { var v = parseFloat(localStorage.getItem('boparts_red_tope')); return v >= 0 ? v : 2; } catch (e) { return 2; } })();
+function redondeoActual() {
+  var lista = Math.round(listaCarritoUSD() * TASA);
+  var activo = COBRADO_BS > 0 && TASA > 0 && cart.length && !CASHEA_ON && !modoSocio && COBRADO_BS !== lista;
+  var red = activo ? Math.round((COBRADO_BS - lista) * 100) / 100 : 0;
+  return {activo:activo, listaBs:lista, red:red, pct:lista ? Math.abs(red) / lista * 100 : 0,
+          pasaTope:activo && !soySocio() && Math.abs(red) > lista * RED_TOPE / 100 + 0.01};
+}
+function setCobrado(v) {
+  COBRADO_BS = Math.round((parseFloat(v) || 0) * 100) / 100;
+  COB_LISTA = Math.round(listaCarritoUSD() * TASA);
+  updateTotals();
+}
+function limpiarCobrado() {
+  COBRADO_BS = 0; COB_LISTA = 0;
+  var el = document.getElementById('cobBs'); if (el) el.value = '';
+}
+function pintarRedondeo() {
+  var box = document.getElementById('cobBox'); if (!box) return;
+  box.style.display = (CASHEA_ON || modoSocio) ? 'none' : 'block';
+  // Si cambio el carrito despues de escribir lo cobrado, ese monto ya no corresponde: se borra.
+  if (COBRADO_BS > 0 && COB_LISTA && Math.round(listaCarritoUSD() * TASA) !== COB_LISTA) {
+    limpiarCobrado(); toast('Cambio el carrito: vuelve a escribir lo cobrado en Bs', 'err');
+  }
+  var r = redondeoActual(), av = document.getElementById('cobAviso');
+  document.getElementById('tListaRow').style.display = r.activo ? 'flex' : 'none';
+  document.getElementById('tRedRow').style.display = r.activo ? 'flex' : 'none';
+  if (r.activo) {
+    document.getElementById('tLista').textContent = fmtBs2(r.listaBs);
+    var tr = document.getElementById('tRed');
+    tr.textContent = (r.red > 0 ? '+' : '-') + fmtBs2(Math.abs(r.red)).replace('Bs ', 'Bs ') + ' (' + r.pct.toFixed(1) + '%)';
+    tr.style.color = r.red < 0 ? 'var(--red)' : 'var(--green)';
+  }
+  if (r.pasaTope) {
+    av.style.display = 'block'; av.style.borderLeftColor = 'var(--red)';
+    av.innerHTML = 'Ese redondeo pasa del <b>' + RED_TOPE + '%</b> permitido. Si es un descuento, lo registra un socio.';
+  } else av.style.display = 'none';
 }
 // v15.5 — Lo que el cliente paga es el precio de la lista, se facture o no (el IVA va incluido).
 function totalCarritoUSD() { return baseCarritoUSD(); }
@@ -1486,10 +1549,12 @@ function guardarVenta() {
   var fecha = now.toLocaleDateString('es-VE');
   var hora  = now.toLocaleTimeString('es-VE', {hour:'2-digit', minute:'2-digit'});
   // v15.5: IVA incluido. usd = lo que paga el cliente; base e IVA salen de ahi.
+  var RED = redondeoActual();
+  if (RED.pasaTope) { toast('El redondeo pasa del ' + RED_TOPE + '% permitido. Lo registra un socio.', 'err'); return; }
   var usd     = baseCarritoUSD();
   var baseUSD = FACTURAR ? baseDeTotal(usd) : usd;
   var ivaUSD  = FACTURAR ? Math.round((usd - baseUSD) * 100) / 100 : 0;
-  var bs    = Math.round(usd * TASA);
+  var bs    = RED.activo ? COBRADO_BS : Math.round(usd * TASA);
   var prods = cart.map(function(c) { return c.producto + ' x' + c.cantidad + ' (' + fmtUSD(c.precio) + ')'; }).join(' | ');
   var notas = document.getElementById('txtNotas').value;
 
@@ -1507,9 +1572,12 @@ function guardarVenta() {
       pad2(now.getHours()) + pad2(now.getMinutes()) + pad2(now.getSeconds()) + '-' + Math.random().toString(36).substr(2,4).toUpperCase());
   }
   var idVenta = idVentaActual;
+  // v15.8: con redondeo, cada linea lleva su parte (precio con 6 decimales) para que el margen sea el real.
+  var kRed = RED.activo && RED.listaBs > 0 ? COBRADO_BS / RED.listaBs : 1;
   var lineas = lastCart.map(function(c) {
-    return {codigo:c.codigo, producto:c.producto, cantidad:c.cantidad, precio:c.precio, costo:c.costo};
+    return {codigo:c.codigo, producto:c.producto, cantidad:c.cantidad, precio:kRed === 1 ? c.precio : Math.round(c.precio * kRed * 1e6) / 1e6, costo:c.costo};
   });
+  if (kRed !== 1) lastCart.forEach(function(c, i) { c.precio = lineas[i].precio; });   // la nota PDF muestra lo cobrado
 
   var com = 0;
   var pagoData = [];
@@ -1626,6 +1694,7 @@ function guardarVenta() {
     facturar:FACTURAR, baseUSD:baseUSD, ivaUSD:ivaUSD, totalConIvaUSD:usd, tasaBCV:TASA_BCV,
     casheaInicial:cashea.inicial, casheaFinanciado:cashea.financiado,
     casheaComision:cashea.comision, casheaNeto:cashea.neto,
+    redondeoBs:RED.activo ? RED.red : 0, listaBs:RED.activo ? RED.listaBs : 0,
     casheaFinBCV:cashea.finBCV, casheaRecargo:(CASHEA_ON && cashea.financiado > 0) ? CAS.recargo : 0,
     cliente: cliSel ? {nombre:cliSel.nombre, rif:cliSel.rif || '', tel:cliSel.tel || ''} : null,
     creditoUSD: creditoUSD,
@@ -1776,6 +1845,7 @@ function resetAll() {
   aliadoOn = false; aliadoSel = null; cliSel = null; lastCredito = null;
   olvidarIdVenta(); FACT = null; try { document.getElementById('btnFactura').textContent = 'Generar FACTURA digital'; } catch (eF) {}
   clienteVenta = null; saldoCliente = 0; saldoConocido = false; pintarClienteVenta();
+  limpiarCobrado();
   CASHEA_ON = false; CAS_INI = '';
   var ct = document.getElementById('casTog'); if (ct) ct.classList.remove('on');
   var cb = document.getElementById('casBox'); if (cb) cb.style.display = 'none';

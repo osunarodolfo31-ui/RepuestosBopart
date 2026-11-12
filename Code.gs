@@ -1,6 +1,14 @@
 /**
  * Repuesto BoParts — Code.gs
- * VERSION: v28.21 (2026-11-11) | tasa negociada con OB
+ * VERSION: v28.22 (2026-11-12) | redondeo en Bs
+ *
+ * v28.22 — REDONDEO. Cuando el vendedor cobra un monto en Bs redondeado (3.800 en vez de 3.850), la venta manda
+ *   redondeoBs (cobrado - lista, con signo) y listaBs. VENTAS AR REDONDEO_BS. Los precios de las lineas ya llegan
+ *   ajustados (con mas decimales) para que el margen por producto sea el real. Un VENDEDOR no puede redondear
+ *   mas de CONFIG B21 REDONDEO_TOPE_PCT (2% si esta vacio) de lo que daba la lista; un socio si, pero queda
+ *   registrado igual. action=redondeos (SOCIO) suma los del periodo para Gerencia.
+ *
+ * VERSION anterior: v28.21 (2026-11-11) | tasa negociada con OB
  *
  * v28.21 — TASA NEGOCIADA CON OB. Un cambio con OB sigue yendo a la tasa de trabajo, salvo que un SOCIO mande
  *   tasaNegociada (> 0, hasta 30% lejos de la de trabajo) con un motivo en notas. MOV_CUENTAS gana Q TASA_TRABAJO
@@ -591,7 +599,7 @@ function listaAliados_(ss) {
 var PERMISOS_GET = {
   config:'VENDEDOR', nextNota:'VENDEDOR', nextCot:'VENDEDOR', nextFactura:'VENDEDOR', nota:'VENDEDOR',
   apartados:'VENDEDOR', proveedores:'VENDEDOR', stock:'VENDEDOR', conteos:'VENDEDOR', clientes:'VENDEDOR',
-  cxc:'VENDEDOR', cxc_diferencial:'SOCIO', productos:'VENDEDOR', catalogo:'VENDEDOR', metodos:'VENDEDOR', equivalencias:'VENDEDOR', cuentas:'VENDEDOR',
+  cxc:'VENDEDOR', cxc_diferencial:'SOCIO', redondeos:'SOCIO', productos:'VENDEDOR', catalogo:'VENDEDOR', metodos:'VENDEDOR', equivalencias:'VENDEDOR', cuentas:'VENDEDOR',
   tareas:'VENDEDOR',
   producto:'SOCIO',
   ventas:'SOCIO', socios:'SOCIO', cxp:'SOCIO', cliente_stats:'SOCIO', compras:'SOCIO', diag:'SOCIO',
@@ -835,7 +843,7 @@ function claveDePost_(data) {
 // OJO: esta constante es lo que ven las apps en el menu. Se habia quedado en v21.4 mientras el
 // encabezado ya decia v24, asi que el sello de version — que existe justamente para saber si lo
 // desplegado es lo que crees — estaba mintiendo. Cada version nueva se cambia AQUI tambien.
-var VERSION_SCRIPT = 'v28.21';
+var VERSION_SCRIPT = 'v28.22';
 
 function json_(obj) {
   // La version viaja en cada respuesta: es la forma rapida de saber si lo desplegado es lo que crees
@@ -1065,6 +1073,9 @@ function rutearGet_(e) {
   if (e.parameter.action === 'cxc') {
     var ss2 = SpreadsheetApp.getActiveSpreadsheet();
     return json_({ok:true, tasa:leerTasa_(ss2), bcv:Number(leerConfig_(ss2).bcv) || 0, clientes:estadoCxc_(ss2, e.parameter.cliente || '')});
+  }
+  if (e.parameter.action === 'redondeos') {
+    return json_(redondeos_(SpreadsheetApp.getActiveSpreadsheet(), e.parameter.desde || '', e.parameter.hasta || ''));
   }
   if (e.parameter.action === 'cxc_diferencial') {
     return json_(diferencialCxc_(SpreadsheetApp.getActiveSpreadsheet(), e.parameter.desde || '', e.parameter.hasta || ''));
@@ -1436,6 +1447,7 @@ function doPost(e) {
     if (data.vendedor !== undefined) {
       delete data.__costoCongelado;      // v27: esas marcas solo las pone el servidor, nunca el telefono
       delete data.__apartadoNum; delete data.__avisos;
+      data.__rol = (quien && quien.rol) || 'VENDEDOR';   // v28.22: el tope de redondeo depende de quien vende
       var lock = LockService.getScriptLock();
       lock.waitLock(10000);
       var numNota = 0, repetida = false;
@@ -1512,6 +1524,13 @@ function guardarVenta_(ss, data) {
   }
   var totV = Number(data.totalUSD);
   if (!isFinite(totV) || totV < 0) throw rechazo_('El total de la venta es invalido');
+  // v28.22 — redondeo en Bs: un vendedor tiene tope; un socio no, pero queda registrado.
+  var redBs = Number(data.redondeoBs) || 0, listaBsV = Number(data.listaBs) || 0;
+  if (redBs) {
+    var topeR = leerConfig_(ss).redondeoTope;
+    if (data.__rol !== 'SOCIO' && listaBsV > 0 && Math.abs(redBs) > listaBsV * topeR / 100 + 0.01)
+      throw rechazo_('El redondeo (Bs ' + redBs + ') pasa del ' + topeR + '% permitido. Si es un descuento, lo autoriza un socio.');
+  }
   if (!(Number(data.creditoUSD) >= 0)) data.creditoUSD = 0;
   if (Number(data.creditoUSD) > totV + 0.05) throw rechazo_('El credito no puede ser mayor que el total de la venta');
   // Un descuento es normal; un total muy por encima o muy por debajo de sus productos no lo es.
@@ -1555,8 +1574,10 @@ function guardarVenta_(ss, data) {
     Number(data.casheaComision) || 0,                        // AN CASHEA_COMISION_USD
     Number(data.casheaNeto) || 0,                            // AO CASHEA_NETO_USD
     Number(data.casheaFinBCV) || 0,                          // AP CASHEA_FIN_BCV (v28.20: lo que Cashea liquida)
-    Number(data.casheaRecargo) || 0                          // AQ CASHEA_RECARGO_PCT
+    Number(data.casheaRecargo) || 0,                         // AQ CASHEA_RECARGO_PCT
+    Number(data.redondeoBs) || 0                             // AR REDONDEO_BS (v28.22: cobrado - lista)
   ]);
+  if (Number(data.redondeoBs) && !String(sheet.getRange(1, 44).getValue() || '').trim()) sheet.getRange(1, 44).setValue('REDONDEO_BS');
   if (Number(data.casheaFinBCV) > 0 && !String(sheet.getRange(1, 42).getValue() || '').trim())
     sheet.getRange(1, 38, 1, 6).setValues([['CASHEA_INICIAL_USD','CASHEA_FINANCIADO_USD','CASHEA_COMISION_USD','CASHEA_NETO_USD','CASHEA_FIN_BCV','CASHEA_RECARGO_PCT']]);
   formatoFecha_(sheet, sheet.getLastRow(), 1);
@@ -1897,6 +1918,21 @@ function cuentaBcvEstado_(c, cb, bcvVentas) {
   c.diferencialUSD = round2_(difTotal);
 }
 // Diferencial cambiario de las cuentas en $ BCV entre dos fechas (yyyy-MM-dd), para Gerencia.
+// v28.22 — redondeos en Bs del periodo (VENTAS AR). Negativo = se cobro menos que la lista.
+function redondeos_(ss, desde, hasta) {
+  var sh = ss.getSheetByName('VENTAS'), items = [], totBs = 0, totUsd = 0;
+  if (sh && sh.getLastRow() > 1) {
+    sh.getRange(2, 1, sh.getLastRow() - 1, 44).getValues().forEach(function(r) {
+      var red = Number(r[43]) || 0; if (!red) return;
+      var f = iso_(r[0]); if (!f || (desde && f < desde) || (hasta && f > hasta)) return;
+      var usdV = Number(r[5]) || 0, bsV = Number(r[6]) || 0, t = (usdV > 0 && bsV > 0) ? bsV / usdV : 0;
+      items.push({fecha:f, nota:r[24], vendedor:String(r[2] || ''), redondeoBs:red, usd:t ? round2_(red / t) : 0});
+      totBs += red; totUsd += t ? red / t : 0;
+    });
+  }
+  return {ok:true, totalBs:round2_(totBs), totalUSD:round2_(totUsd), items:items};
+}
+
 function diferencialCxc_(ss, desde, hasta) {
   var items = [], total = 0;
   estadoCxc_(ss, '').forEach(function(c) {
@@ -2439,6 +2475,7 @@ function leerConfig_(ss) {
   var casN = function(v, def) { return (v === '' || v === null || isNaN(Number(v))) ? def : Number(v); };
   return {ok:true, tasa:tasa, fecha:fecha, quien:quien, bcv:bcv, bcvFecha:bcvFecha,
           casheaRecargo:casN(cas[0][0], 30), casheaComTotal:casN(cas[1][0], 4), casheaComFin:casN(cas[2][0], 4),
+          redondeoTope:casN(cfg ? cfg.getRange('B21').getValue() : '', 2),
           estadoDefecto:estadoDef || 'Lara', ciudadDefecto:estadoDef ? ciudadDef : 'Barquisimeto',
           factura:factura, control:control, controlHasta:controlHasta,
           controlRestantes:(controlHasta && control) ? (controlHasta - control) : 0};

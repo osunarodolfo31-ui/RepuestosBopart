@@ -1,5 +1,15 @@
 # CHANGELOG — Repuesto BoParts
 
+## Apps Script v28.22 + ventas v15.8 + gerencia v3.9 — build 2026-11-12.1 — redondeo en Bs
+
+- Total en Bs calculado sin redondear antes los dolares a 2 decimales ($3,4545 ya da 3.800, no 3.795).
+- Ventas: campo "Cobrado en Bs (solo si se redondeo)". La lista no cambia; se ve "Segun lista" y "Redondeo".
+  Las lineas viajan ajustadas (6 decimales) para que margen, nota y factura cuadren con lo cobrado.
+- Tope para vendedores: CONFIG B21 REDONDEO_TOPE_PCT (2% si esta vacio). Socios sin tope, igual queda registrado.
+  El servidor tambien lo valida.
+- VENTAS AR REDONDEO_BS (cobrado - lista). action=redondeos (SOCIO). Gerencia: KPI "Redondeos".
+- No aplica en ventas con Cashea ni ventas a socio.
+
 ## Apps Script v28.21 + dinero v1.6 — build 2026-11-11.1 — tasa negociada con OB
 
 - Cambio con OB: casilla "Usar otra tasa (negociada con OB)". Solo socios, motivo obligatorio en Notas, maximo 30%
