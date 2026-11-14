@@ -1,5 +1,12 @@
 # CHANGELOG — Repuesto BoParts
 
+## ventas v15.11 — build 2026-11-14.3 — la lista de productos no deja la venta parada
+
+- La ultima lista de productos queda guardada en el telefono: se puede vender con ella si el servidor tarda o falla.
+- Debajo del buscador se ve el estado: cargando / no cargo (con el motivo) + Reintentar. Reintenta sola 3 veces.
+- Si el servidor no contesta en 25 s se corta y se reintenta. El buscador dice "Nada con ..." cuando no hay coincidencias.
+- Sin cambios en Apps Script (sigue v28.24).
+
 ## ventas v15.10 — build 2026-11-14.2 — direccion del cliente al momento de vender
 
 - El formulario rapido de cliente nuevo (arriba, al vender) pide la direccion por partes, con estado y ciudad por defecto.

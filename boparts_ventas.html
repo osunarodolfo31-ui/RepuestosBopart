@@ -1,7 +1,11 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_ventas.html
-  VERSION: v15.10 (2026-11-14) | build 2026-11-14.2 | requiere Apps Script v28.22
+  VERSION: v15.11 (2026-11-14) | build 2026-11-14.3 | requiere Apps Script v28.22
+  v15.11: la lista de productos queda guardada en el telefono y se puede vender con ella si el servidor tarda. Debajo
+  del buscador se ve siempre el estado (cargando / no cargo + Reintentar), reintenta sola 3 veces y corta a los 25 s.
+  El buscador ya no se queda mudo: dice si la lista no ha llegado o si no hay nada con ese nombre.
+  VERSION anterior: v15.10 (2026-11-14) | build 2026-11-14.2 | requiere Apps Script v28.22
   v15.10: DIRECCION AL MOMENTO. El formulario rapido de cliente nuevo (el de arriba, al vender) ya pide la direccion
   por partes. Un cliente que existe sin direccion muestra "+ Agregar direccion" ahi mismo. Si la venta va con
   factura o Cashea, la direccion es obligatoria antes de registrar. Ya no hace falta pasar por Gerencia.
@@ -265,7 +269,7 @@ select option{background:#1E1E1E;color:var(--ink)}
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
-<script src="boparts_pdf.js?v=2026-11-14.2"></script>
+<script src="boparts_pdf.js?v=2026-11-14.3"></script>
 </head>
 <body>
 
@@ -336,6 +340,7 @@ select option{background:#1E1E1E;color:var(--ink)}
       <input type="search" id="prodSearch" placeholder="Nombre, codigo o marca..." autocomplete="off" autocorrect="off" spellcheck="false">
       <div class="drop" id="prodDrop"></div>
     </div>
+    <div class="cominfo" id="prodEstado" style="display:none;margin-bottom:8px"></div>
     <div id="cartEl"><div class="cart-empty">Sin productos aun</div></div>
   </div>
 
@@ -594,8 +599,8 @@ select option{background:#1E1E1E;color:var(--ink)}
   </div>
 </div>
 
-<script src="boparts_sesion.js?v=2026-11-14.2"></script>
-<script src="boparts_clientes.js?v=2026-11-14.2"></script>
+<script src="boparts_sesion.js?v=2026-11-14.3"></script>
+<script src="boparts_clientes.js?v=2026-11-14.3"></script>
 <script>
 
 
@@ -611,7 +616,7 @@ function sellarVersion(d) {
   if (t) t.textContent = 'app ' + APP_VERSION + ' \u00b7 script ' + VER_SCRIPT;
   return d;
 }
-var APP_VERSION = 'v15.10';
+var APP_VERSION = 'v15.11';
 var TASA        = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
 var TASA_ORIGEN = TASA ? 'guardada' : 'ninguna';
 
@@ -741,24 +746,59 @@ function isValidCSV(txt) {
 // ============================================================
 // LOAD PRODUCTS
 // ============================================================
+// v15.11 — CARGA QUE SE VE Y SE REPITE. Antes, si el script tardaba o fallaba, el aviso era un toast que se iba y
+// el buscador quedaba mudo. Ahora: (1) la ultima lista queda guardada en el telefono (localStorage, no solo en la
+// sesion) y se puede vender con ella; (2) debajo del buscador se dice siempre en que esta la lista; (3) reintenta
+// sola 3 veces y hay boton Reintentar; (4) si el script no contesta en 25 s se corta y se reintenta.
+var PROD_KEY = 'boparts_prod_v14', PROD_ESTADO = 'cargando', PROD_INTENTO = 0, PROD_MOTIVO = '';
+function leerCacheProd() {
+  var t = null;
+  try { t = localStorage.getItem(PROD_KEY); } catch (e) {}
+  if (!t) { try { t = sessionStorage.getItem(PROD_KEY); } catch (e) {} }
+  return t;
+}
+function guardarCacheProd(txt) {
+  try { localStorage.setItem(PROD_KEY, txt); localStorage.setItem(PROD_KEY + '_t', String(Date.now())); }
+  catch (e) { try { sessionStorage.setItem(PROD_KEY, txt); } catch (e2) {} }
+}
+function pintarEstadoProd() {
+  var el = document.getElementById('prodEstado'); if (!el) return;
+  var hay = PRODUCTS.length > 0, h = '';
+  if (PROD_ESTADO === 'ok') { el.style.display = 'none'; return; }
+  var cuando = '';
+  try { var tt = Number(localStorage.getItem(PROD_KEY + '_t')); if (tt) cuando = ' del ' + new Date(tt).toLocaleString('es-VE', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'}); } catch (e) {}
+  if (PROD_ESTADO === 'cargando') {
+    h = hay ? 'Actualizando la lista de productos... puedes vender con la guardada' + cuando + '.'
+            : 'Cargando la lista de productos' + (PROD_INTENTO > 1 ? ' (intento ' + PROD_INTENTO + ' de 3)' : '') + '... El buscador responde cuando termine.';
+  } else {
+    h = '<b style="color:var(--red)">' + (hay ? 'No se pudo actualizar la lista' : 'No cargo la lista de productos') + '</b> (' + escHtml(PROD_MOTIVO || 'sin conexion') + '). ' +
+        (hay ? 'Estas viendo la guardada' + cuando + ': los precios pueden estar viejos. ' : '') +
+        '<a href="#" onclick="PROD_INTENTO=0;loadProducts();return false" style="color:var(--brand);font-weight:700">Reintentar</a>';
+  }
+  el.innerHTML = h; el.style.display = 'block';
+}
 function loadProducts() {
-  // Arranca con lo ultimo que se bajo en este telefono, para poder vender aunque el script tarde
-  // v14.9 (auditoria #9): la lista se guarda en cache SOLO despues de entenderla, y si no se pudo
-  // actualizar se DICE. Antes el error se tragaba: se vendia con precios viejos sin saberlo.
-  var cached = null;
-  try { cached = sessionStorage.getItem('boparts_prod_v14'); } catch (e) {}
-  if (cached) { try { parseProducts(cached); } catch (e) { cached = null; } }
-  fetch(SCRIPT_URL + '?action=productos&t=' + Date.now())
+  var cached = leerCacheProd();
+  if (cached && !PRODUCTS.length) { try { parseProducts(cached); } catch (e) { cached = null; } }
+  PROD_INTENTO++; PROD_ESTADO = 'cargando'; pintarEstadoProd();
+  var ctl = null, reloj = null;
+  try { ctl = new AbortController(); reloj = setTimeout(function() { ctl.abort(); }, 25000); } catch (e) {}
+  fetch(SCRIPT_URL + '?action=productos&t=' + Date.now(), ctl ? {signal:ctl.signal} : undefined)
     .then(function(r) { return r.text(); })
     .then(function(txt) {
+      if (reloj) clearTimeout(reloj);
       if (!txt || txt.charAt(0) !== '{') throw new Error('el script no devolvio la lista');
       parseProducts(txt);                                   // si falla, lanza y NO se guarda
-      try { sessionStorage.setItem('boparts_prod_v14', txt); } catch (e) {}
+      guardarCacheProd(txt);
+      PROD_ESTADO = 'ok'; PROD_INTENTO = 0; pintarEstadoProd();
+      if (prodSearch.value.trim().length >= 2) prodSearch.dispatchEvent(new Event('input'));   // lo que ya escribieron
     })
     .catch(function(e) {
+      if (reloj) clearTimeout(reloj);
       if (e && e.message === 'SESION') return;
-      toast(cached ? 'No se pudo actualizar la lista de productos: estas viendo la ultima que bajo este telefono. Recarga para reintentar.'
-                   : 'No se pudo cargar la lista de productos (' + (e && e.message || 'sin conexion') + '). Recarga para reintentar.', 'err');
+      PROD_MOTIVO = (e && e.name === 'AbortError') ? 'el servidor tardo mas de 25 segundos' : (e && e.message || 'sin conexion');
+      if (PROD_INTENTO < 3) { setTimeout(loadProducts, PROD_INTENTO * 4000); pintarEstadoProd(); return; }
+      PROD_ESTADO = 'error'; pintarEstadoProd();
     });
 }
 
@@ -873,7 +913,13 @@ prodSearch.addEventListener('input', function() {
     for (var t = 0; t < terms.length; t++) { if (hay.indexOf(terms[t]) < 0) { ok = false; break; } }
     if (ok) res.push({p:p, idx:i});
   }
-  if (!res.length) { prodDrop.classList.remove('open'); return; }
+  if (!res.length) {
+    // v15.11: nunca mudo. O la lista no ha llegado, o de verdad no hay nada con ese nombre.
+    // Sin lista no se abre nada encima: el estado (y el boton Reintentar) estan justo debajo del buscador.
+    if (!PRODUCTS.length) { prodDrop.classList.remove('open'); pintarEstadoProd(); return; }
+    prodDrop.innerHTML = '<div class="ditem" style="color:var(--ink-muted);cursor:default">Nada con "' + escHtml(prodSearch.value.trim()) + '"</div>';
+    prodDrop.classList.add('open'); return;
+  }
   var html = '';
   for (var i = 0; i < res.length; i++) {
     var p = res[i].p, idx = res[i].idx;
