@@ -1,4 +1,4 @@
 {
-  "build": "2026-11-14.1",
+  "build": "2026-11-14.2",
   "nota": "Cambia build en CADA despliegue, incluso el mismo dia (usa .2, .3...)."
 }

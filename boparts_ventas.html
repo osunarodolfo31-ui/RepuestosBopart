@@ -1,7 +1,11 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_ventas.html
-  VERSION: v15.9 (2026-11-14) | build 2026-11-14.1 | requiere Apps Script v28.22
+  VERSION: v15.10 (2026-11-14) | build 2026-11-14.2 | requiere Apps Script v28.22
+  v15.10: DIRECCION AL MOMENTO. El formulario rapido de cliente nuevo (el de arriba, al vender) ya pide la direccion
+  por partes. Un cliente que existe sin direccion muestra "+ Agregar direccion" ahi mismo. Si la venta va con
+  factura o Cashea, la direccion es obligatoria antes de registrar. Ya no hace falta pasar por Gerencia.
+  VERSION anterior: v15.9 (2026-11-14) | build 2026-11-14.1 | requiere Apps Script v28.22
   v15.9: la comision del metodo de pago respeta su minimo (CANALES columna MINIMO).
   VERSION anterior: v15.8 (2026-11-12) | build 2026-11-13.1 | requiere Apps Script v28.22
   v15.8: REDONDEO EN Bs. (1) El total en Bs ya no sale de redondear primero los dolares a 2 decimales ($3,4545 daba
@@ -261,7 +265,7 @@ select option{background:#1E1E1E;color:var(--ink)}
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
-<script src="boparts_pdf.js?v=2026-11-14.1"></script>
+<script src="boparts_pdf.js?v=2026-11-14.2"></script>
 </head>
 <body>
 
@@ -317,8 +321,10 @@ select option{background:#1E1E1E;color:var(--ink)}
         <div class="field"><label>Cedula / RIF *</label><input type="text" id="nvCed" placeholder="V-12345678"></div>
         <div class="field"><label>Telefono *</label><input type="tel" id="nvTel" placeholder="0414-1234567"></div>
       </div>
+      <div id="nvDirBox"></div>
+      <div class="cominfo" id="nvDirAviso" style="display:none;margin-bottom:8px"></div>
       <button class="nbtn nbtn-p" onclick="crearClienteVenta()">Guardar cliente</button>
-      <button class="nbtn nbtn-s" onclick="document.getElementById('cliVtaForm').style.display='none'">Cancelar</button>
+      <button class="nbtn nbtn-s" onclick="NV_EDIT=null;document.getElementById('cliVtaForm').style.display='none'">Cancelar</button>
     </div>
   </div>
 
@@ -588,8 +594,8 @@ select option{background:#1E1E1E;color:var(--ink)}
   </div>
 </div>
 
-<script src="boparts_sesion.js?v=2026-11-14.1"></script>
-<script src="boparts_clientes.js?v=2026-11-14.1"></script>
+<script src="boparts_sesion.js?v=2026-11-14.2"></script>
+<script src="boparts_clientes.js?v=2026-11-14.2"></script>
 <script>
 
 
@@ -605,7 +611,7 @@ function sellarVersion(d) {
   if (t) t.textContent = 'app ' + APP_VERSION + ' \u00b7 script ' + VER_SCRIPT;
   return d;
 }
-var APP_VERSION = 'v15.9';
+var APP_VERSION = 'v15.10';
 var TASA        = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
 var TASA_ORIGEN = TASA ? 'guardada' : 'ninguna';
 
@@ -1226,19 +1232,46 @@ function pintarClienteVenta() {
   var extra = clienteVenta.credito ? ' · credito' + (clienteVenta.limite ? ' hasta ' + fmtUSD(clienteVenta.limite) : '') : '';
   el.innerHTML = '<div class="cli-result"><div><div class="cli-info">' + escHtml(clienteVenta.nombre) + '</div>' +
     '<div class="cli-sub">' + escHtml(clienteVenta.rif || 'sin cedula') + (clienteVenta.tel ? ' · ' + escHtml(clienteVenta.tel) : '') + extra + '</div></div>' +
-    '<button class="cli-clear" onclick="clienteVenta=null;pintarClienteVenta();renderPagos()">&#x2715;</button></div>';
+    '<button class="cli-clear" onclick="clienteVenta=null;pintarClienteVenta();renderPagos()">&#x2715;</button></div>' +
+    (esParticular(clienteVenta) ? '' : (tieneDireccion(clienteVenta)
+      ? '<div class="cli-sub" style="margin-top:4px">' + escHtml(clienteVenta.dir || clienteVenta.calle) + ' · <a href="#" onclick="editarDireccionVenta();return false" style="color:var(--brand)">cambiar</a></div>'
+      : '<button class="addpbtn" style="margin-top:6px" onclick="editarDireccionVenta()">+ Agregar direccion (hace falta para facturar)</button>'));
   el.style.display = 'block';
   document.getElementById('cliVtaWrap').style.display = 'none';
   cargarSaldoCliente();
   renderPagos();
 }
+// v15.10 — DIRECCION AL MOMENTO. El formulario rapido de cliente trae la direccion por partes (antes solo se podia
+// poner desde Gerencia). NV_EDIT = cliente ya existente al que se le esta completando la direccion.
+var NV_EDIT = null;
+function tieneDireccion(c) { return !!(c && (String(c.calle || '').trim() || String(c.dir || '').trim())); }
+function esParticular(c) { return !c || /^particular$/i.test(String(c.nombre || '').trim()) || /^[VE]?-?0+$/i.test(String(c.rif || '').trim()); }
+function exigeDireccion() { return FACTURAR || CASHEA_ON; }
+function abrirFormVenta(c) {
+  document.getElementById('cliVtaForm').style.display = 'block';
+  montarDireccion('nv', 'nvDirBox', c || {});
+  amarrarRif('nvCed');
+  var av = document.getElementById('nvDirAviso');
+  av.style.display = exigeDireccion() ? 'block' : 'none';
+  av.textContent = 'Esta venta va con factura: la direccion es obligatoria (al menos la calle o avenida).';
+}
 function nuevoClienteVenta() {
   cliVtaDrop.classList.remove('open');
+  NV_EDIT = null;
   var v = cliVtaEl.value.trim(), d = v.replace(/[^0-9]/g, '');
   document.getElementById('nvNombre').value = d ? '' : v;
   document.getElementById('nvTel').value = (d.length >= 10) ? v : '';
   document.getElementById('nvCed').value = (d.length && d.length < 10) ? v : '';
-  document.getElementById('cliVtaForm').style.display = 'block';
+  abrirFormVenta({});
+}
+function editarDireccionVenta() {
+  if (!clienteVenta) return;
+  NV_EDIT = clienteVenta;
+  document.getElementById('nvNombre').value = clienteVenta.nombre || '';
+  document.getElementById('nvCed').value = clienteVenta.rif || '';
+  document.getElementById('nvTel').value = clienteVenta.tel || '';
+  abrirFormVenta(clienteVenta);
+  document.getElementById('cliVtaForm').scrollIntoView({behavior:'smooth', block:'center'});
 }
 function crearClienteVenta() {
   var c = {nombre:document.getElementById('nvNombre').value.trim(), rif:document.getElementById('nvCed').value.trim(),
@@ -1247,6 +1280,26 @@ function crearClienteVenta() {
   if (!c.rif && !c.tel) { toast('Hace falta la cedula o el telefono', 'err'); return; }
   var vrq = validarRif(c.rif); if (!vrq.ok) { toast('Cedula/RIF: ' + vrq.error, 'err'); return; }
   c.rif = vrq.valor; document.getElementById('nvCed').value = c.rif;
+  var dn = leerDireccion('nv');
+  c.dir = dn.dir; c.estado = dn.estado; c.ciudad = dn.ciudad; c.sector = dn.sector; c.calle = dn.calle; c.local = dn.local; c.referencia = dn.referencia;
+  if (!dn.calle && (exigeDireccion() || vrq.tipo === 'J' || vrq.tipo === 'G' || vrq.tipo === 'C')) {
+    toast(exigeDireccion() ? 'Venta con factura: escribe la direccion (calle o avenida)' : 'Empresa (RIF ' + vrq.tipo + '): copia la direccion de su RIF', 'err'); return;
+  }
+  var datosDir = {dir:c.dir, estado:c.estado, ciudad:c.ciudad, sector:c.sector, calle:c.calle, local:c.local, referencia:c.referencia};
+  if (NV_EDIT) {   // cliente que ya existia: se le completa la ficha
+    var ant = NV_EDIT, rifAnt = ant.rif || '';
+    ant.nombre = c.nombre; ant.rif = c.rif; ant.tel = c.tel;
+    for (var kd in datosDir) ant[kd] = datosDir[kd];
+    NV_EDIT = null;
+    document.getElementById('cliVtaForm').style.display = 'none';
+    pintarClienteVenta();
+    var pe = {tipo:'cliente', nombre:ant.nombre, rif:ant.rif, tel:ant.tel, rifAnterior:rifAnt, fecha:new Date().toLocaleDateString('es-VE')};
+    for (var ke in datosDir) pe[ke] = datosDir[ke];
+    postScript(pe)
+      .then(function(d) { toast(d && d.ok ? 'Direccion guardada' : 'NO se guardo: ' + (d && d.error ? d.error : 'error en la hoja'), d && d.ok ? 'ok' : 'err'); })
+      .catch(function() { toast('NO se guardo (sin conexion)', 'err'); });
+    return;
+  }
   var dupe = CLIENTES.filter(function(x) {
     var a = (x.tel || '').replace(/[^0-9]/g, ''), b = (c.tel || '').replace(/[^0-9]/g, '');
     var e = (x.rif || '').replace(/[^0-9]/g, ''), f = (c.rif || '').replace(/[^0-9]/g, '');
@@ -1256,7 +1309,9 @@ function crearClienteVenta() {
   CLIENTES.push(c); clienteVenta = c;
   document.getElementById('cliVtaForm').style.display = 'none';
   pintarClienteVenta();
-  postScript({tipo:'cliente', nombre:c.nombre, rif:c.rif, tel:c.tel, fecha:new Date().toLocaleDateString('es-VE')})
+  var pn = {tipo:'cliente', nombre:c.nombre, rif:c.rif, tel:c.tel, fecha:new Date().toLocaleDateString('es-VE')};
+  for (var kn in datosDir) pn[kn] = datosDir[kn];
+  postScript(pn)
     .then(function(d) { toast(d && d.ok ? 'Cliente guardado' : 'Cliente NO guardado: ' + (d && d.error ? d.error : 'error en la hoja'), d && d.ok ? 'ok' : 'err'); })
     .catch(function() { toast('Cliente NO guardado (sin conexion)', 'err'); });
 }
@@ -1607,6 +1662,10 @@ function guardarVenta() {
   if (!modoSocio && !clienteVenta) { toast('Toda venta lleva cliente: buscalo o registralo arriba', 'err'); irACliente(); return; }
   if (FACTURAR && !modoSocio && !(clienteVenta && clienteVenta.rif)) { toast('Para facturar hace falta la cedula o RIF del cliente', 'err'); irACliente(); return; }
   if (FACTURAR && (!TASA_BCV || TASA_BCV < 1)) { toast('Sin tasa BCV no se puede facturar. La carga un socio en Gerencia.', 'err'); return; }
+  // v15.10: la factura lleva el domicilio del cliente: se pide ANTES de registrar, no despues desde Gerencia.
+  if (FACTURAR && !modoSocio && clienteVenta && !tieneDireccion(clienteVenta)) {
+    toast('Venta con factura: falta la direccion de ' + clienteVenta.nombre, 'err'); editarDireccionVenta(); return;
+  }
 
   var creditoUSD = 0, hayCredito = false;
   for (var i = 0; i < pagos.length; i++) {

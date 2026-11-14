@@ -1,5 +1,12 @@
 # CHANGELOG — Repuesto BoParts
 
+## ventas v15.10 — build 2026-11-14.2 — direccion del cliente al momento de vender
+
+- El formulario rapido de cliente nuevo (arriba, al vender) pide la direccion por partes, con estado y ciudad por defecto.
+- Cliente existente sin direccion: boton "+ Agregar direccion" en la misma pantalla; con direccion, enlace "cambiar".
+- Venta con factura o Cashea: no se registra sin la direccion del cliente (al menos la calle).
+- Sin cambios en Apps Script (sigue v28.24).
+
 ## Apps Script v28.24 + cobros v3.7 + ventas v15.9 — build 2026-11-14.1 — abono con fecha anterior
 
 - Cobros (solo socios): "Fecha del pago". Con una fecha anterior trae la tasa de trabajo y el BCV de ese dia
