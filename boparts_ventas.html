@@ -1,7 +1,9 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_ventas.html
-  VERSION: v15.8 (2026-11-12) | build 2026-11-12.1 | requiere Apps Script v28.22
+  VERSION: v15.9 (2026-11-14) | build 2026-11-14.1 | requiere Apps Script v28.22
+  v15.9: la comision del metodo de pago respeta su minimo (CANALES columna MINIMO).
+  VERSION anterior: v15.8 (2026-11-12) | build 2026-11-13.1 | requiere Apps Script v28.22
   v15.8: REDONDEO EN Bs. (1) El total en Bs ya no sale de redondear primero los dolares a 2 decimales ($3,4545 daba
   3.795 en vez de 3.800). (2) Campo "Cobrado en Bs": si se cobro un monto redondeado, se escribe ahi. El precio de
   lista no cambia en pantalla; la diferencia queda como REDONDEO en la venta y los precios de las lineas se ajustan
@@ -259,7 +261,7 @@ select option{background:#1E1E1E;color:var(--ink)}
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
-<script src="boparts_pdf.js?v=2026-11-12.1"></script>
+<script src="boparts_pdf.js?v=2026-11-14.1"></script>
 </head>
 <body>
 
@@ -586,8 +588,8 @@ select option{background:#1E1E1E;color:var(--ink)}
   </div>
 </div>
 
-<script src="boparts_sesion.js?v=2026-11-12.1"></script>
-<script src="boparts_clientes.js?v=2026-11-12.1"></script>
+<script src="boparts_sesion.js?v=2026-11-14.1"></script>
+<script src="boparts_clientes.js?v=2026-11-14.1"></script>
 <script>
 
 
@@ -603,7 +605,7 @@ function sellarVersion(d) {
   if (t) t.textContent = 'app ' + APP_VERSION + ' \u00b7 script ' + VER_SCRIPT;
   return d;
 }
-var APP_VERSION = 'v15.8';
+var APP_VERSION = 'v15.9';
 var TASA        = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
 var TASA_ORIGEN = TASA ? 'guardada' : 'ninguna';
 
@@ -1000,7 +1002,7 @@ function updateTotals() {
     if (!pagos[i].metodoData) continue;
     var mEl = document.getElementById('monto_' + pagos[i].id);
     var monto = mEl ? parseFloat(mEl.value) || 0 : 0;
-    if (monto > 0) com += pagos[i].metodoData.fijo + monto * pagos[i].metodoData.pct / 100;
+    if (monto > 0) com += comMetodo(pagos[i].metodoData, monto);
   }
   // v10.4: la comision del punto la asume la tienda; se calcula y se guarda, pero no se muestra al vender
   document.getElementById('tCom').textContent = fmtBS(com);
@@ -1037,6 +1039,12 @@ function syncPagosDesdeDOM() {
     if (mEl) p.monto = mEl.value;
     if (monEl) p.moneda = monEl.value;
   }
+}
+// v15.9 — comision del metodo con su MINIMO (Pago Movil Bancrecer: 1,5%, minimo Bs 14).
+function comMetodo(m, monto) {
+  var v = (Number(m.fijo) || 0) + monto * (Number(m.pct) || 0) / 100;
+  if (Number(m.minimo) > 0 && v < Number(m.minimo)) v = Number(m.minimo);
+  return v;
 }
 // v15.8 — 4 decimales: redondear a 2 aqui hacia que $3,4545 x 1100 diera 3.795 Bs en vez de 3.800.
 function listaCarritoUSD() {
@@ -1591,7 +1599,7 @@ function guardarVenta() {
     var metIdx = metEl ? parseInt(metEl.value) : NaN;
     var metNom = (!isNaN(metIdx) && METODOS[metIdx]) ? METODOS[metIdx].metodo : '';
     var banNom = (!isNaN(metIdx) && METODOS[metIdx]) ? METODOS[metIdx].banco : '';
-    if (p.metodoData && monto > 0) com += p.metodoData.fijo + monto * p.metodoData.pct / 100;
+    if (p.metodoData && monto > 0) com += comMetodo(p.metodoData, monto);
     pagoData.push({metodo:metNom, banco:banNom, monto:monto, moneda:moneda, label:(!isNaN(metIdx) && METODOS[metIdx]) ? METODOS[metIdx].label : ''});
   }
 

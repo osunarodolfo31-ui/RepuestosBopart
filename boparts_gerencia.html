@@ -1,7 +1,10 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_gerencia.html
-  VERSION: v3.9 (2026-11-12) | build 2026-11-12.1 | requiere Apps Script v28.22
+  VERSION: v4.0 (2026-11-13) | build 2026-11-14.1 | requiere Apps Script v28.23
+  v4.0: "Vendido", utilidad y margenes ya vienen NETOS de IVA (ventas facturadas) y de la comision de Cashea. Un
+  aviso dice cuanto se desconto. Antes una venta Cashea a +30% se veia como si todo el recargo fuera ganancia.
+  VERSION anterior: v3.9 (2026-11-12) | build 2026-11-12.1 | requiere Apps Script v28.22
   v3.9: KPI "Redondeos" del periodo (ventas cobradas en Bs por encima o por debajo de la lista). Ya esta dentro de la
   utilidad: se muestra para ver cuanto cuesta redondear.
   VERSION anterior: v3.8 (2026-11-10) | build 2026-11-10.1 | requiere Apps Script v28.20
@@ -544,8 +547,8 @@ select option{background:#1E1E1E;color:var(--ink)}
   </div>
 </div>
 
-<script src="boparts_sesion.js?v=2026-11-12.1"></script>
-<script src="boparts_clientes.js?v=2026-11-12.1"></script>
+<script src="boparts_sesion.js?v=2026-11-14.1"></script>
+<script src="boparts_clientes.js?v=2026-11-14.1"></script>
 <script>
 
 
@@ -558,7 +561,7 @@ function sellarVersion(d) {
   if (t) t.textContent = 'app ' + APP_VERSION + ' \u00b7 script ' + VER_SCRIPT;
   return d;
 }
-var APP_VERSION = 'v3.9';
+var APP_VERSION = 'v4.0';
 var TASA = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
 var periodo = 'hoy', DATA = null;
 
@@ -1246,10 +1249,12 @@ function render(r) {
   var difUSD = DATA.diferencial ? Number(DATA.diferencial.total) || 0 : 0, difN = DATA.diferencial ? DATA.diferencial.items.length : 0;
   var resultado = util - comUSD - aliUSD - gastosUSD + difUSD;
   var totalRef = vend || vendVentas;
+  // v4.0: lo que se le desconto a lo vendido (no es de la tienda). Viene de v28.23; con un script viejo es 0.
+  var ded = DATA.deducciones || {ivaUSD:0, casheaUSD:0}, dedTot = (Number(ded.ivaUSD) || 0) + (Number(ded.casheaUSD) || 0);
 
   var h = '';
   h += '<div class="section"><div class="stitle">Resumen</div><div class="kpis">' +
-    kpi('Vendido', usd(totalRef), (TASA ? bs(totalRef * TASA) : '') + (tickets ? ' · ' + tickets + ' ventas' : ''), 'big') +
+    kpi('Vendido', usd(totalRef), (dedTot ? 'neto, sin IVA ni comision Cashea · ' : '') + (TASA ? bs(totalRef * TASA) : '') + (tickets ? ' · ' + tickets + ' ventas' : ''), 'big') +
     kpi('Utilidad bruta', usd(util), margen.toFixed(1) + '% de margen') +
     kpi('Costo de lo vendido', usd(costo), unidades + ' unidades') +
     kpi('Comisiones', usd(comUSD + aliUSD), 'punto ' + usd(comUSD) + ' · aliados ' + usd(aliUSD)) +
@@ -1275,7 +1280,12 @@ function render(r) {
   }
   if (creditoUSD > 0) {
     h += '<div class="cominfo" style="margin-top:10px">De lo vendido, <b>' + usd(creditoUSD) + '</b> fue a credito (aun no cobrado). ' +
-      'Cobrado en el periodo: <b>' + usd(totalRef - creditoUSD) + '</b>.</div>';
+      'Cobrado en el periodo: <b>' + usd(vendVentas - creditoUSD) + '</b>.</div>';
+  }
+  if (dedTot > 0) {
+    h += '<div class="cominfo" style="margin-top:10px">Las ventas cobraron <b>' + usd(vendVentas) + '</b>. No son de la tienda y ya estan fuera de Vendido y de la utilidad: ' +
+      (ded.ivaUSD ? 'IVA de facturas <b>' + usd(ded.ivaUSD) + '</b>' : '') + (ded.ivaUSD && ded.casheaUSD ? ' · ' : '') +
+      (ded.casheaUSD ? 'comision de Cashea <b>' + usd(ded.casheaUSD) + '</b>' : '') + '.</div>';
   }
   if (!L.length && V.length) h += '<div class="aviso">Sin lineas de detalle en este periodo: el costo y el margen no se pueden calcular (ventas anteriores a la version que guarda costo).</div>';
   if (sinUSD) h += '<div class="aviso">' + sinUSD + ' venta(s) del periodo tienen monto en Bs pero no en USD (filas viejas importadas a mano). No suman en el total en dolares.</div>';

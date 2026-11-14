@@ -1,7 +1,11 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_cobros.html
-  VERSION: v3.6 (2026-11-07) | build 2026-11-12.1 | requiere Apps Script v28.18
+  VERSION: v3.7 (2026-11-14) | build 2026-11-14.1 | requiere Apps Script v28.24
+  v3.7: FECHA DEL PAGO (solo socios). Un abono que se cobro otro dia se registra con su fecha real: la pantalla trae
+  la tasa de trabajo y el BCV de ese dia (se pueden corregir) y con ellas calcula el abono y lo que descuenta en
+  $ Ref BCV. Al guardar, la fecha vuelve a hoy.
+  VERSION anterior: v3.6 (2026-11-07) | build 2026-11-13.1 | requiere Apps Script v28.18
   v3.6: CUENTAS EN $ REF BCV. Si el cliente esta marcado en Gerencia, su saldo y sus notas se ven en $ Ref BCV (fijos
   del dia de la venta), el abono se descuenta en $ BCV al BCV de hoy, "Pagar esta" llena los Bs al BCV de hoy, y el
   WhatsApp de cobro sale en $ Ref BCV con su equivalente en Bs. Cada abono muestra lo que entro por dentro y el
@@ -270,6 +274,17 @@ select option{background:#1E1E1E;color:var(--ink)}
       </div>
       <div class="field"><label>Metodo de pago</label><select id="abMetodo" onchange="previewAbono()"></select></div>
       <div id="abPreview" class="cominfo" style="display:none"></div>
+      <div id="abFechaBox" style="display:none;margin-top:10px">
+        <div class="field"><label>Fecha del pago <span style="font-weight:400;color:var(--ink-muted)">(si se cobro otro dia)</span></label>
+          <input type="date" id="abFecha" onchange="cambiarFechaAbono()"></div>
+        <div id="abAtras" style="display:none">
+          <div class="row2">
+            <div class="field"><label>Tasa de trabajo ese dia</label><input type="number" id="abTasaD" step="0.01" oninput="aplicarTasasAtras()"></div>
+            <div class="field"><label>BCV ese dia</label><input type="number" id="abBcvD" step="0.0001" oninput="aplicarTasasAtras()"></div>
+          </div>
+          <div class="cominfo" id="abAtrasInfo"></div>
+        </div>
+      </div>
       <div class="field" style="margin-top:10px"><label>Notas</label><input type="text" id="abNotas" placeholder="Opcional"></div>
     </div>
   </div>
@@ -367,7 +382,7 @@ select option{background:#1E1E1E;color:var(--ink)}
   </div>
 </div>
 
-<script src="boparts_sesion.js?v=2026-11-12.1"></script>
+<script src="boparts_sesion.js?v=2026-11-14.1"></script>
 <script>
 
 
@@ -522,7 +537,7 @@ function primerNombre(n) {
 }
 var ultimo = null;   // ultimo abono registrado (para el mensaje de WhatsApp)
 
-var APP_VERSION = 'v3.6';
+var APP_VERSION = 'v3.7';
 document.getElementById('fechaHdr').textContent = APP_VERSION + ' · ' + new Date().toLocaleDateString('es-VE', {weekday:'long', day:'numeric', month:'long'});
 
 // Metodos de pago (sin CREDITO)
@@ -539,8 +554,12 @@ function cargar() {
     .then(leerJSON)
     .then(function(d) {
       if (!d || !d.ok) throw new Error(d && d.error ? d.error : 'sin respuesta');
-      if (!TASA && d.tasa > 1) TASA = d.tasa;
-      BCV = Number(d.bcv) || 0;                    // v3.6: para las cuentas en $ Ref BCV
+      if (AB_REAL) { AB_REAL.bcv = Number(d.bcv) || 0; if (!AB_REAL.tasa && d.tasa > 1) AB_REAL.tasa = d.tasa; }
+      else {
+        if (!TASA && d.tasa > 1) TASA = d.tasa;
+        BCV = Number(d.bcv) || 0;                    // v3.6: para las cuentas en $ Ref BCV
+      }
+      prepararFechaAbono();
       document.getElementById('tasaLbl').textContent = TASA ? 'Tasa ' + TASA : 'Sin tasa';
       CLIENTES = d.clientes || [];
       renderLista();
@@ -712,8 +731,62 @@ function idDeEsteAbono(cliente, usd) {
 }
 function olvidarIdAbono() { try { localStorage.removeItem(AB_KEY); } catch (e) {} }
 
+// ============================================================
+// v3.7 — FECHA DEL PAGO (solo socios). Con una fecha anterior, TASA y BCV pasan a ser las de ese dia mientras se
+// registra el abono; AB_REAL guarda las de hoy para devolverlas.
+// ============================================================
+var AB_REAL = null;
+function hoyISO() { var n = new Date(); return n.getFullYear() + '-' + pad2(n.getMonth() + 1) + '-' + pad2(n.getDate()); }
+function prepararFechaAbono() {
+  var box = document.getElementById('abFechaBox'); if (!box) return;
+  var socio = false; try { socio = soySocio(); } catch (e) {}
+  box.style.display = socio ? 'block' : 'none';
+  var f = document.getElementById('abFecha');
+  f.max = hoyISO(); if (!f.value) f.value = hoyISO();
+}
+function fechaAbonoAtras() { var v = document.getElementById('abFecha').value; return (v && v < hoyISO()) ? v : ''; }
+function volverAHoy() {
+  if (AB_REAL) { TASA = AB_REAL.tasa; BCV = AB_REAL.bcv; AB_REAL = null; }
+  document.getElementById('abFecha').value = hoyISO();
+  document.getElementById('abAtras').style.display = 'none';
+  document.getElementById('tasaLbl').textContent = TASA ? 'Tasa ' + TASA : 'Sin tasa';
+}
+function cambiarFechaAbono() {
+  var f = document.getElementById('abFecha');
+  if (f.value > hoyISO()) { f.value = hoyISO(); toast('La fecha no puede ser futura', 'err'); }
+  var atras = fechaAbonoAtras();
+  if (!atras) { volverAHoy(); previewAbono(); return; }
+  if (!AB_REAL) AB_REAL = {tasa:TASA, bcv:BCV};
+  document.getElementById('abAtras').style.display = 'block';
+  document.getElementById('abAtrasInfo').textContent = 'Buscando las tasas de ese dia...';
+  fetch(SCRIPT_URL + '?action=tasas_dia&fecha=' + atras + '&t=' + Date.now()).then(leerJSON).then(function(d) {
+    if (fechaAbonoAtras() !== atras) return;
+    if (!d || !d.ok) throw new Error(d && d.error ? d.error : 'sin datos');
+    document.getElementById('abTasaD').value = d.tasa || '';
+    document.getElementById('abBcvD').value = d.bcv || '';
+    var varias = (d.delDia || []).length && d.tasaInicio && d.tasaInicio !== d.tasa;
+    document.getElementById('abAtrasInfo').innerHTML = 'El abono se calcula con las tasas del ' + atras.split('-').reverse().join('/') + ', no con las de hoy.' +
+      (varias ? ' <b>Ese dia la tasa de trabajo cambio: empezo en ' + d.tasaInicio + ' y cerro en ' + d.tasa + '.</b> Deja la que estaba cuando pagaron.' : '') +
+      (!d.tasa || !d.bcv ? ' <b style="color:var(--red)">Falta una tasa: escribela.</b>' : '');
+    aplicarTasasAtras();
+  }).catch(function(e) {
+    if (e && e.message === 'SESION') return;
+    document.getElementById('abAtrasInfo').innerHTML = '<span style="color:var(--red)">No se pudieron traer las tasas de ese dia (' + escHtml(e.message) + '). Escribelas a mano.</span>';
+    aplicarTasasAtras();
+  });
+}
+function aplicarTasasAtras() {
+  if (!AB_REAL) return;
+  TASA = parseFloat(document.getElementById('abTasaD').value) || 0;
+  BCV = parseFloat(document.getElementById('abBcvD').value) || 0;
+  previewAbono();
+}
+
 function guardarAbono() {
   if (!sel) return;
+  var atrasF = fechaAbonoAtras();
+  if (atrasF && !(TASA > 0)) { toast('Escribe la tasa de trabajo de ese dia', 'err'); return; }
+  if (atrasF && !confirm('Este abono se registra con fecha ' + atrasF.split('-').reverse().join('/') + ', tasa ' + TASA + (esBcv(sel) ? ' y BCV ' + BCV : '') + '.\n\n¿Confirmas?')) return;
   var quien = document.getElementById('selV').value;
   if (!quien) { toast('Selecciona quien registra', 'err'); return; }
   var a = calcAbono();
@@ -729,11 +802,12 @@ function guardarAbono() {
   var now = new Date();
   var payload = {
     tipo:'abono', cliente:sel.cliente, rif:sel.rif || '',
-    fecha:now.toLocaleDateString('es-VE'), hora:now.toLocaleTimeString('es-VE', {hour:'2-digit', minute:'2-digit'}),
+    fecha:atrasF ? atrasF.split('-').reverse().join('/') : now.toLocaleDateString('es-VE'),
+    hora:atrasF ? '' : now.toLocaleTimeString('es-VE', {hour:'2-digit', minute:'2-digit'}),
     idAbono:idDeEsteAbono(sel.cliente, a.usd),
     montoUSD:a.usd, moneda:a.moneda, montoPagado:a.monto, tasa:TASA,
     metodo:a.m.metodo, banco:a.m.banco, comision:a.com,
-    registradoPor:quien, notas:document.getElementById('abNotas').value,
+    registradoPor:quien, notas:(atrasF ? '[Registrado el ' + now.toLocaleDateString('es-VE') + '] ' : '') + document.getElementById('abNotas').value,
     aplicaA:ABONO_A ? ABONO_A.idVenta : '',       // v3.4: abono a una nota en particular
     tasaBCV:BCV                                   // v3.6: para cuentas en $ Ref BCV
   };
@@ -745,6 +819,7 @@ function guardarAbono() {
       btn.disabled = false; btn.textContent = 'Registrar Abono';
       if (!d || d.ok !== true) { var er = new Error(d && d.error ? d.error : 'Respuesta invalida'); er.rechazo = !!(d && d.rechazada); throw er; }
       olvidarIdAbono();   // quedo confirmado: el proximo cobro empieza con ID nuevo
+      if (atrasF) volverAHoy();   // v3.7: el siguiente abono vuelve a ser de hoy
       ultimo = {cliente:sel.cliente, usd:a.usd, moneda:a.moneda, monto:a.monto, metodo:a.m.label, saldo:d.saldoUSD, bcvUsd:a.bcvUsd};
       // v26: el servidor avisa cuando ese abono YA estaba registrado. Se dice, en vez de dejar
       // creer que entro un segundo pago.
@@ -824,6 +899,7 @@ function sincronizarTasa(despues) {
   fetch(SCRIPT_URL + '?action=config&t=' + Date.now())
     .then(leerJSON)
     .then(function(d) {
+      if (AB_REAL) { if (d && d.ok && d.tasa > 0) AB_REAL.tasa = d.tasa; return; }   // v3.7: con fecha anterior no se pisa
       if (!d || !d.ok || !(d.tasa > 0) || d.tasa === TASA) return;
       TASA = d.tasa;
       try { localStorage.setItem('motoauto_tasa', String(TASA)); } catch (e) {}

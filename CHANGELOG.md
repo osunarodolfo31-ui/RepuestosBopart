@@ -1,5 +1,23 @@
 # CHANGELOG — Repuesto BoParts
 
+## Apps Script v28.24 + cobros v3.7 + ventas v15.9 — build 2026-11-14.1 — abono con fecha anterior
+
+- Cobros (solo socios): "Fecha del pago". Con una fecha anterior trae la tasa de trabajo y el BCV de ese dia
+  (action=tasas_dia, editables) y calcula el abono con ellas. Avisa si ese dia la tasa cambio. El servidor
+  rechaza fecha futura y fecha anterior de un vendedor.
+- Ventas: la comision del metodo respeta el minimo de CANALES (Pago Movil Bancrecer 1,5%, minimo Bs 14).
+- Hoja: CANALES Pago Movil Bancrecer ENTRA 1,5% min 14; nuevo canal Transferencia Bancrecer ENTRA 0%.
+  Gastos bancarios Bancrecer 03/11 y 04/11. SOCIOS_MOV creada: prestamo de Rodolfo Bs 5.738,04 (03/11).
+
+## Apps Script v28.23 + gerencia v4.0 + index v11.7 — build 2026-11-13.1 — Cashea en reportes y lista de precios
+
+- Gerencia: Vendido, utilidad y margen por producto/categoria/vendedor salen NETOS de IVA (VENTAS AG) y de la
+  comision de Cashea (AN). Aviso con lo cobrado y lo descontado. "Cobrado en el periodo" usa lo cobrado bruto.
+- action=ventas: deducciones {ivaUSD, casheaUSD, brutoUSD}; cada linea trae su bruto en [13]; ventas [14] IVA, [15] comision.
+- Lista de precios: tercer modo "Cashea" en el badge de tasa. Monto para la app en $ BCV en grande, Bs con Cashea,
+  lista + recargo. En los otros modos la ficha muestra una fila "Con Cashea". WhatsApp con mensaje Cashea.
+  En modos BCV y Cashea el monto en $ se ve mas grande.
+
 ## Apps Script v28.22 + ventas v15.8 + gerencia v3.9 — build 2026-11-12.1 — redondeo en Bs
 
 - Total en Bs calculado sin redondear antes los dolares a 2 decimales ($3,4545 ya da 3.800, no 3.795).

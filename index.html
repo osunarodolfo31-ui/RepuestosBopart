@@ -1,7 +1,12 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — index.html
-  VERSION: v11.6 (2026-09-24) | build 2026-11-12.1 | requiere Apps Script v27
+  VERSION: v11.7 (2026-11-13) | build 2026-11-14.1 | requiere Apps Script v28.20
+  v11.7: modo CASHEA (pedido del operador de tienda). Tercera opcion en el badge de tasa: cada producto muestra en
+  grande el monto que se carga en la app Cashea, en $ BCV ((precio x tasa de trabajo) x (1 + recargo) / BCV), y
+  sus Bs. El recargo sale de CONFIG (30%). En la ficha de cualquier producto aparece tambien "Con Cashea". En los
+  modos BCV y Cashea el monto en $ BCV se ve mas grande.
+  VERSION anterior: v11.6 (2026-09-24) | build 2026-11-12.1 | requiere Apps Script v27
   v11.6: EQUIVALENCIAS llega por el script (action=equivalencias), con sesion: ya no queda ninguna hoja
   publicada en internet. Auditoria #8: las fotos pasan por urlSegura() antes de pintarse y escHtml escapa
   tambien comillas; una URL con comillas ya no puede meter codigo en la ficha.
@@ -105,6 +110,13 @@
   .tasa-badge{font-size:11px;color:var(--brand);background:var(--brand-soft);border:1px solid rgba(245,168,0,0.3);border-radius:20px;padding:4px 10px;cursor:pointer;white-space:nowrap;font-weight:600}
   .tasa-badge:active{opacity:.7}
   .tasa-badge.bcv{background:var(--brand);color:#111;border-color:var(--brand)}
+  .tasa-badge.cashea{background:#7c3aed;color:#fff;border-color:#7c3aed}
+  .card-price.grande .usd{font-size:21px}
+  .castag{font-size:10px;font-weight:700;color:#a78bfa;letter-spacing:.3px}
+  .cas-row{margin-top:10px;background:var(--card);border:1px dashed rgba(167,139,250,.5);border-radius:12px;padding:10px 14px;display:flex;justify-content:space-between;align-items:center;gap:10px}
+  .cas-row .t{font-size:11px;font-weight:700;color:#a78bfa;text-transform:uppercase;letter-spacing:.5px}
+  .cas-row .v{font-size:18px;font-weight:800;color:var(--ink);white-space:nowrap}
+  .cas-row .s{font-size:11px;color:var(--ink-muted)}
   .refresh-btn{background:none;border:none;cursor:pointer;color:var(--ink-muted);padding:4px;border-radius:6px;display:flex;align-items:center}
   .refresh-btn:active{color:var(--brand)}
   .refresh-btn svg{width:16px;height:16px}
@@ -298,6 +310,10 @@
       <div class="modo-op-top"><span class="modo-op-t">BCV</span><span class="modo-op-check">✓</span></div>
       <div class="modo-op-s" id="ejBcv"></div>
     </button>
+    <button class="modo-op" id="modoCas" onclick="ponerModo('cashea')">
+      <div class="modo-op-top"><span class="modo-op-t">Cashea</span><span class="modo-op-check">✓</span></div>
+      <div class="modo-op-s" id="ejCas"></div>
+    </button>
     <div class="modo-nota" id="modoNota"></div>
     <div class="tasa-actions">
       <button class="btn-cancel" onclick="cerrarModoTasa()">Cerrar</button>
@@ -305,13 +321,13 @@
   </div>
 </div>
 
-<script src="boparts_sesion.js?v=2026-11-12.1"></script>
+<script src="boparts_sesion.js?v=2026-11-14.1"></script>
 <script>
 
 
 // v10: la lista viene del script, no del CSV publicado. Asi LISTA DE PRODUCTOS puede dejar de estar publicada.
 const SCRIPT_URL_SESION = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
-const APP_VERSION = 'v11.6';
+const APP_VERSION = 'v11.7';
 var VER_SCRIPT = '?';
 /* v11.3: el sello mentia de otra forma. La version salia tambien de la LISTA GUARDADA en el telefono,
    que puede ser de hace dias, asi que la pantalla podia decir "script v21.4" con un v25 desplegado.
@@ -337,15 +353,25 @@ let currentTasa = parseFloat(localStorage.getItem('motoauto_tasa') || '1000');
    Es solo presentacion. No toca currentTasa ni 'motoauto_tasa', que es la que lee Registrar Venta:
    si esto tocara esa tasa, se colaria en el registro de ventas. */
 let TASA_BCV = parseFloat(localStorage.getItem('boparts_bcv') || '0') || 0;
-let modoPrecio = localStorage.getItem('boparts_modo_precio') === 'bcv' ? 'bcv' : 'usd';
+let modoPrecio = (function() { var m = localStorage.getItem('boparts_modo_precio'); return (m === 'bcv' || m === 'cashea') ? m : 'usd'; })();
+// v11.7 — recargo Cashea (CONFIG B18). Mismo guardado que usa Registrar Venta.
+let CAS_REC = (function() { try { var g = JSON.parse(localStorage.getItem('boparts_cashea') || 'null'); return g && g.recargo >= 0 ? Number(g.recargo) : 30; } catch (e) { return 30; } })();
 
 function hayBCV() { return TASA_BCV > 0 && currentTasa > 0; }
-// El dolar que se muestra segun el modo. Los bolivares son los mismos en los dos.
+// Cashea: Bs = precio de lista x tasa de trabajo x (1 + recargo). En la app se carga en $ BCV.
+function bsCashea(p) { return p.bs ? Math.round(p.bs * (1 + CAS_REC / 100)) : 0; }
+function casheaBCV(p) { return hayBCV() && p.bs ? Math.round(bsCashea(p) / TASA_BCV * 100) / 100 : 0; }
+// El dolar que se muestra segun el modo.
 function precioMostrado(p) {
+  if (modoPrecio === 'cashea' && hayBCV() && p.bs) return casheaBCV(p);
   if (modoPrecio === 'bcv' && hayBCV() && p.bs) return p.bs / TASA_BCV;
   return p.precio;
 }
-function marcaModo() { return modoPrecio === 'bcv' ? ' BCV' : ''; }
+function bsMostrado(p) { return modoPrecio === 'cashea' ? bsCashea(p) : p.bs; }
+function marcaModo() { return modoPrecio === 'bcv' ? ' BCV' : modoPrecio === 'cashea' ? ' Cashea' : ''; }
+function tagModo() {
+  return modoPrecio === 'bcv' ? ' <span class="bcvtag">BCV</span>' : modoPrecio === 'cashea' ? ' <span class="castag">CASHEA BCV</span>' : '';
+}
 
 /* v11.1: el modo se elige desde el badge "Tasa" del encabezado. */
 function abrirModoTasa() {
@@ -356,7 +382,7 @@ function cerrarModoTasa() {
   document.getElementById('tasaModal').classList.remove('show');
 }
 function ponerModo(m) {
-  if (m === 'bcv' && !hayBCV()) { avisoSinBCV(); return; }
+  if ((m === 'bcv' || m === 'cashea') && !hayBCV()) { avisoSinBCV(); return; }
   modoPrecio = m;
   try { localStorage.setItem('boparts_modo_precio', m); } catch (e) {}
   pintarModo();
@@ -371,15 +397,17 @@ function avisoSinBCV() {
 function pintarModo() {
   // El badge del encabezado es el que muestra con cual tasa se esta trabajando.
   const badge = document.getElementById('tasaBadge');
-  if (badge) badge.classList.toggle('bcv', modoPrecio === 'bcv');
+  if (badge) { badge.classList.toggle('bcv', modoPrecio === 'bcv'); badge.classList.toggle('cashea', modoPrecio === 'cashea'); }
   const tv = document.getElementById('tasaVal');
-  if (tv) tv.textContent = modoPrecio === 'bcv' ? 'Tasa · BCV' : 'Tasa';
+  if (tv) tv.textContent = modoPrecio === 'bcv' ? 'Tasa · BCV' : modoPrecio === 'cashea' ? 'Cashea' : 'Tasa';
 
-  const b1 = document.getElementById('modoUsd'), b2 = document.getElementById('modoBcv');
+  const b1 = document.getElementById('modoUsd'), b2 = document.getElementById('modoBcv'), b3 = document.getElementById('modoCas');
   if (!b1) return;
   b1.classList.toggle('on', modoPrecio === 'usd');
   b2.classList.toggle('on', modoPrecio === 'bcv');
+  b3.classList.toggle('on', modoPrecio === 'cashea');
   b2.style.opacity = hayBCV() ? '1' : '.45';
+  b3.style.opacity = hayBCV() ? '1' : '.45';
 
   // Ejemplo con las tasas reales, para no tener que adivinar cual conviene.
   const ref = 10, bsRef = Math.round(ref * currentTasa);
@@ -389,6 +417,11 @@ function pintarModo() {
   if (e2) e2.textContent = hayBCV()
     ? 'Esos mismos Bs ' + bsRef.toLocaleString('es-VE') + ' a tasa BCV ' + TASA_BCV.toLocaleString('es-VE') +
       ': $' + (bsRef / TASA_BCV).toFixed(2) + '. Los bolivares no cambian.'
+    : 'Falta cargar la tasa BCV. La fija un socio desde Gerencia.';
+  const e3 = document.getElementById('ejCas');
+  if (e3) e3.textContent = hayBCV()
+    ? 'Lista + ' + CAS_REC + '%, con factura. $' + ref.toFixed(2) + ' de lista = Bs ' + Math.round(bsRef * (1 + CAS_REC / 100)).toLocaleString('es-VE') +
+      ' = $' + (Math.round(bsRef * (1 + CAS_REC / 100)) / TASA_BCV).toFixed(2) + ' BCV para cargar en la app.'
     : 'Falta cargar la tasa BCV. La fija un socio desde Gerencia.';
 
   const t = document.getElementById('modoNota');
@@ -593,7 +626,12 @@ function sincronizarTasa() {
         TASA_BCV = d.bcv;
         try { localStorage.setItem('boparts_bcv', String(TASA_BCV)); } catch (e) {}
         pintarModo();
-        if (modoPrecio === 'bcv') search();
+        if (modoPrecio !== 'usd') search();
+      }
+      if (d.casheaRecargo !== undefined && Number(d.casheaRecargo) >= 0 && Number(d.casheaRecargo) !== CAS_REC) {   // v11.7
+        CAS_REC = Number(d.casheaRecargo);
+        try { localStorage.setItem('boparts_cashea', JSON.stringify({recargo:CAS_REC, comTotal:Number(d.casheaComTotal) || 0, comFin:Number(d.casheaComFin) || 0})); } catch (e) {}
+        pintarModo(); if (modoPrecio === 'cashea') search();
       }
       TASA_FECHA = d.fecha || '';
       try { localStorage.setItem('boparts_tasa_fecha', TASA_FECHA); } catch (e) {}
@@ -712,9 +750,9 @@ function render(filtered) {
     <div class="card" onclick="openDetail(${PRODUCTS.indexOf(p)})">
       <div class="card-top">
         <div class="card-name">${cortable(highlight(p.producto, terms))}</div>
-        <div class="card-price">
-          <div class="usd">${fmtUSD(precioMostrado(p))}${modoPrecio === 'bcv' ? ' <span class="bcvtag">BCV</span>' : ''}</div>
-          <div class="bs">${fmtBS(p.bs)}</div>
+        <div class="card-price${modoPrecio !== 'usd' ? ' grande' : ''}">
+          <div class="usd">${fmtUSD(precioMostrado(p))}${tagModo()}</div>
+          <div class="bs">${fmtBS(bsMostrado(p))}</div>
         </div>
       </div>
       <div class="card-meta">
@@ -757,15 +795,17 @@ function openDetail(idx) {
     <div class="sheet-name">${cortable(escHtml(p.producto))}</div>
     <div class="sheet-marca">${escHtml(p.marca) || '&nbsp;'}</div>
     <div class="sheet-prices">
-      <div class="price-box featured">
-        <div class="label">${modoPrecio === 'bcv' ? 'Dólares a BCV' : 'Dólares'}</div>
-        <div class="amount">${fmtUSD(precioMostrado(p))}</div>
+      <div class="price-box featured"${modoPrecio === 'cashea' ? ' style="background:rgba(124,58,237,.15);border-color:rgba(167,139,250,.5)"' : ''}>
+        <div class="label">${modoPrecio === 'bcv' ? 'Dólares a BCV' : modoPrecio === 'cashea' ? 'Cargar en Cashea ($ BCV)' : 'Dólares'}</div>
+        <div class="amount"${modoPrecio === 'cashea' ? ' style="color:#c4b5fd;font-size:30px"' : modoPrecio === 'bcv' ? ' style="font-size:30px"' : ''}>${fmtUSD(precioMostrado(p))}</div>
       </div>
       <div class="price-box">
-        <div class="label">Bolívares</div>
-        <div class="amount" style="font-size:${p.bs > 99999 ? '16px' : '22px'}">${fmtBS(p.bs)}</div>
+        <div class="label">${modoPrecio === 'cashea' ? 'Bolívares con Cashea' : 'Bolívares'}</div>
+        <div class="amount" style="font-size:${bsMostrado(p) > 99999 ? '16px' : '22px'}">${fmtBS(bsMostrado(p))}</div>
       </div>
     </div>
+    ${modoPrecio === 'cashea' && p.precio ? `<div class="cas-row"><div class="s">Lista ${fmtUSD(p.precio)} + ${CAS_REC}% · va con factura, IVA incluido · la inicial la dice la app</div></div>` : ''}
+    ${modoPrecio !== 'cashea' && hayBCV() && p.bs ? `<div class="cas-row" onclick="ponerModo('cashea')"><div><div class="t">Con Cashea</div><div class="s">${fmtBS(bsCashea(p))} · toca para ver la lista así</div></div><div class="v">$${casheaBCV(p).toFixed(2)} <span class="castag">BCV</span></div></div>` : ''}
     ${p.codigo ? `<div class="sheet-code"><span class="label">Código</span><span class="val">${escHtml(p.codigo)}</span></div>` : ''}
     <button class="share-btn" onclick="shareProduct(${idx})">
       <svg viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92-1.31-2.92-2.92-2.92z"/></svg>
@@ -814,7 +854,7 @@ updateTasaBadge();
 // v10: con el login encendido se pide la sesion antes de cargar; con el apagado arranca directo.
 // alEntrar() lo llama el modulo de sesion apenas el PIN es correcto.
 function alEntrar() { loadData(true); }
-if (modoPrecio === 'bcv' && !hayBCV()) modoPrecio = 'usd';   // sin tasa BCV no se puede dar ese precio
+if (modoPrecio !== 'usd' && !hayBCV()) modoPrecio = 'usd';   // sin tasa BCV no se puede dar ese precio
 pintarModo();
 revisarSesion(function() { loadData(); });
 sincronizarTasa();
@@ -828,11 +868,13 @@ function shareProduct(idx) {
   // El mensaje dice de que dolar habla: dos precios distintos para el mismo producto, sin decir cual es cual,
   // es exactamente lo que termina en una discusion con el cliente.
   const pm = precioMostrado(p);
-  const usd = pm ? `$${Number(pm).toFixed(2)}${modoPrecio === 'bcv' ? ' (tasa BCV)' : ''}` : '—';
+  const usd = pm ? `$${Number(pm).toFixed(2)}${modoPrecio !== 'usd' ? ' (tasa BCV)' : ''}` : '—';
   const imgs = [p.imagen, p.imagen2, p.imagen3].filter(Boolean);
   const fotoLinks = imgs.length ? '\n🖼️ ' + imgs.join('\n🖼️ ') : '';
 
-  const lineaUsd = modoPrecio === 'bcv'
+  const lineaUsd = modoPrecio === 'cashea'
+    ? `💳 *Con Cashea:* ${usd.replace(' (tasa BCV)', '')} (tasa BCV)\n💵 En bolívares: Bs ${bsCashea(p).toLocaleString('es-VE')}\n_Pagas la inicial en tienda y el resto en cuotas con Cashea_`
+    : modoPrecio === 'bcv'
     ? `💵 Precio: ${bs}\n💲 Equivalente en divisa a BCV: ${usd}`
     : `💵 Precio: ${bs}\n🤑 Oferta en Divisa: ${usd}\n\n_Cancelando en dólares obtienes un precio preferencial_ 😉`;
   const msg = `🔧 *${nombre}*\n${codigo}\n${lineaUsd}${fotoLinks}\n\n📍 *Repuesto BoParts*\n📞 0412-3185778 / 0414-9536708`;

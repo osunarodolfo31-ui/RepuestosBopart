@@ -1,6 +1,19 @@
 /**
  * Repuesto BoParts — Code.gs
- * VERSION: v28.22 (2026-11-12) | redondeo en Bs
+ * VERSION: v28.24 (2026-11-14) | abono con fecha anterior
+ *
+ * v28.24 — ABONO CON FECHA ANTERIOR. Un SOCIO puede registrar un abono con la fecha en que de verdad se pago
+ *   (un vendedor no; fecha futura, nadie). action=tasas_dia&fecha=AAAA-MM-DD (SOCIO) devuelve la tasa de trabajo
+ *   y el BCV de ese dia (hoja TASAS; si no hay, la ultima venta hasta ese dia), para que el abono se convierta
+ *   con las tasas del dia del pago y no con las de hoy. tipo=abono devuelve tambien saldoBCV.
+ *
+ * VERSION anterior: v28.23 (2026-11-13) | Gerencia: ventas netas de IVA y comision Cashea
+ *
+ * v28.23 — action=ventas descuenta de cada linea el IVA (VENTAS AG) y la comision de Cashea (AN) de su venta:
+ *   "Vendido", utilidad y margen pasan a ser lo que le queda a la tienda. Una venta Cashea a +30% aparecia como
+ *   si todo el recargo fuera ganancia. Devuelve deducciones {ivaUSD, casheaUSD} y la linea trae el bruto en [13].
+ *
+ * VERSION anterior: v28.22 (2026-11-12) | redondeo en Bs
  *
  * v28.22 — REDONDEO. Cuando el vendedor cobra un monto en Bs redondeado (3.800 en vez de 3.850), la venta manda
  *   redondeoBs (cobrado - lista, con signo) y listaBs. VENTAS AR REDONDEO_BS. Los precios de las lineas ya llegan
@@ -599,7 +612,7 @@ function listaAliados_(ss) {
 var PERMISOS_GET = {
   config:'VENDEDOR', nextNota:'VENDEDOR', nextCot:'VENDEDOR', nextFactura:'VENDEDOR', nota:'VENDEDOR',
   apartados:'VENDEDOR', proveedores:'VENDEDOR', stock:'VENDEDOR', conteos:'VENDEDOR', clientes:'VENDEDOR',
-  cxc:'VENDEDOR', cxc_diferencial:'SOCIO', redondeos:'SOCIO', productos:'VENDEDOR', catalogo:'VENDEDOR', metodos:'VENDEDOR', equivalencias:'VENDEDOR', cuentas:'VENDEDOR',
+  cxc:'VENDEDOR', cxc_diferencial:'SOCIO', redondeos:'SOCIO', tasas_dia:'SOCIO', productos:'VENDEDOR', catalogo:'VENDEDOR', metodos:'VENDEDOR', equivalencias:'VENDEDOR', cuentas:'VENDEDOR',
   tareas:'VENDEDOR',
   producto:'SOCIO',
   ventas:'SOCIO', socios:'SOCIO', cxp:'SOCIO', cliente_stats:'SOCIO', compras:'SOCIO', diag:'SOCIO',
@@ -843,7 +856,7 @@ function claveDePost_(data) {
 // OJO: esta constante es lo que ven las apps en el menu. Se habia quedado en v21.4 mientras el
 // encabezado ya decia v24, asi que el sello de version — que existe justamente para saber si lo
 // desplegado es lo que crees — estaba mintiendo. Cada version nueva se cambia AQUI tambien.
-var VERSION_SCRIPT = 'v28.22';
+var VERSION_SCRIPT = 'v28.24';
 
 function json_(obj) {
   // La version viaja en cada respuesta: es la forma rapida de saber si lo desplegado es lo que crees
@@ -1073,6 +1086,9 @@ function rutearGet_(e) {
   if (e.parameter.action === 'cxc') {
     var ss2 = SpreadsheetApp.getActiveSpreadsheet();
     return json_({ok:true, tasa:leerTasa_(ss2), bcv:Number(leerConfig_(ss2).bcv) || 0, clientes:estadoCxc_(ss2, e.parameter.cliente || '')});
+  }
+  if (e.parameter.action === 'tasas_dia') {
+    return json_(tasasDia_(SpreadsheetApp.getActiveSpreadsheet(), e.parameter.fecha || ''));
   }
   if (e.parameter.action === 'redondeos') {
     return json_(redondeos_(SpreadsheetApp.getActiveSpreadsheet(), e.parameter.desde || '', e.parameter.hasta || ''));
@@ -1432,10 +1448,19 @@ function doPost(e) {
       var lockA = LockService.getScriptLock();
       lockA.waitLock(10000);
       try {
+        // v28.24 — fecha del pago: hoy para todos; un dia anterior solo lo registra un socio; futura, nadie.
+        var fAb = iso_(fechaVE_(data.fecha)), hoyAb = Utilities.formatDate(new Date(), TZ_VE, 'yyyy-MM-dd');
+        if (fAb && fAb > hoyAb) throw rechazo_('La fecha del abono no puede ser futura');
+        if (fAb && fAb < hoyAb) {
+          if (!quien || quien.rol !== 'SOCIO') throw rechazo_('Un abono con fecha anterior lo registra un socio');
+          var tD = tasasDia_(ss, fAb);
+          if (!(Number(data.tasa) > 0)) data.tasa = tD.tasa;
+          if (!(Number(data.tasaBCV) > 0)) data.tasaBCV = tD.bcv;
+        }
         var r = guardarAbono_(ss, data);
         // 'repetido' viaja a la app para que pueda decir "ese abono ya estaba" en vez de dejar
         // creer que registro uno nuevo. Las pantallas viejas leen saldoUSD igual y no se rompen.
-        return json_({ok:true, tipo:'abono', saldoUSD:r.saldoUSD, repetido:!!r.repetido,
+        return json_({ok:true, tipo:'abono', saldoUSD:r.saldoUSD, saldoBCV:r.saldoBCV, repetido:!!r.repetido,
                       comisionesLiberadas:r.comisionesLiberadas || 0});
       } finally {
         SpreadsheetApp.flush();   // v26.1: vaciar ANTES de soltar el candado
@@ -1918,6 +1943,40 @@ function cuentaBcvEstado_(c, cb, bcvVentas) {
   c.diferencialUSD = round2_(difTotal);
 }
 // Diferencial cambiario de las cuentas en $ BCV entre dos fechas (yyyy-MM-dd), para Gerencia.
+// v28.24 — tasa de trabajo y BCV vigentes un dia (AAAA-MM-DD). tasa = la ultima fijada hasta el cierre de ese dia;
+// tasaInicio = la que venia del dia anterior (si ese dia se cambio, son distintas). Fuente: hoja TASAS (las filas
+// cuya nota empieza por BCV son del BCV); si no alcanza, la ultima venta hasta ese dia.
+function tasasDia_(ss, fecha) {
+  var f = iso_(fecha);
+  if (!f) throw new Error('Fecha invalida');
+  var out = {ok:true, fecha:f, tasa:0, tasaInicio:0, bcv:0, delDia:[]};
+  var sh = ss.getSheetByName('TASAS');
+  if (sh && sh.getLastRow() >= 2) {
+    sh.getRange(2, 1, sh.getLastRow() - 1, 5).getValues().forEach(function(r) {
+      var d = iso_(r[0]), t = Number(r[2]) || 0; if (!d || !(t > 0) || d > f) return;
+      if (/^BCV/i.test(String(r[4] || '').trim())) { out.bcv = t; return; }
+      if (d < f) out.tasaInicio = t; else out.delDia.push(t);
+      out.tasa = t;
+    });
+  }
+  if (!out.tasaInicio) out.tasaInicio = out.delDia.length ? out.delDia[0] : out.tasa;
+  if (!out.tasa || !out.bcv) {
+    var det = ss.getSheetByName(SH_DETALLE), v = ss.getSheetByName(SH_VENTAS);
+    if (!out.tasa && det && det.getLastRow() >= 2) {
+      det.getRange(2, 1, det.getLastRow() - 1, 14).getValues().forEach(function(r) {
+        var d = iso_(r[1]), t = Number(r[13]) || 0; if (d && d <= f && t > 0) out.tasa = t;
+      });
+      if (!out.tasaInicio) out.tasaInicio = out.tasa;
+    }
+    if (!out.bcv && v && v.getLastRow() >= 2) {
+      v.getRange(2, 1, v.getLastRow() - 1, 35).getValues().forEach(function(r) {
+        var d = iso_(r[0]), b = Number(r[34]) || 0; if (d && d <= f && b > 0) out.bcv = b;
+      });
+    }
+  }
+  return out;
+}
+
 // v28.22 — redondeos en Bs del periodo (VENTAS AR). Negativo = se cobro menos que la lista.
 function redondeos_(ss, desde, hasta) {
   var sh = ss.getSheetByName('VENTAS'), items = [], totBs = 0, totUsd = 0;
@@ -2379,33 +2438,53 @@ function iso_(v) {
 // Formato compacto (arrays) para que el telefono descargue lo menos posible.
 function datosVentas_(ss, desde, hasta) {
   var d1 = desde || '0000-00-00', d2 = hasta || '9999-99-99';
-  var out = {ok:true, desde:d1, hasta:d2, lineas:[], ventas:[], gastos:[], conteos:[], demanda:[], fotos:[]};
+  var out = {ok:true, desde:d1, hasta:d2, lineas:[], ventas:[], gastos:[], conteos:[], demanda:[], fotos:[],
+             deducciones:{ivaUSD:0, casheaUSD:0, brutoUSD:0}};
+
+  // v28.23 — lo que NO es ingreso de la tienda: el IVA de una venta facturada (AG) es del SENIAT y la comision
+  // de Cashea (AN) se la queda Cashea. Por venta se saca un factor neto = (total - IVA - comision) / total y con
+  // el se ajustan sus lineas. Asi "Vendido", la utilidad y el margen por producto son lo que de verdad le queda.
+  var factorVenta = {};
+  var v = ss.getSheetByName(SH_VENTAS);
+  if (v && v.getLastRow() >= 2) {
+    var anchoV = Math.max(v.getLastColumn(), 40);
+    v.getRange(2, 1, v.getLastRow() - 1, anchoV).getValues().forEach(function(r) {
+      var f = iso_(r[0]); if (!f || f < d1 || f > d2) return;
+      var tot = usdCelda_(r[5]), iva = Number(r[32]) || 0, com = Number(r[39]) || 0;
+      if (tot > 0 && (iva > 0 || com > 0)) {
+        factorVenta[String(r[23] || '')] = Math.max(0, (tot - iva - com) / tot);
+        out.deducciones.ivaUSD += iva; out.deducciones.casheaUSD += com;
+      }
+      // 0 fecha, 1 vendedor, 2 canal, 3 totalUSD, 4 totalBS, 5 comisionBS, 6 netoBS, 7 aliado, 8 aliadoComisionBS,
+      // 9 idVenta, 10 nota, 11 cliente, 12 creditoUSD, 13 metodos [[metodo, banco, monto, moneda] x3],
+      // 14 ivaUSD, 15 comisionCasheaUSD (v28.23)
+      out.ventas.push([f, String(r[2]||''), String(r[3]||''), tot, Number(r[6])||0, Number(r[16])||0, Number(r[17])||0,
+                       String(r[18]||''), Number(r[21])||0, String(r[23]||''), r[24]||'', String(r[25]||''), Number(r[30])||0,
+                       [[String(r[7]||''), String(r[8]||''), Number(r[9])||0, String(r[27]||'')],
+                        [String(r[10]||''), String(r[11]||''), Number(r[12])||0, String(r[28]||'')],
+                        [String(r[13]||''), String(r[14]||''), Number(r[15])||0, String(r[29]||'')]],
+                       iva, com]);
+    });
+  }
 
   var det = ss.getSheetByName(SH_DETALLE);
   if (det && det.getLastRow() >= 2) {
     det.getRange(2, 1, det.getLastRow() - 1, 16).getValues().forEach(function(r) {
       var f = iso_(r[1]); if (!f || f < d1 || f > d2) return;
       // 0 idVenta, 1 fecha, 2 vendedor, 3 canal, 4 codigo, 5 producto, 6 cant, 7 precio, 8 costo,
-      // 9 subtotal, 10 costoTotal, 11 utilidad, 12 nota
+      // 9 subtotal, 10 costoTotal, 11 utilidad, 12 nota, 13 subtotal bruto (v28.23: antes de IVA y comision Cashea)
+      var k = factorVenta[String(r[0] || '')], sub = Number(r[10]) || 0, cTot = Number(r[11]) || 0;
+      var precio = Number(r[8]) || 0, util = Number(r[12]) || 0, bruto = sub;
+      if (k !== undefined) {
+        out.deducciones.brutoUSD += sub;
+        sub = round2_(sub * k); precio = Math.round(precio * k * 10000) / 10000; util = round2_(sub - cTot);
+      }
       out.lineas.push([String(r[0]||''), f, String(r[3]||''), String(r[4]||''), String(r[5]||''), String(r[6]||''),
-                       Number(r[7])||0, Number(r[8])||0, Number(r[9])||0, Number(r[10])||0, Number(r[11])||0, Number(r[12])||0, r[15]||'']);
+                       Number(r[7])||0, precio, Number(r[9])||0, sub, cTot, util, r[15]||'', bruto]);
     });
   }
-
-  var v = ss.getSheetByName(SH_VENTAS);
-  if (v && v.getLastRow() >= 2) {
-    var anchoV = Math.max(v.getLastColumn(), 31);
-    v.getRange(2, 1, v.getLastRow() - 1, anchoV).getValues().forEach(function(r) {
-      var f = iso_(r[0]); if (!f || f < d1 || f > d2) return;
-      // 0 fecha, 1 vendedor, 2 canal, 3 totalUSD, 4 totalBS, 5 comisionBS, 6 netoBS, 7 aliado, 8 aliadoComisionBS,
-      // 9 idVenta, 10 nota, 11 cliente, 12 creditoUSD, 13 metodos [[metodo, banco, monto, moneda] x3]
-      out.ventas.push([f, String(r[2]||''), String(r[3]||''), usdCelda_(r[5]), Number(r[6])||0, Number(r[16])||0, Number(r[17])||0,
-                       String(r[18]||''), Number(r[21])||0, String(r[23]||''), r[24]||'', String(r[25]||''), Number(r[30])||0,
-                       [[String(r[7]||''), String(r[8]||''), Number(r[9])||0, String(r[27]||'')],
-                        [String(r[10]||''), String(r[11]||''), Number(r[12])||0, String(r[28]||'')],
-                        [String(r[13]||''), String(r[14]||''), Number(r[15])||0, String(r[29]||'')]]]);
-    });
-  }
+  out.deducciones.ivaUSD = round2_(out.deducciones.ivaUSD);
+  out.deducciones.casheaUSD = round2_(out.deducciones.casheaUSD);
 
   var gh = ss.getSheetByName('GASTOS');
   if (gh && gh.getLastRow() >= 2) {
