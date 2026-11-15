@@ -1,5 +1,13 @@
 # CHANGELOG — Repuesto BoParts
 
+## Apps Script v28.25 + compras v3.2 + gerencia v4.1 — build 2026-11-15.1 — nota de entrega o factura fiscal
+
+- Costeo: "Documento que dio el proveedor" (Nota de entrega / Factura fiscal), obligatorio y recordado por proveedor.
+- Con factura fiscal: costos SIN IVA, IVA 16% calculado (editable), N° de control y total a pagar.
+  El costo del producto queda sin IVA; la cuenta por pagar, la salida de dinero y el prestamo de socio, con IVA.
+- COMPRAS U DOCUMENTO, V IVA_USD, W N_CONTROL, X TOTAL_PAGAR_USD. Las compras anteriores quedan "sin indicar".
+- Gerencia: IVA cobrado en facturas contra credito fiscal de compras, y compras con factura / con nota.
+
 ## ventas v15.11 — build 2026-11-14.3 — la lista de productos no deja la venta parada
 
 - La ultima lista de productos queda guardada en el telefono: se puede vender con ella si el servidor tarda o falla.

@@ -1,7 +1,10 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_gerencia.html
-  VERSION: v4.0 (2026-11-13) | build 2026-11-14.3 | requiere Apps Script v28.23
+  VERSION: v4.1 (2026-11-15) | build 2026-11-15.1 | requiere Apps Script v28.25
+  v4.1: IVA del periodo: cobrado en facturas contra el credito fiscal de las compras con factura fiscal, y cuanto
+  se compro con factura y cuanto con nota de entrega.
+  VERSION anterior: v4.0 (2026-11-13) | build 2026-11-14.3 | requiere Apps Script v28.23
   v4.0: "Vendido", utilidad y margenes ya vienen NETOS de IVA (ventas facturadas) y de la comision de Cashea. Un
   aviso dice cuanto se desconto. Antes una venta Cashea a +30% se veia como si todo el recargo fuera ganancia.
   VERSION anterior: v3.9 (2026-11-12) | build 2026-11-12.1 | requiere Apps Script v28.22
@@ -547,8 +550,8 @@ select option{background:#1E1E1E;color:var(--ink)}
   </div>
 </div>
 
-<script src="boparts_sesion.js?v=2026-11-14.3"></script>
-<script src="boparts_clientes.js?v=2026-11-14.3"></script>
+<script src="boparts_sesion.js?v=2026-11-15.1"></script>
+<script src="boparts_clientes.js?v=2026-11-15.1"></script>
 <script>
 
 
@@ -561,7 +564,7 @@ function sellarVersion(d) {
   if (t) t.textContent = 'app ' + APP_VERSION + ' \u00b7 script ' + VER_SCRIPT;
   return d;
 }
-var APP_VERSION = 'v4.0';
+var APP_VERSION = 'v4.1';
 var TASA = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
 var periodo = 'hoy', DATA = null;
 
@@ -1286,6 +1289,16 @@ function render(r) {
     h += '<div class="cominfo" style="margin-top:10px">Las ventas cobraron <b>' + usd(vendVentas) + '</b>. No son de la tienda y ya estan fuera de Vendido y de la utilidad: ' +
       (ded.ivaUSD ? 'IVA de facturas <b>' + usd(ded.ivaUSD) + '</b>' : '') + (ded.ivaUSD && ded.casheaUSD ? ' · ' : '') +
       (ded.casheaUSD ? 'comision de Cashea <b>' + usd(ded.casheaUSD) + '</b>' : '') + '.</div>';
+  }
+  // v4.1 — IVA: lo cobrado en facturas contra el credito fiscal de las compras con factura. Con nota no hay credito.
+  var compF = num(ded.comprasFactura), compN = num(ded.comprasNota), compS = num(ded.comprasSinDoc);
+  if (num(ded.ivaUSD) > 0 || compF + compN + compS > 0) {
+    var ivaNeto = num(ded.ivaUSD) - num(ded.ivaComprasUSD);
+    h += '<div class="cominfo" style="margin-top:10px"><b>IVA del periodo (estimado).</b> Cobrado en tus facturas: <b>' + usd(num(ded.ivaUSD)) + '</b>. ' +
+      'Credito fiscal de compras con factura: <b>' + usd(num(ded.ivaComprasUSD)) + '</b>. ' +
+      (ivaNeto > 0.005 ? 'Por pagar al SENIAT: <b style="color:var(--red)">' + usd(ivaNeto) + '</b>.' : 'Queda a favor: <b>' + usd(-ivaNeto) + '</b>.') +
+      '<br>Compras costeadas: con factura fiscal ' + usd(compF) + ' · con nota de entrega ' + usd(compN) + (compS ? ' · sin indicar ' + usd(compS) : '') +
+      '. Confirmalo con el contador: esto no reemplaza la declaracion.</div>';
   }
   if (!L.length && V.length) h += '<div class="aviso">Sin lineas de detalle en este periodo: el costo y el margen no se pueden calcular (ventas anteriores a la version que guarda costo).</div>';
   if (sinUSD) h += '<div class="aviso">' + sinUSD + ' venta(s) del periodo tienen monto en Bs pero no en USD (filas viejas importadas a mano). No suman en el total en dolares.</div>';

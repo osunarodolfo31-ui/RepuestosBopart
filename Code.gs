@@ -1,6 +1,14 @@
 /**
  * Repuesto BoParts — Code.gs
- * VERSION: v28.24 (2026-11-14) | abono con fecha anterior
+ * VERSION: v28.25 (2026-11-15) | compras: nota de entrega o factura fiscal
+ *
+ * v28.25 — DOCUMENTO DE LA COMPRA. Al costear se indica si el proveedor dio NOTA de entrega o FACTURA fiscal.
+ *   COMPRAS gana U DOCUMENTO, V IVA_USD, W N_CONTROL y X TOTAL_PAGAR_USD. Con factura, los costos de las lineas
+ *   son la BASE (sin IVA): el costo del producto no lleva IVA (es credito fiscal), pero lo que se le debe al
+ *   proveedor (CXP), lo que sale de la cuenta (Dinero) y el prestamo del socio si son base + IVA. Con nota
+ *   todo sigue igual. action=ventas devuelve deducciones.ivaComprasUSD (credito fiscal del periodo).
+ *
+ * VERSION anterior: v28.24 (2026-11-14) | abono con fecha anterior
  *
  * v28.24 — ABONO CON FECHA ANTERIOR. Un SOCIO puede registrar un abono con la fecha en que de verdad se pago
  *   (un vendedor no; fecha futura, nadie). action=tasas_dia&fecha=AAAA-MM-DD (SOCIO) devuelve la tasa de trabajo
@@ -856,7 +864,7 @@ function claveDePost_(data) {
 // OJO: esta constante es lo que ven las apps en el menu. Se habia quedado en v21.4 mientras el
 // encabezado ya decia v24, asi que el sello de version — que existe justamente para saber si lo
 // desplegado es lo que crees — estaba mintiendo. Cada version nueva se cambia AQUI tambien.
-var VERSION_SCRIPT = 'v28.24';
+var VERSION_SCRIPT = 'v28.25';
 
 function json_(obj) {
   // La version viaja en cada respuesta: es la forma rapida de saber si lo desplegado es lo que crees
@@ -2483,6 +2491,19 @@ function datosVentas_(ss, desde, hasta) {
                        Number(r[7])||0, precio, Number(r[9])||0, sub, cTot, util, r[15]||'', bruto]);
     });
   }
+  // v28.25 — credito fiscal: IVA de las compras con factura fiscal costeadas en el periodo
+  out.deducciones.ivaComprasUSD = 0; out.deducciones.comprasFactura = 0; out.deducciones.comprasNota = 0; out.deducciones.comprasSinDoc = 0;
+  var shCo = ss.getSheetByName('COMPRAS');
+  if (shCo && shCo.getLastRow() >= 2) {
+    shCo.getRange(2, 1, shCo.getLastRow() - 1, Math.min(22, shCo.getMaxColumns())).getValues().forEach(function(r) {
+      var f = iso_(r[1]); if (!f || f < d1 || f > d2 || String(r[8] || '').toUpperCase() !== 'COSTEADA') return;
+      var doc = String(r[20] || '').toUpperCase(), tot = Number(r[9]) || 0;
+      if (doc === 'FACTURA') { out.deducciones.comprasFactura += tot; out.deducciones.ivaComprasUSD += Number(r[21]) || 0; }
+      else if (doc === 'NOTA') out.deducciones.comprasNota += tot;
+      else out.deducciones.comprasSinDoc += tot;
+    });
+  }
+  ['ivaComprasUSD', 'comprasFactura', 'comprasNota', 'comprasSinDoc'].forEach(function(k) { out.deducciones[k] = round2_(out.deducciones[k]); });
   out.deducciones.ivaUSD = round2_(out.deducciones.ivaUSD);
   out.deducciones.casheaUSD = round2_(out.deducciones.casheaUSD);
 
@@ -3562,6 +3583,15 @@ function costearCompra_(ss, d) {
   lineas.forEach(function(l) { totalPrev += (Number(l.costo) || 0) * (Number(l.cantidad) || 0); });
   if (condPrev === 'CREDITO' && !(totalPrev > 0)) throw new Error('Una compra a credito necesita un total mayor que cero');
   if (condPrev === 'CREDITO' && !d.proveedor) throw new Error('Falta el proveedor');
+  // v28.25 — documento del proveedor. Una app vieja no lo manda: queda en blanco (sin indicar), no se inventa.
+  var docC = String(d.documento || '').toUpperCase();
+  if (docC && docC !== 'NOTA' && docC !== 'FACTURA') throw new Error('Documento invalido: debe ser NOTA o FACTURA');
+  var ivaC = 0;
+  if (docC === 'FACTURA') {
+    ivaC = (d.ivaUSD !== undefined && d.ivaUSD !== null && d.ivaUSD !== '') ? Number(d.ivaUSD) : round2_(totalPrev * 0.16);
+    if (!(ivaC >= 0) || ivaC > totalPrev * 0.5) throw new Error('El IVA de la factura no cuadra con el total. Revisalo.');
+    ivaC = round2_(ivaC);
+  }
 
   // Costos en el detalle
   var dt = ss.getSheetByName('COMPRAS_DETALLE');
@@ -3640,6 +3670,11 @@ function costearCompra_(ss, d) {
   // socio de su bolsillo, queda en PAGADO_POR y la tienda se lo debe, igual que con los gastos.
   sh.getRange(fila, 18).setValue(d.metodo || '');
   sh.getRange(fila, 19).setValue(d.banco || '');
+  // v28.25: documento, IVA, control y total a pagar (base + IVA)
+  var totalPagar = round2_(total + ivaC);
+  if (sh.getMaxColumns() < 24) sh.insertColumnsAfter(sh.getMaxColumns(), 24 - sh.getMaxColumns());
+  if (!String(sh.getRange(1, 21).getValue() || '').trim()) sh.getRange(1, 21, 1, 4).setValues([['DOCUMENTO','IVA_USD','N_CONTROL','TOTAL_PAGAR_USD']]);
+  sh.getRange(fila, 21, 1, 4).setValues([[docC, ivaC, String(d.nControl || '').slice(0, 40), totalPagar]]);
   var pagoSocio = String(d.pagadoPor || '').trim().toUpperCase();
   if (condicion === 'CONTADO' && (pagoSocio === 'RODOLFO' || pagoSocio === 'JAVIER')) sh.getRange(fila, 20).setValue(pagoSocio);
   if (!sh.getRange(1, 18).getValue()) {
@@ -3664,17 +3699,19 @@ function costearCompra_(ss, d) {
   // A credito: nace el compromiso de pago (v27: sin duplicar si un reintento llega hasta aqui)
   if (condicion === 'CREDITO' && !cargoCxpExiste_(ss, d.id)) {
     movCxp_(ss, {fecha:d.fecha, hora:d.hora, proveedor:d.proveedor, id:d.id, factura:d.factura,
-                 montoUSD:total, registradoPor:d.costeadoPor, notas:'Compra a ' + dias + ' dias'}, 'CARGO');
+                 montoUSD:totalPagar, registradoPor:d.costeadoPor,
+                 notas:'Compra a ' + dias + ' dias' + (ivaC ? ' · factura fiscal, incluye IVA ' + ivaC : '')}, 'CARGO');
   }
   // De contado pagada por un socio: la tienda le debe (sin duplicar).
   if (condicion === 'CONTADO' && (pagoSocio === 'RODOLFO' || pagoSocio === 'JAVIER') && !movSocioExiste_(ss, d.id)) {
-    movSocio_(ss, {fecha:d.fecha, socio:pagoSocio, tipo:'PRESTAMO', montoUSD:total, moneda:'USD', montoPagado:total, tasa:0,
+    movSocio_(ss, {fecha:d.fecha, socio:pagoSocio, tipo:'PRESTAMO', montoUSD:totalPagar, moneda:'USD', montoPagado:totalPagar, tasa:0,
                    origen:d.id, descripcion:'Compra ' + (d.proveedor || '') + (d.factura ? ' fact. ' + d.factura : ''),
                    registradoPor:d.costeadoPor || ''});
   }
   SpreadsheetApp.flush();
   sh.getRange(fila, 9).setValue('COSTEADA');     // ultimo paso: todo lo anterior ya quedo escrito
-  return {ok:true, tipo:'costeo', id:d.id, total:total, condicion:condicion, vence:vence ? iso_(vence) : '', actualizados:actualizados};
+  return {ok:true, tipo:'costeo', id:d.id, total:total, documento:docC, ivaUSD:ivaC, totalPagar:totalPagar,
+          condicion:condicion, vence:vence ? iso_(vence) : '', actualizados:actualizados};
 }
 
 function cargoCxpExiste_(ss, idCompra) {
@@ -6347,7 +6384,11 @@ function estadoDinero_(ss, desde, hasta) {
   function filas(nombre, ancho) {
     var sh = ss.getSheetByName(nombre);
     if (!sh || sh.getLastRow() < 2) return [];
-    return sh.getRange(2, 1, sh.getLastRow() - 1, Math.max(ancho, 1)).getValues();
+    // v28.25: si la hoja tiene menos columnas que las pedidas, se lee lo que hay y se rellena (antes daba error)
+    var hay = Math.min(Math.max(ancho, 1), sh.getMaxColumns());
+    var v = sh.getRange(2, 1, sh.getLastRow() - 1, hay).getValues();
+    if (hay < ancho) v.forEach(function(r) { while (r.length < ancho) r.push(''); });
+    return v;
   }
 
   // 1) VENTAS: hasta 3 pagos por venta. No cuentan el credito ni el anticipo de un apartado (ese dinero ya
@@ -6461,11 +6502,11 @@ function estadoDinero_(ss, desde, hasta) {
   });
 
   // 7) COMPRAS DE CONTADO costeadas, pagadas por la tienda (no por un socio)
-  filas('COMPRAS', 20).forEach(function(r) {
+  filas('COMPRAS', 22).forEach(function(r) {
     if (String(r[8] || '').toUpperCase() !== 'COSTEADA') return;
     if (String(r[14] || 'CONTADO').toUpperCase() !== 'CONTADO') return;
     if (String(r[19] || '').trim()) return;
-    var total = n_(r[9]); if (!(total > 0)) return;
+    var total = n_(r[9]) + n_(r[21]); if (!(total > 0)) return;   // v28.25: con factura fiscal sale base + IVA
     var f = iso_(r[1]); if (!f) return;
     var met = String(r[17] || '').trim();
     var cta = resolverCuenta_(porNombre, met, r[18], '');

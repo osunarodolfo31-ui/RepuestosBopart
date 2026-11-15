@@ -1,7 +1,11 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_compras.html
-  VERSION: v3.1 (2026-10-31) | build 2026-11-14.3 | requiere Apps Script v27.3
+  VERSION: v3.2 (2026-11-15) | build 2026-11-15.1 | requiere Apps Script v28.25
+  v3.2: al costear se indica si el proveedor dio NOTA de entrega o FACTURA fiscal (se recuerda por proveedor). Con
+  factura fiscal los costos se escriben SIN IVA: el sistema muestra el IVA (16%, editable), el numero de control
+  y el total a pagar. El costo del producto queda sin IVA; la deuda y la salida de dinero, con IVA.
+  VERSION anterior: v3.1 (2026-10-31) | build 2026-11-14.3 | requiere Apps Script v27.3
   v3.1: si un producto nuevo llega sin codigo, con "-" o con el codigo de otro producto, el servidor le pone uno
   propio (N-AAMMDD-01) y el mensaje de la recepcion lo muestra.
   VERSION anterior: v3.0 (2026-09-24) | build 2026-09-24.1 | requiere Apps Script v27
@@ -387,7 +391,7 @@ select option{background:#1E1E1E;color:var(--ink)}
   </div>
 </div>
 
-<script src="boparts_sesion.js?v=2026-11-14.3"></script>
+<script src="boparts_sesion.js?v=2026-11-15.1"></script>
 <script>
 
 
@@ -402,7 +406,7 @@ function sellarVersion(d) {
 }
 function txt_(v) { return v == null ? '' : String(v); }
 var CLOUD = 'c7jufi9v', PRESET = 'boparts_productos';
-var APP_VERSION = 'v3.1';
+var APP_VERSION = 'v3.2';
 
 var PRODUCTS = [], PROVEEDORES = [], lineas = [], provSel = null, fotoUrl = '';
 var idCompraActual = '';   // se mantiene entre reintentos de la MISMA recepcion
@@ -605,9 +609,20 @@ var PIN_HASH_SOCIOS = 911136;
 function hashPin(t) { var h = 5381; for (var i = 0; i < t.length; i++) h = ((h * 33) ^ t.charCodeAt(i)) >>> 0; return h % 1000000; }
 var PENDIENTES = [], costeando = null, DIAS_PROV = {};
 // El formulario del costeo se guarda aparte: pintarCosteo() rehace el HTML y antes borraba lo elegido.
-var FCOS = {cond:'CONTADO', dias:0, met:'', quien:''};
+var FCOS = {cond:'CONTADO', dias:0, met:'', quien:'', doc:'', iva:'', control:''};
+// v3.2 — que documento da cada proveedor (se recuerda en este telefono, como los dias de credito)
+var DOC_PROV = (function() { try { return JSON.parse(localStorage.getItem('boparts_doc_prov') || '{}') || {}; } catch (e) { return {}; } })();
+function claveProv(p) { return String(p || '').trim().toUpperCase(); }
+function totalBaseCosteo() { return costeando ? costeando.productos.reduce(function(a, l) { return a + (parseNumC(l.costo) * l.cantidad); }, 0) : 0; }
+function ivaCosteo() {
+  if (FCOS.doc !== 'FACTURA') return 0;
+  var m = parseNumC(FCOS.iva);
+  return (FCOS.iva !== '' && FCOS.iva !== undefined && m >= 0) ? Math.round(m * 100) / 100 : Math.round(totalBaseCosteo() * 16) / 100;
+}
 function guardarFCos() {
   var g = function(id) { var e = document.getElementById(id); return e ? e.value : undefined; };
+  var dc = g('csDoc'); if (dc !== undefined) { if (dc !== FCOS.doc) FCOS.iva = ''; FCOS.doc = dc; }
+  var nc = g('csControl'); if (nc !== undefined) FCOS.control = nc;
   var c = g('csCond'); if (c !== undefined) FCOS.cond = c;
   var d = g('csDias'); if (d !== undefined) FCOS.dias = parseInt(d) || 0;
   var m = g('csMet'); if (m !== undefined) FCOS.met = m;
@@ -655,7 +670,8 @@ function pintarPendientes() {
 
 function abrirCosteo(i) {
   costeando = PENDIENTES[i];
-  FCOS = {cond:'CONTADO', dias:DIAS_PROV[costeando.proveedor] || 0, met:'', quien:FCOS.quien};
+  FCOS = {cond:'CONTADO', dias:DIAS_PROV[costeando.proveedor] || 0, met:'', quien:FCOS.quien,
+          doc:DOC_PROV[claveProv(costeando.proveedor)] || '', iva:'', control:''};
   costeando.productos.forEach(function(l) { if (!l.costo) l.costo = 0; });
   pintarCosteo();
 }
@@ -680,7 +696,17 @@ function pintarCosteo() {
   h += '</div><div class="field" style="margin-top:8px"><label>Margen sobre el costo (%)</label>' +
     '<input type="number" step="1" value="' + MARGEN + '" onchange="setMargen(this.value)">' +
     '<div class="cominfo">Propone el precio de venta de cada linea. Puedes cambiar el precio de una linea sin tocar las demas.</div></div>' +
-    '<div class="tot"><span>Total de la compra</span><span>' + usdC(total) + '</span></div>' +
+    '<div class="tot"><span>' + (FCOS.doc === 'FACTURA' ? 'Base (sin IVA)' : 'Total de la compra') + '</span><span>' + usdC(total) + '</span></div>' +
+    '<div class="field"><label>Documento que dio el proveedor *</label><select id="csDoc" onchange="guardarFCos();pintarCosteo()">' +
+      '<option value="">Seleccionar...</option>' +
+      '<option value="NOTA"' + (FCOS.doc === 'NOTA' ? ' selected' : '') + '>Nota de entrega</option>' +
+      '<option value="FACTURA"' + (FCOS.doc === 'FACTURA' ? ' selected' : '') + '>Factura fiscal</option></select></div>' +
+    (FCOS.doc === 'FACTURA'
+      ? '<div class="cominfo">Con factura fiscal escribe arriba los costos <b>sin IVA</b> (la base de cada producto). El IVA no entra al costo: es credito fiscal.</div>' +
+        '<div class="row2"><div class="field"><label>IVA de la factura (USD)</label><input type="number" id="csIva" step="0.01" value="' + ivaCosteo().toFixed(2) + '" onchange="FCOS.iva=this.value;guardarFCos();pintarCosteo()"></div>' +
+        '<div class="field"><label>N° de control</label><input type="text" id="csControl" value="' + escHtml(FCOS.control || '') + '" placeholder="00-000000" onchange="guardarFCos()"></div></div>' +
+        '<div class="tot"><span>Total a pagar (con IVA)</span><span>' + usdC(total + ivaCosteo()) + '</span></div>'
+      : (FCOS.doc === 'NOTA' ? '<div class="cominfo">Nota de entrega: no genera credito fiscal de IVA. El costo es lo que se paga.</div>' : '')) +
     '<div class="field"><label>Condicion *</label><select id="csCond" onchange="guardarFCos();pintarCosteo2()">' +
       '<option value="CONTADO"' + (FCOS.cond === 'CONTADO' ? ' selected' : '') + '>Pagada de contado</option>' +
       '<option value="CREDITO"' + (FCOS.cond === 'CREDITO' ? ' selected' : '') + '>A credito</option></select></div>' +
@@ -746,6 +772,10 @@ function guardarCosteo() {
   if (sinPrecio.length && !confirm(sinPrecio.length + ' producto(s) quedaran sin precio de venta y no se podran vender. Continuar igual?')) return;
   var bajo = c.productos.filter(function(l) { return parseNumC(l.precio) > 0 && parseNumC(l.precio) <= parseNumC(l.costo); });
   if (bajo.length && !confirm(bajo.length + ' producto(s) tienen precio igual o menor al costo. Continuar igual?')) return;
+  guardarFCos();
+  if (!FCOS.doc) { toast('Indica si el proveedor dio nota de entrega o factura fiscal', 'err'); return; }
+  var ivaF = ivaCosteo(), baseF = totalBaseCosteo();
+  if (FCOS.doc === 'FACTURA' && ivaF > baseF * 0.5) { toast('El IVA no cuadra con el total. Revisalo.', 'err'); return; }
   var cond = document.getElementById('csCond').value;
   var dias = cond === 'CREDITO' ? (parseInt(document.getElementById('csDias').value) || 0) : 0;
   if (cond === 'CREDITO' && dias <= 0) { toast('Indica los dias de credito', 'err'); return; }
@@ -760,12 +790,16 @@ function guardarCosteo() {
   postScript({tipo:'costeo', id:c.id, fila:c.fila, proveedor:c.proveedor, factura:c.factura,
     fecha:now.toLocaleDateString('es-VE'), hora:now.toLocaleTimeString('es-VE', {hour:'2-digit', minute:'2-digit'}),
     condicion:cond, dias:dias, metodo:met, banco:banco, pagadoPor:pagadoPor, costeadoPor:quien,
+    documento:FCOS.doc, ivaUSD:FCOS.doc === 'FACTURA' ? ivaF : 0, nControl:FCOS.doc === 'FACTURA' ? (FCOS.control || '') : '',
     lineas:c.productos.map(function(l) { return {codigo:l.codigo, cantidad:l.cantidad, costo:parseNumC(l.costo), precio:parseNumC(l.precio)}; })})
     .then(function(d) {
       if (!d || !d.ok) throw new Error(d && d.error ? d.error : 'no se guardo');
       if (dias) DIAS_PROV[c.proveedor] = dias;
+      DOC_PROV[claveProv(c.proveedor)] = FCOS.doc;
+      try { localStorage.setItem('boparts_doc_prov', JSON.stringify(DOC_PROV)); } catch (e) {}
       if (d.repetida) toast('Esa compra ya estaba costeada (' + usdC(d.total) + '). No se duplico nada.', 'err');
-      else toast('Costeada: ' + usdC(d.total) + (d.condicion === 'CREDITO' ? ' a credito, vence ' + d.vence : ' de contado'), 'ok');
+      else toast('Costeada: ' + usdC(d.totalPagar || d.total) + (d.ivaUSD ? ' (base ' + usdC(d.total) + ' + IVA ' + usdC(d.ivaUSD) + ')' : '') +
+        (d.condicion === 'CREDITO' ? ' a credito, vence ' + d.vence : ' de contado'), 'ok');
       costeando = null; cargarPendientes();
     })
     .catch(function(e) { toast('No se pudo costear: ' + e.message, 'err'); });
