@@ -1,5 +1,9 @@
 # CHANGELOG — Repuesto BoParts
 
+## ventas v15.13 — build 2026-11-17.2 — copiar mensajes
+
+- Boton "Copiar" junto a "Enviar reporte a WhatsApp" (venta terminada) y junto a "Solo mensaje por WhatsApp" (nota).
+
 ## ventas v15.12 — build 2026-11-17.1 — boton de nota arreglado y reporte corto a WhatsApp
 
 - ARREGLO: "Generar Nota de Entrega" (y "Cotizar") no abrian desde v15.6: abrirDoc limpiaba el campo cliDir,
