@@ -1,5 +1,10 @@
 # CHANGELOG — Repuesto BoParts
 
+## Apps Script v28.28 + dinero v1.8 — build 2026-11-17.5 — reintento de liquidacion
+
+- Si la liquidacion de un aliado ya se hizo hoy y se vuelve a pedir, responde "ya estaba hecha" (repetida) con
+  sus datos, en vez de "no tiene comisiones por pagar". Con error de conexion, Dinero recarga la lista.
+
 ## Apps Script v28.27 + dinero v1.7 + gerencia v4.2 — build 2026-11-17.4 — liquidar aliado con metodo, banco y tasa
 
 - Dinero: "Liquidar y pagarle" abre una ventana: como le pagas (metodo + banco de CANALES de salida, recuerda el

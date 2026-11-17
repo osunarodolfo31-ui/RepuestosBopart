@@ -1,7 +1,10 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_dinero.html
-  VERSION: v1.7 (2026-11-17) | build 2026-11-17.4 | requiere Apps Script v28.27
+  VERSION: v1.8 (2026-11-17) | build 2026-11-17.5 | requiere Apps Script v28.28
+  v1.8: si la liquidacion ya estaba hecha (respuesta perdida y reintento) lo dice claro; si falla la conexion,
+  recarga la lista para ver si quedo.
+  VERSION anterior: v1.7 (2026-11-17) | build 2026-11-17.4 | requiere Apps Script v28.27
   v1.7: liquidar a un aliado abre una ventana: como se le paga (metodo y banco, de CANALES), la tasa (trabajo, BCV
   u otra) y el monto exacto en Bs (editable para redondear). Muestra la comision del banco y a cuanto equivale.
   VERSION anterior: v1.6 (2026-11-11) | build 2026-11-17.3 | requiere Apps Script v28.21
@@ -493,11 +496,11 @@ select option{background:#1E1E1E;color:var(--ink)}
 </div>
 
 
-<script src="boparts_sesion.js?v=2026-11-17.4"></script>
+<script src="boparts_sesion.js?v=2026-11-17.5"></script>
 <script>
 var SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
 var SCRIPT_URL_SESION = SCRIPT_URL;
-var APP_VERSION = 'v1.7';
+var APP_VERSION = 'v1.8';
 var VER_SCRIPT = '?';
 var periodo = 'mes', DIN = null, CXP = [], LIQ = [], liqTasa = 0, SALIDAS = [], CUENTAS = [];
 var VER_PAGADAS = {}, FACT_ABIERTA = '', PAGO_PEND = {}, ID_MOV = '', ARQ = null, FILTRO_CTA = '';
@@ -1215,11 +1218,19 @@ function enviarLiq(a, pago) {
     .then(function(d) {
       if (!d || !d.ok) throw new Error(d && d.error ? d.error : 'no se liquido');
       btn.disabled = false; btn.textContent = 'Liquidar'; cerrarLiq();
+      if (d.repetida) { toast('Esa liquidacion YA estaba hecha hoy' + (d.hora ? ' a las ' + d.hora : '') + ': ' + usd(d.comisiones) +
+        (d.montoPagado ? ' · pagado ' + (d.moneda === 'BS' ? bs(d.montoPagado) : usd(d.montoPagado)) + (d.banco ? ' por ' + d.banco : '') : '') + '. No se duplico.', 'ok'); cargarLiquidacion(); cargarDinero(); return; }
       toast(d.aliado + ': ' + usd(d.comisiones) + (d.aplicado > 0.009 ? ' · ' + usd(d.aplicado) + ' a su deuda' : '') +
             (d.pagado > 0.009 ? ' · pagado ' + (d.moneda === 'BS' ? bs(d.montoPagado) : usd(d.pagado)) + (d.banco ? ' por ' + d.banco : '') : ''), 'ok');
       cargarLiquidacion(); cargarDinero();
     })
-    .catch(function(e) { btn.disabled = false; btn.textContent = 'Liquidar'; if (e && e.message !== 'SESION') toast('No se liquido: ' + e.message, 'err'); });
+    .catch(function(e) {
+      btn.disabled = false; btn.textContent = 'Liquidar';
+      if (e && e.message === 'SESION') return;
+      // v1.8: si se perdio la respuesta, la liquidacion pudo quedar hecha. Se recarga para que se vea.
+      toast('No se pudo confirmar (' + e.message + '). Revisa la lista: si ya no aparece pendiente, SI quedo liquidado.', 'err');
+      cerrarLiq(); cargarLiquidacion(); cargarDinero();
+    });
 }
 
 revisarSesion(alEntrar);

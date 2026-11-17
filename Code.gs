@@ -1,6 +1,11 @@
 /**
  * Repuesto BoParts — Code.gs
- * VERSION: v28.27 (2026-11-17) | liquidar aliado: metodo, banco y tasa
+ * VERSION: v28.28 (2026-11-17) | liquidar aliado: reintento sin error
+ *
+ * v28.28 — Si la liquidacion ya se hizo hoy y se vuelve a pedir (se perdio la respuesta y se reintento), devuelve
+ *   esa liquidacion con repetida:true en vez de "no tiene comisiones por pagar".
+ *
+ * VERSION anterior: v28.27 (2026-11-17) | liquidar aliado: metodo, banco y tasa
  *
  * v28.27 — LIQUIDACION DE ALIADO. tipo=liquidar_aliado acepta metodo (Pago Movil, Efectivo...), banco (la cuenta),
  *   moneda, montoPagado (lo que de verdad sale, en la moneda de la cuenta), tasaPago y tasaTipo (TRABAJO, BCV u
@@ -883,7 +888,7 @@ function claveDePost_(data) {
 // OJO: esta constante es lo que ven las apps en el menu. Se habia quedado en v21.4 mientras el
 // encabezado ya decia v24, asi que el sello de version — que existe justamente para saber si lo
 // desplegado es lo que crees — estaba mintiendo. Cada version nueva se cambia AQUI tambien.
-var VERSION_SCRIPT = 'v28.27';
+var VERSION_SCRIPT = 'v28.28';
 
 function json_(obj) {
   // La version viaja en cada respuesta: es la forma rapida de saber si lo desplegado es lo que crees
@@ -4822,7 +4827,22 @@ function liquidarAliado_(ss, d) {
   if (!d.quien) throw new Error('Falta quien liquida');
 
   var com = comisionesDe_(ss, ali.nombre, ali.cedula, tasa);
-  if (!com.cobrables.length) throw new Error('Ese aliado no tiene comisiones por pagar');
+  if (!com.cobrables.length) {
+    // v28.28 — si se acaba de liquidar (la respuesta se perdio y se reintento), se dice eso: no es un error.
+    var lqR = ss.getSheetByName('LIQUIDACIONES');
+    if (lqR && lqR.getLastRow() >= 2) {
+      var ult = lqR.getRange(2, 1, lqR.getLastRow() - 1, 17).getValues().filter(function(r) {
+        return String(r[3] || '').trim().toUpperCase() === ali.nombre.trim().toUpperCase();
+      }).pop();
+      if (ult) {
+        var hHoy = Utilities.formatDate(new Date(), TZ_VE, 'yyyy-MM-dd'), fU = iso_(ult[1]);
+        if (fU === hHoy) return {ok:true, tipo:'liquidar_aliado', repetida:true, id:String(ult[0]), aliado:ali.nombre,
+          comisiones:Number(ult[5]) || 0, ventas:Number(ult[6]) || 0, aplicado:Number(ult[7]) || 0, pagado:Number(ult[8]) || 0,
+          moneda:String(ult[13] || ''), montoPagado:Number(ult[14]) || 0, banco:String(ult[15] || ult[9] || ''), hora:String(ult[2] || '')};
+      }
+    }
+    throw new Error('Ese aliado no tiene comisiones por pagar');
+  }
   // v27: con devoluciones, las comisiones pueden sumar cero o menos. Entonces no hay nada que pagar.
   if (!(com.totalUSD > 0)) throw new Error('Las comisiones de ' + ali.nombre + ' suman $' + com.totalUSD +
                                             ' (hay devoluciones que las descuentan). No hay nada que pagar.');
