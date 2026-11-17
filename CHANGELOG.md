@@ -1,8 +1,16 @@
 # CHANGELOG — Repuesto BoParts
 
+## Apps Script v28.27 + dinero v1.7 + gerencia v4.2 — build 2026-11-17.4 — liquidar aliado con metodo, banco y tasa
+
+- Dinero: "Liquidar y pagarle" abre una ventana: como le pagas (metodo + banco de CANALES de salida, recuerda el
+  ultimo por aliado), tasa (trabajo, BCV u otra) y monto exacto en Bs (editable). Muestra comision del banco y a
+  cuanto equivale a tasa de trabajo.
+- LIQUIDACIONES gana MONEDA, MONTO_PAGADO, BANCO, TASA_TIPO; Dinero descuenta el monto exacto y la comision del metodo.
+- Gerencia: el boton de liquidar lleva a Dinero.
+
 ## Apps Script v28.26 + ventas v15.14 — build 2026-11-17.3 — pagos de Bancrecer leidos del correo
 
-- leerCorreosBanco_: lee "Pago Movil recibido" y "Operacion Recibida de Credito Inmediato" de Bancrecer en el Gmail
+- leerCorreosBanco_ (cuenta JURIDICA tambien si el correo iba para boscsupply@gmail.com): lee "Pago Movil recibido" y "Operacion Recibida de Credito Inmediato" de Bancrecer en el Gmail
   del script (los de BOSC llegan reenviados desde boscsupply@gmail.com) y los anota en PAGOS_BANCO sin duplicar.
   Cuenta JURIDICA si la cuenta destino es CONFIG B22 (2817 por defecto) o va dirigido a BOSC; si no, PERSONAL.
 - instalarLectorBanco(): correr una vez a mano en el editor (autoriza Gmail y deja un disparador cada 5 min).

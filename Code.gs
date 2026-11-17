@@ -1,11 +1,19 @@
 /**
  * Repuesto BoParts — Code.gs
- * VERSION: v28.26 (2026-11-17) | pagos de Bancrecer leidos del correo
+ * VERSION: v28.27 (2026-11-17) | liquidar aliado: metodo, banco y tasa
+ *
+ * v28.27 — LIQUIDACION DE ALIADO. tipo=liquidar_aliado acepta metodo (Pago Movil, Efectivo...), banco (la cuenta),
+ *   moneda, montoPagado (lo que de verdad sale, en la moneda de la cuenta), tasaPago y tasaTipo (TRABAJO, BCV u
+ *   OTRA). d.tasa sigue siendo la de trabajo (convierte comisiones viejas en Bs). LIQUIDACIONES gana N MONEDA,
+ *   O MONTO_PAGADO, P BANCO, Q TASA_TIPO; Dinero descuenta el monto exacto y cobra la comision del metodo.
+ *   action=dinero devuelve bcv.
+ *
+ * VERSION anterior: v28.26 (2026-11-17) | pagos de Bancrecer leidos del correo
  *
  * v28.26 — PAGOS DEL BANCO. leerCorreosBanco_() lee los correos de Bancrecer (bdigital@ y bservicios@) de esta
  *   cuenta de Gmail: "Pago Movil recibido" y "Operacion Recibida de Credito Inmediato". Los de la cuenta juridica
  *   llegan reenviados desde boscsupply@gmail.com. Cada pago va a la hoja PAGOS_BANCO (sin duplicar: la llave es
- *   el id del mensaje) con CUENTA = JURIDICA (cuenta destino CONFIG B22, por defecto 2817, o dirigido a BOSC)
+ *   el id del mensaje) con CUENTA = JURIDICA (para: boscsupply, cuenta destino CONFIG B22 = 2817, o saludo a BOSC)
  *   o PERSONAL. action=pagos_banco (VENDEDOR) lee lo nuevo (max 1 vez por minuto) y devuelve los LIBRES de 3 dias.
  *   La venta manda pagoBancoIds: esos pagos pasan a ASIGNADO con su idVenta y nota. tipo=pago_banco_estado
  *   (SOCIO) los marca IGNORADO (no son ventas: Cashea, prestamos...) o los devuelve a LIBRE.
@@ -875,7 +883,7 @@ function claveDePost_(data) {
 // OJO: esta constante es lo que ven las apps en el menu. Se habia quedado en v21.4 mientras el
 // encabezado ya decia v24, asi que el sello de version — que existe justamente para saber si lo
 // desplegado es lo que crees — estaba mintiendo. Cada version nueva se cambia AQUI tambien.
-var VERSION_SCRIPT = 'v28.26';
+var VERSION_SCRIPT = 'v28.27';
 
 function json_(obj) {
   // La version viaja en cada respuesta: es la forma rapida de saber si lo desplegado es lo que crees
@@ -1981,7 +1989,8 @@ var PB_COLS = ['ID','FECHA_OP','BANCO','CUENTA','TIPO','MONTO_BS','REFERENCIA','
 function shPagosBanco_(ss) { return hojaAp_(ss, 'PAGOS_BANCO', PB_COLS); }
 function numVE_(t) { return Number(String(t || '').replace(/\./g, '').replace(',', '.')) || 0; }
 // Lee un correo de Bancrecer. Devuelve null si no es un pago recibido.
-function parsearCorreoBancrecer_(asunto, cuerpo, fechaCorreo, cuentaJur) {
+// para: destinatario original del correo. Los de BOSC llegan reenviados por filtro y conservan To: boscsupply@...
+function parsearCorreoBancrecer_(asunto, cuerpo, fechaCorreo, cuentaJur, para) {
   var a = String(asunto || ''), t = String(cuerpo || '').replace(/\r/g, '').replace(/\*\*(?=[^*]*\d)/g, '');
   var tipo = /Pago M[oó]vil recibido/i.test(a) ? 'PAGO_MOVIL' : (/Recibida de Cr[eé]dito Inmediato/i.test(a) ? 'CREDITO_INMEDIATO' : '');
   if (!tipo) return null;
@@ -1995,7 +2004,8 @@ function parsearCorreoBancrecer_(asunto, cuerpo, fechaCorreo, cuentaJur) {
     var h = Number(fRaw[4]) % 12 + (/p/i.test(fRaw[7]) ? 12 : 0);
     fIso = fRaw[3] + '-' + fRaw[2] + '-' + fRaw[1] + ' ' + ('0' + h).slice(-2) + ':' + fRaw[5];
   } else fIso = Utilities.formatDate(fechaCorreo || new Date(), TZ_VE, 'yyyy-MM-dd HH:mm');
-  var jur = (dest && dest === cuentaJur) || /BOSC/i.test(cli);
+  // Tres senales, basta una: el correo iba para la cuenta de BOSC, la cuenta destino es la juridica, o el saludo es a BOSC.
+  var jur = /boscsupply/i.test(String(para || '')) || (dest && dest === cuentaJur) || /BOSC/i.test(cli);
   return {fecha:fIso, tipo:tipo, monto:monto, ref:g(/Referencia(?: No\.)?\s*:\s*(\d+)/i),
           ordenante:g(/Ordenante\s*:\s*([^\n]+)/i), tel:g(/Tel[eé]fono emisor\s*:\s*(\d+)/i),
           bancoOrigen:g(/Banco Origen\s*:\s*([^\n]+)/i), destino:dest, cuenta:jur ? 'JURIDICA' : 'PERSONAL'};
@@ -2012,7 +2022,7 @@ function leerCorreosBanco_(ss, forzar) {
   hilos.forEach(function(h) {
     h.getMessages().forEach(function(m) {
       var id = m.getId(); if (vistos[id]) return;
-      var p = parsearCorreoBancrecer_(m.getSubject(), m.getPlainBody(), m.getDate(), cuentaJur);
+      var p = parsearCorreoBancrecer_(m.getSubject(), m.getPlainBody(), m.getDate(), cuentaJur, m.getTo() + ' ' + (m.getCc() || ''));
       if (!p) return;
       vistos[id] = 1;
       nuevos.push([id, p.fecha, 'Bancrecer', p.cuenta, p.tipo, p.monto, p.ref, p.ordenante, p.tel, p.bancoOrigen, p.destino,
@@ -4825,10 +4835,18 @@ function liquidarAliado_(ss, d) {
   var compensa = round2_(Math.min(ganado, deuda));    // lo que se le descuenta de la deuda
   var neto = round2_(ganado - compensa);              // lo que sale en efectivo o pago movil
   // v28 — si sale dinero, tiene que salir de una cuenta de la hoja CUENTAS (para el flujo de caja).
+  var monPago = '', montoPag = 0, tasaPago = 0, tasaTipo = '', bancoPago = '';
   if (neto > 0.009) {
-    var ctaL = cuentaPorNombre_(ss, d.cuenta || d.metodo);
+    var ctaL = cuentaPorNombre_(ss, d.banco || d.cuenta || d.metodo);
     if (!ctaL) throw rechazo_('Indica de que cuenta sale el pago (' + listaCuentas_(ss).map(function(c) { return c.cuenta; }).join(', ') + ')');
-    d.metodo = ctaL.cuenta;
+    bancoPago = ctaL.cuenta; monPago = ctaL.moneda;
+    if (!d.banco) d.metodo = ctaL.cuenta;              // pantalla vieja: solo mandaba la cuenta
+    // v28.27: lo que de verdad sale. En Bs se convierte con la tasa que elija el socio (trabajo, BCV u otra).
+    tasaPago = Number(d.tasaPago) || (monPago === 'BS' ? tasa : 0);
+    tasaTipo = String(d.tasaTipo || (monPago === 'BS' ? 'TRABAJO' : '')).toUpperCase();
+    montoPag = Number(d.montoPagado) > 0 ? round2_(Number(d.montoPagado)) : (monPago === 'BS' ? round2_(neto * tasaPago) : neto);
+    if (monPago === 'BS' && !(tasaPago > 0)) throw rechazo_('Falta la tasa para pagar en bolivares');
+    if (monPago === 'USD' && Math.abs(montoPag - neto) > 0.05) throw rechazo_('En dolares se le pagan ' + neto + ', no ' + montoPag);
   }
   var hoy = new Date();
   var fechaHoy = Utilities.formatDate(hoy, TZ_VE, 'dd/MM/yyyy');
@@ -4860,14 +4878,15 @@ function liquidarAliado_(ss, d) {
 
   // 3. Constancia de la liquidacion
   var lq = hojaAp_(ss, 'LIQUIDACIONES', ['ID','FECHA','HORA','ALIADO','CEDULA','COMISIONES_USD','VENTAS',
-    'APLICADO_A_DEUDA_USD','PAGADO_USD','METODO','TASA','LIQUIDADO_POR','NOTAS']);
+    'APLICADO_A_DEUDA_USD','PAGADO_USD','METODO','TASA','LIQUIDADO_POR','NOTAS','MONEDA','MONTO_PAGADO','BANCO','TASA_TIPO']);
+  if (!String(lq.getRange(1, 14).getValue() || '').trim()) lq.getRange(1, 14, 1, 4).setValues([['MONEDA','MONTO_PAGADO','BANCO','TASA_TIPO']]);
   lq.appendRow([idLiq, fechaVE_(fechaHoy), Utilities.formatDate(hoy, TZ_VE, 'HH:mm'), ali.nombre, ali.cedula,
-                ganado, com.cobrables.length, compensa, neto, neto > 0 ? (d.metodo || '') : '', tasa,
-                d.quien, d.notas || '']);
+                ganado, com.cobrables.length, compensa, neto, neto > 0 ? (d.metodo || '') : '', tasaPago || tasa,
+                d.quien, d.notas || '', monPago, montoPag || '', bancoPago, tasaTipo]);
   formatoFecha_(lq, lq.getLastRow(), 2);
 
   return {ok:true, tipo:'liquidar_aliado', id:idLiq, aliado:ali.nombre, comisiones:ganado,
-          ventas:com.cobrables.length, aplicado:compensa, pagado:neto,
+          ventas:com.cobrables.length, aplicado:compensa, pagado:neto, moneda:monPago, montoPagado:montoPag, banco:bancoPago,
           deudaAntes:round2_(deuda), deudaDespues:round2_(deuda - compensa)};
 }
 
@@ -6662,14 +6681,16 @@ function estadoDinero_(ss, desde, hasta) {
   });
 
   // 8) LIQUIDACIONES de aliados: lo que se les pago en dinero
-  filas('LIQUIDACIONES', 13).forEach(function(r) {
+  filas('LIQUIDACIONES', 17).forEach(function(r) {
     var pag = n_(r[8]); if (!(pag > 0)) return;
     var f = iso_(r[1]); if (!f) return;
-    var cta = resolverCuenta_(porNombre, r[9], r[9], '');
+    var nueva = !!String(r[15] || '').trim();            // v28.27: trae BANCO, moneda y monto exacto
+    var cta = nueva ? resolverCuenta_(porNombre, r[9], r[15], r[13]) : resolverCuenta_(porNombre, r[9], r[9], '');
     var base = {fecha:f, origen:'ALIADO', ref:String(r[0] || ''), desc:'Liquidacion ' + String(r[3] || ''), metodo:String(r[9] || ''), signo:-1, tasa:r[10]};
-    if (!cta) { base.monto = pag; base.moneda = 'USD'; base.motivo = 'Liquidacion sin cuenta: ' + (r[9] || '(vacia)'); agregar(base); return; }
-    var cv = aMoneda(pag, 'USD', cta, r[10]);
-    base.cuenta = cta; base.monto = cv.monto; base.estimado = cv.estimado; base.sinComision = true;
+    if (!cta) { base.monto = pag; base.moneda = 'USD'; base.motivo = 'Liquidacion sin cuenta: ' + (r[15] || r[9] || '(vacia)'); agregar(base); return; }
+    var mon = String(r[13] || '').toUpperCase();
+    var cv = (nueva && mon === cta.moneda && n_(r[14]) > 0) ? {monto:n_(r[14]), estimado:false} : aMoneda(pag, 'USD', cta, r[10]);
+    base.cuenta = cta; base.monto = cv.monto; base.estimado = cv.estimado; base.sinComision = !nueva;
     agregar(base);
   });
 
@@ -6770,7 +6791,7 @@ function estadoDinero_(ss, desde, hasta) {
   if (!canales.length) avisos.push('La hoja CANALES no se pudo leer: las comisiones no se estan calculando.');
   if (!tasaHoy) avisos.push('No hay tasa de trabajo: los montos en Bs no se pudieron pasar a dolares.');
 
-  return {ok:true, desde:d1, hasta:d2, tasa:tasaHoy, tasaFecha:cfg.fecha, cuentas:listaRes, flujo:flujo, movimientos:lista,
+  return {ok:true, desde:d1, hasta:d2, tasa:tasaHoy, bcv:Number(cfg.bcv) || 0, tasaFecha:cfg.fecha, cuentas:listaRes, flujo:flujo, movimientos:lista,
           sinCuenta:sinC, ob:ob, socios:saldosSocios_(ss), avisos:avisos,
           canales:canales.map(function(c) { return {cuenta:c.cuenta, metodo:c.metodo, sentido:c.sentido, etiqueta:c.etiqueta, fijo:c.fijo, pct:c.pct, moneda:c.moneda}; })};
 }

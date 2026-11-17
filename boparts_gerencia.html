@@ -1,7 +1,9 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_gerencia.html
-  VERSION: v4.1 (2026-11-15) | build 2026-11-17.3 | requiere Apps Script v28.25
+  VERSION: v4.2 (2026-11-17) | build 2026-11-17.4 | requiere Apps Script v28.27
+  v4.2: el boton de liquidar un aliado lleva a Dinero, donde se elige metodo, banco y tasa.
+  VERSION anterior: v4.1 (2026-11-15) | build 2026-11-17.3 | requiere Apps Script v28.25
   v4.1: IVA del periodo: cobrado en facturas contra el credito fiscal de las compras con factura fiscal, y cuanto
   se compro con factura y cuanto con nota de entrega.
   VERSION anterior: v4.0 (2026-11-13) | build 2026-11-14.3 | requiere Apps Script v28.23
@@ -550,8 +552,8 @@ select option{background:#1E1E1E;color:var(--ink)}
   </div>
 </div>
 
-<script src="boparts_sesion.js?v=2026-11-17.3"></script>
-<script src="boparts_clientes.js?v=2026-11-17.3"></script>
+<script src="boparts_sesion.js?v=2026-11-17.4"></script>
+<script src="boparts_clientes.js?v=2026-11-17.4"></script>
 <script>
 
 
@@ -564,7 +566,7 @@ function sellarVersion(d) {
   if (t) t.textContent = 'app ' + APP_VERSION + ' \u00b7 script ' + VER_SCRIPT;
   return d;
 }
-var APP_VERSION = 'v4.1';
+var APP_VERSION = 'v4.2';
 var TASA = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
 var periodo = 'hoy', DATA = null;
 
@@ -1606,7 +1608,7 @@ function pintarLiquidacion() {
         '</div>';
       if (a.comisiones > 0.009) {
         h += '<button class="tab on" style="width:100%;margin-top:10px;padding:10px" onclick="liquidar(\'' + escAttr(a.nombre) + '\')">' +
-             (a.neto > 0.009 ? 'Liquidar y pagarle ' + usd(a.neto) : 'Aplicar ' + usd(a.comisiones) + ' a su deuda') + '</button>';
+             (a.neto > 0.009 ? 'Liquidar y pagarle ' + usd(a.neto) + ' (en Dinero)' : 'Aplicar ' + usd(a.comisiones) + ' a su deuda (en Dinero)') + '</button>';
       } else if (a.deuda > 0.009) {
         h += '<div class="liqm">No tiene comisiones cobrables. Su deuda se arrastra.</div>';
       }
@@ -1621,7 +1623,9 @@ function pintarLiquidacion() {
   box.innerHTML = h;
 }
 
-function liquidar(nombre) {
+// v4.2: la liquidacion (con metodo, banco y tasa) se hace en Dinero, donde se ve de que cuenta sale.
+function liquidar(nombre) { location.href = 'boparts_dinero.html?v=' + (typeof BUILD !== 'undefined' ? BUILD : '') + '#liqBox'; }
+function liquidarViejo(nombre) {
   var a = LIQ.filter(function(x) { return x.nombre === nombre; })[0];
   if (!a) return;
   var quien = miNombre() || prompt('Quien liquida? (Rodolfo Osuna / Javier Boves)');

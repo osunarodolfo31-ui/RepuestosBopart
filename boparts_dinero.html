@@ -1,7 +1,10 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_dinero.html
-  VERSION: v1.6 (2026-11-11) | build 2026-11-17.3 | requiere Apps Script v28.21
+  VERSION: v1.7 (2026-11-17) | build 2026-11-17.4 | requiere Apps Script v28.27
+  v1.7: liquidar a un aliado abre una ventana: como se le paga (metodo y banco, de CANALES), la tasa (trabajo, BCV
+  u otra) y el monto exacto en Bs (editable para redondear). Muestra la comision del banco y a cuanto equivale.
+  VERSION anterior: v1.6 (2026-11-11) | build 2026-11-17.3 | requiere Apps Script v28.21
   v1.6: un cambio con OB puede usar OTRA TASA (negociada) en vez de la de trabajo, con motivo obligatorio. Se ve
   cuanto gano la tienda o le dio de mas a OB contra la tasa de trabajo, y la tarjeta de OB suma esas diferencias.
   VERSION anterior: v1.5 (2026-11-04) | build 2026-11-04.4 | requiere Apps Script v28.12
@@ -378,6 +381,23 @@ select option{background:#1E1E1E;color:var(--ink)}
 
 </div>
 
+<div class="overlay" id="liqOv" onclick="if(event.target===this)cerrarLiq()">
+  <div class="sheet">
+    <div class="sheet-title" id="lqTit">Liquidar</div>
+    <div class="aviso" id="lqRes" style="margin-bottom:12px"></div>
+    <div class="field"><label>Como le pagas *</label><select id="lqMet" onchange="pintarLiqForm()"></select></div>
+    <div id="lqBsBox" style="display:none">
+      <div class="field"><label>Tasa</label><select id="lqTasaTipo" onchange="pintarLiqForm(true)"></select></div>
+      <div class="field" id="lqOtraBox" style="display:none"><label>Tasa acordada</label><input type="number" id="lqOtra" step="0.01" oninput="pintarLiqForm(true)"></div>
+      <div class="field"><label>Monto que le transfieres (Bs)</label><input type="number" id="lqBs" step="0.01" oninput="pintarLiqForm()"></div>
+    </div>
+    <div class="aviso" id="lqInfo" style="margin-bottom:10px"></div>
+    <div class="field"><label>Notas</label><input type="text" id="lqNotas" placeholder="Referencia del pago, etc."></div>
+    <button class="tab on" id="lqBtn" style="width:100%;padding:12px;margin-top:6px" onclick="confirmarLiq()">Liquidar</button>
+    <button class="tab" style="width:100%;padding:12px;margin-top:8px" onclick="cerrarLiq()">Cancelar</button>
+  </div>
+</div>
+
 <div class="overlay" id="arqOv" onclick="if(event.target===this)cerrarArqueo()">
   <div class="sheet">
     <div class="sheet-title" id="arqTit">Arqueo</div>
@@ -473,11 +493,11 @@ select option{background:#1E1E1E;color:var(--ink)}
 </div>
 
 
-<script src="boparts_sesion.js?v=2026-11-17.3"></script>
+<script src="boparts_sesion.js?v=2026-11-17.4"></script>
 <script>
 var SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
 var SCRIPT_URL_SESION = SCRIPT_URL;
-var APP_VERSION = 'v1.6';
+var APP_VERSION = 'v1.7';
 var VER_SCRIPT = '?';
 var periodo = 'mes', DIN = null, CXP = [], LIQ = [], liqTasa = 0, SALIDAS = [], CUENTAS = [];
 var VER_PAGADAS = {}, FACT_ABIERTA = '', PAGO_PEND = {}, ID_MOV = '', ARQ = null, FILTRO_CTA = '';
@@ -1117,7 +1137,6 @@ function pintarLiquidacion() {
         (a.porCobrar > 0.009 ? '<div><span>Pendiente de cobro</span><b class="mut">' + usd(a.porCobrar) + '</b></div>' : '') +
         (a.deuda > 0.009 ? '<div><span>Mercancia que se llevo</span><b class="neg">-' + usd(a.deuda) + '</b></div>' : '') + '</div>';
       if (a.comisiones > 0.009) {
-        if (a.neto > 0.009) h += '<div class="field" style="margin-top:8px"><label style="font-size:11px">Sale de</label>' + selCuentasLiq('lq-' + aid) + '</div>';
         h += '<button class="tab on" style="width:100%;margin-top:8px;padding:10px" onclick="liquidar(\'' + escAttr(a.nombre) + '\')">' +
              (a.neto > 0.009 ? 'Liquidar y pagarle ' + usd(a.neto) : 'Aplicar ' + usd(a.comisiones) + ' a su deuda') + '</button>';
       }
@@ -1127,20 +1146,80 @@ function pintarLiquidacion() {
   h += '<div class="aviso">Pagarle comisiones a un aliado se hace aqui, no como gasto: si se registra como gasto, la comision sigue apareciendo como pendiente.</div></div>';
   box.innerHTML = h;
 }
+// v1.7 — ventana de liquidacion: metodo + banco (CANALES de salida), tasa y monto exacto.
+var LQ = null;
 function liquidar(nombre) {
   var a = LIQ.filter(function(x) { return x.nombre === nombre; })[0]; if (!a) return;
+  if (!(a.neto > 0.009)) { enviarLiq(a, null); return; }          // solo se aplica a su deuda: no sale dinero
+  if (!SALIDAS.length) { toast('Cargando las formas de pago, intenta de nuevo en un momento', 'err'); cargarSalidas(); return; }
+  LQ = a;
+  document.getElementById('lqTit').textContent = 'Liquidar a ' + a.nombre;
+  document.getElementById('lqRes').innerHTML = 'Comisiones: <b>' + usd(a.comisiones) + '</b>' +
+    (a.deuda > 0.009 ? ' · se aplica a su deuda: <b>' + usd(Math.min(a.comisiones, a.deuda)) + '</b>' : '') +
+    '<br>A pagarle: <b style="font-size:16px">' + usd(a.neto) + '</b>';
+  var ult = ''; try { ult = localStorage.getItem('boparts_liq_met_' + idSafe(a.nombre)) || ''; } catch (e) {}
+  document.getElementById('lqMet').innerHTML = '<option value="">Seleccionar...</option>' + SALIDAS.map(function(m, i) {
+    return '<option value="' + i + '"' + (m.label === ult ? ' selected' : '') + '>' + escHtml(m.label) + ' (' + (m.moneda === 'BS' ? 'Bs' : '$') + ')</option>'; }).join('');
+  var bcvH = DIN ? num(DIN.bcv) : 0, tt = DIN ? num(DIN.tasa) : liqTasa;
+  document.getElementById('lqTasaTipo').innerHTML = '<option value="TRABAJO">Tasa de trabajo (' + (tt || '?') + ')</option>' +
+    (bcvH ? '<option value="BCV">BCV (' + bcvH + ')</option>' : '') + '<option value="OTRA">Otra tasa</option>';
+  document.getElementById('lqOtra').value = ''; document.getElementById('lqNotas').value = ''; document.getElementById('lqBs').value = '';
+  document.getElementById('liqOv').classList.add('open');
+  pintarLiqForm(true);
+}
+function cerrarLiq() { document.getElementById('liqOv').classList.remove('open'); LQ = null; }
+function tasaLiq() {
+  var t = document.getElementById('lqTasaTipo').value;
+  if (t === 'BCV') return DIN ? num(DIN.bcv) : 0;
+  if (t === 'OTRA') return num(document.getElementById('lqOtra').value);
+  return DIN ? num(DIN.tasa) : liqTasa;
+}
+function pintarLiqForm(recalcular) {
+  if (!LQ) return;
+  var m = SALIDAS[parseInt(document.getElementById('lqMet').value)], enBs = m && m.moneda === 'BS';
+  document.getElementById('lqBsBox').style.display = enBs ? 'block' : 'none';
+  document.getElementById('lqOtraBox').style.display = document.getElementById('lqTasaTipo').value === 'OTRA' ? 'block' : 'none';
+  var info = '', tasa = tasaLiq(), bsEl = document.getElementById('lqBs');
+  if (!m) info = 'Elige como le pagas: metodo y banco.';
+  else if (!enBs) info = 'Sale de ' + escHtml(m.label) + ': <b>' + usd(LQ.neto) + '</b>.';
+  else {
+    if (recalcular || !bsEl.value) bsEl.value = tasa ? (Math.round(LQ.neto * tasa * 100) / 100).toFixed(2) : '';
+    var bsv = num(bsEl.value), tt = DIN ? num(DIN.tasa) : liqTasa;
+    var com = m.pct || m.fijo ? Math.max((num(m.fijo) || 0) + bsv * num(m.pct) / 100, num(m.minimo) || 0) : 0;
+    info = 'Sale de ' + escHtml(m.label) + ': <b>' + bs(bsv) + '</b>' + (com ? ' + comision del banco ' + bs(com) : '') +
+      (tasa ? '<br>Tasa ' + tasa + ' · sus ' + usd(LQ.neto) + ' en Bs' : '<br><b style="color:var(--red)">Escribe la tasa</b>') +
+      (tt && bsv ? '<br>A tasa de trabajo eso es ' + usd(bsv / tt) + (Math.abs(bsv / tt - LQ.neto) > 0.01 ? ' (' + (bsv / tt < LQ.neto ? 'la tienda ahorra ' + usd(LQ.neto - bsv / tt) : 'la tienda pone ' + usd(bsv / tt - LQ.neto) + ' de mas') + ')' : '') : '');
+  }
+  document.getElementById('lqInfo').innerHTML = info;
+}
+function confirmarLiq() {
+  if (!LQ) return;
+  var m = SALIDAS[parseInt(document.getElementById('lqMet').value)];
+  if (!m) { toast('Elige como le pagas', 'err'); return; }
+  var pago = {metodo:m.metodo, banco:m.banco, moneda:m.moneda, notas:document.getElementById('lqNotas').value.trim()};
+  if (m.moneda === 'BS') {
+    pago.tasaPago = tasaLiq(); pago.tasaTipo = document.getElementById('lqTasaTipo').value; pago.montoPagado = num(document.getElementById('lqBs').value);
+    if (!(pago.tasaPago > 0)) { toast('Falta la tasa', 'err'); return; }
+    if (!(pago.montoPagado > 0)) { toast('Falta el monto en Bs', 'err'); return; }
+  } else pago.montoPagado = LQ.neto;
+  try { localStorage.setItem('boparts_liq_met_' + idSafe(LQ.nombre), m.label); } catch (e) {}
+  enviarLiq(LQ, pago);
+}
+function enviarLiq(a, pago) {
   var quien = miNombre() || prompt('Quien liquida? (Rodolfo Osuna / Javier Boves)'); if (!quien) return;
-  var cuenta = '';
-  if (a.neto > 0.009) { var s = document.getElementById('lq-' + idSafe(a.nombre)); cuenta = s ? s.value : ''; if (!cuenta) { toast('Elige de que cuenta sale', 'err'); return; } }
-  if (!confirm(a.nombre + '\n\nComisiones: ' + usd(a.comisiones) + (a.deuda > 0.009 ? '\nSe aplica a su deuda: ' + usd(Math.min(a.comisiones, a.deuda)) : '') +
-               '\nSale de ' + (cuenta || 'caja') + ': ' + usd(Math.max(0, a.neto)) + '\n\nConfirmas?')) return;
-  post({tipo:'liquidar_aliado', aliado:a.nombre, cedula:a.cedula, quien:quien, metodo:cuenta, cuenta:cuenta, tasa:liqTasa})
+  if (!pago && !confirm(a.nombre + '\n\nComisiones ' + usd(a.comisiones) + ' se aplican a su deuda. No sale dinero.\n\nConfirmas?')) return;
+  var body = {tipo:'liquidar_aliado', aliado:a.nombre, cedula:a.cedula, quien:quien, tasa:liqTasa};
+  if (pago) for (var k in pago) body[k] = pago[k];
+  var btn = document.getElementById('lqBtn'); btn.disabled = true; btn.textContent = 'Liquidando...';
+  post(body)
     .then(function(d) {
       if (!d || !d.ok) throw new Error(d && d.error ? d.error : 'no se liquido');
-      toast(d.aliado + ': ' + usd(d.comisiones) + (d.aplicado > 0.009 ? ' · ' + usd(d.aplicado) + ' a su deuda' : '') + (d.pagado > 0.009 ? ' · pagado ' + usd(d.pagado) : ''), 'ok');
+      btn.disabled = false; btn.textContent = 'Liquidar'; cerrarLiq();
+      toast(d.aliado + ': ' + usd(d.comisiones) + (d.aplicado > 0.009 ? ' · ' + usd(d.aplicado) + ' a su deuda' : '') +
+            (d.pagado > 0.009 ? ' · pagado ' + (d.moneda === 'BS' ? bs(d.montoPagado) : usd(d.pagado)) + (d.banco ? ' por ' + d.banco : '') : ''), 'ok');
       cargarLiquidacion(); cargarDinero();
     })
-    .catch(function(e) { if (e && e.message !== 'SESION') toast('No se liquido: ' + e.message, 'err'); });
+    .catch(function(e) { btn.disabled = false; btn.textContent = 'Liquidar'; if (e && e.message !== 'SESION') toast('No se liquido: ' + e.message, 'err'); });
 }
 
 revisarSesion(alEntrar);
