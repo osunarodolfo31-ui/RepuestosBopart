@@ -1,7 +1,11 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_ventas.html
-  VERSION: v15.13 (2026-11-17) | build 2026-11-17.2 | requiere Apps Script v28.22
+  VERSION: v15.14 (2026-11-17) | build 2026-11-17.3 | requiere Apps Script v28.26
+  v15.14: bajo un pago con Bancrecer salen los pagos que el banco ya confirmo por correo (PAGOS_BANCO) y nadie ha
+  usado. Se toca el del cliente: llena el monto y la venta queda amarrada a esa referencia. Avisa si hoy llegaron
+  pagos a la cuenta personal en vez de a BOSC.
+  VERSION anterior: v15.13 (2026-11-17) | build 2026-11-17.2 | requiere Apps Script v28.22
   v15.13: boton "Copiar" junto a "Enviar reporte a WhatsApp" y junto a "Solo mensaje por WhatsApp" de la nota.
   VERSION anterior: v15.12 (2026-11-17) | build 2026-11-17.1 | requiere Apps Script v28.22
   v15.12: (1) ARREGLO: "Generar Nota de Entrega" y "Cotizar" no abrian. Desde v15.6 la direccion es por partes y el
@@ -277,7 +281,7 @@ select option{background:#1E1E1E;color:var(--ink)}
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
-<script src="boparts_pdf.js?v=2026-11-17.2"></script>
+<script src="boparts_pdf.js?v=2026-11-17.3"></script>
 </head>
 <body>
 
@@ -614,8 +618,8 @@ select option{background:#1E1E1E;color:var(--ink)}
   </div>
 </div>
 
-<script src="boparts_sesion.js?v=2026-11-17.2"></script>
-<script src="boparts_clientes.js?v=2026-11-17.2"></script>
+<script src="boparts_sesion.js?v=2026-11-17.3"></script>
+<script src="boparts_clientes.js?v=2026-11-17.3"></script>
 <script>
 
 
@@ -631,7 +635,7 @@ function sellarVersion(d) {
   if (t) t.textContent = 'app ' + APP_VERSION + ' \u00b7 script ' + VER_SCRIPT;
   return d;
 }
-var APP_VERSION = 'v15.13';
+var APP_VERSION = 'v15.14';
 var TASA        = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
 var TASA_ORIGEN = TASA ? 'guardada' : 'ninguna';
 
@@ -1098,6 +1102,71 @@ function delPago(id) {
 }
 
 // Guarda en memoria lo que el vendedor escribio, para que re-dibujar no lo borre
+// ============================================================
+// v15.14 — PAGOS DE BANCRECER LEIDOS DEL CORREO. Bajo un pago con Bancrecer salen los pagos que el banco ya
+// confirmo y nadie ha usado. Se toca el que es: llena el monto y queda amarrado a la venta (con su referencia).
+// ============================================================
+var PAGOS_BANCO = [], PB_CARGANDO = false, PB_LEIDO = 0, PB_PERSONAL_HOY = 0;
+function esBancrecer(m) { return !!m && /BANCRECER/i.test((m.banco || '') + ' ' + (m.label || '')) && m.moneda === 'BS' && !m.credito; }
+function cargarPagosBanco(forzar) {
+  if (PB_CARGANDO || (!forzar && Date.now() - PB_LEIDO < 30000)) return;
+  PB_CARGANDO = true;
+  fetch(SCRIPT_URL + '?action=pagos_banco&t=' + Date.now()).then(leerJSON).then(function(d) {
+    PB_CARGANDO = false; PB_LEIDO = Date.now();
+    if (!d || !d.ok) return;
+    PAGOS_BANCO = d.pagos || []; PB_PERSONAL_HOY = Number(d.personalHoy) || 0;
+    for (var i = 0; i < pagos.length; i++) pintarPagosBanco(pagos[i].id);
+  }).catch(function() { PB_CARGANDO = false; });
+}
+function pagoBancoUsado(pbId, menosPago) {
+  return pagos.some(function(p) { return p.id !== menosPago && p.pagoBancoId === pbId; });
+}
+function hace(f) {
+  var d = new Date(f.replace(' ', 'T')), min = Math.round((Date.now() - d.getTime()) / 60000);
+  if (!(min >= 0)) return f.slice(11);
+  return min < 60 ? 'hace ' + min + ' min' : (min < 1440 ? 'hace ' + Math.round(min / 60) + ' h' : f.slice(8, 10) + '/' + f.slice(5, 7) + ' ' + f.slice(11));
+}
+function pintarPagosBanco(id) {
+  var box = document.getElementById('pbanco_' + id); if (!box) return;
+  var p = pagos.filter(function(x) { return x.id === id; })[0];
+  if (!p || !esBancrecer(p.metodoData)) { box.innerHTML = ''; return; }
+  var elegido = p.pagoBancoId ? PAGOS_BANCO.filter(function(x) { return x.id === p.pagoBancoId; })[0] : null;
+  if (elegido) {
+    box.innerHTML = '<div class="cominfo" style="border-left-color:var(--green)">&#10003; Confirmado por el banco: <b>Bs ' + elegido.monto.toLocaleString('es-VE', {minimumFractionDigits:2}) +
+      '</b> · ref ' + escHtml(elegido.ref) + ' · ' + escHtml(elegido.ordenante || elegido.tel || '') +
+      ' <a href="#" onclick="soltarPagoBanco(' + id + ');return false" style="color:var(--brand)">cambiar</a></div>';
+    return;
+  }
+  var jur = PAGOS_BANCO.filter(function(x) { return x.cuenta === 'JURIDICA' && x.estado === 'LIBRE' && !pagoBancoUsado(x.id, id); });
+  var per = PAGOS_BANCO.filter(function(x) { return x.cuenta === 'PERSONAL' && x.estado === 'LIBRE' && x.fecha.slice(0, 10) === hoyISOv(); });
+  var h = '<div style="font-size:11px;color:var(--ink-muted);margin:4px 0">Pagos que ya llegaron a Bancrecer (BOSC) · toca el de este cliente ' +
+    '<a href="#" onclick="cargarPagosBanco(true);return false" style="color:var(--brand)">actualizar</a></div>';
+  if (!jur.length) h += '<div style="font-size:12px;color:var(--ink-muted);margin-bottom:6px">' + (PB_LEIDO ? 'Ninguno pendiente todavia. Si el cliente acaba de pagar, espera 1 o 2 minutos y toca actualizar.' : 'Buscando...') + '</div>';
+  jur.slice(0, 6).forEach(function(x) {
+    h += '<div class="ditem" style="border:1px solid var(--border);border-radius:10px;margin-bottom:6px;cursor:pointer" onclick="elegirPagoBanco(' + id + ',\'' + x.id + '\')">' +
+      '<b>Bs ' + x.monto.toLocaleString('es-VE', {minimumFractionDigits:2}) + '</b> · ' + escHtml(x.ordenante || ('Tel ' + x.tel)) +
+      '<div class="ditem-meta">' + (x.tipo === 'PAGO_MOVIL' ? 'Pago movil' : 'Transferencia') + (x.bancoOrigen ? ' desde ' + escHtml(x.bancoOrigen) : '') + ' · ref ' + escHtml(x.ref) + ' · ' + hace(x.fecha) + '</div></div>';
+  });
+  if (per.length) h += '<div class="cominfo" style="border-left-color:var(--red);margin-top:4px">&#9888; Hoy llegaron ' + per.length + ' pago(s) a la cuenta PERSONAL, no a BOSC (' +
+    per.map(function(x) { return 'Bs ' + x.monto.toLocaleString('es-VE', {minimumFractionDigits:2}); }).join(', ') + '). Revisa que datos le diste al cliente.</div>';
+  else if (PB_PERSONAL_HOY) h += '<div class="cominfo" style="border-left-color:var(--red);margin-top:4px">&#9888; Hoy llegaron ' + PB_PERSONAL_HOY +
+    ' pago(s) a una cuenta que NO es la de BOSC. Dale al cliente los datos de pago movil de BOSC SUPPLY.</div>';
+  box.innerHTML = h;
+}
+function hoyISOv() { var n = new Date(); return n.getFullYear() + '-' + pad2(n.getMonth() + 1) + '-' + pad2(n.getDate()); }
+function elegirPagoBanco(id, pbId) {
+  var x = PAGOS_BANCO.filter(function(y) { return y.id === pbId; })[0], p = pagos.filter(function(y) { return y.id === id; })[0];
+  if (!x || !p) return;
+  p.pagoBancoId = pbId;
+  var mEl = document.getElementById('monto_' + id); if (mEl) mEl.value = String(x.monto);
+  syncPagosDesdeDOM(); updateTotals(); pintarPagosBanco(id);
+  for (var i = 0; i < pagos.length; i++) if (pagos[i].id !== id) pintarPagosBanco(pagos[i].id);
+}
+function soltarPagoBanco(id) {
+  var p = pagos.filter(function(y) { return y.id === id; })[0]; if (!p) return;
+  p.pagoBancoId = ''; for (var i = 0; i < pagos.length; i++) pintarPagosBanco(pagos[i].id);
+}
+
 function syncPagosDesdeDOM() {
   for (var i = 0; i < pagos.length; i++) {
     var p = pagos[i];
@@ -1199,10 +1268,12 @@ function renderPagos() {
         '</div>' +
       '</div>' +
       '<div id="cominf_' + p.id + '"></div>' +
+      '<div id="pbanco_' + p.id + '"></div>' +
       '<div id="cred_' + p.id + '"></div>' +
     '</div>';
   }
   el.innerHTML = h;
+  for (var z = 0; z < pagos.length; z++) pintarPagosBanco(pagos[z].id);
   // Restaurar metodoData y el selector de credito de cada bloque
   for (var k = 0; k < pagos.length; k++) {
     var q = pagos[k], idx = parseInt(q.metIdx);
@@ -1224,6 +1295,9 @@ function onMet(id) {
   monSel.value = m.moneda;
   monSel.disabled = true; monSel.style.opacity = '.75';   // v15: la moneda la define la cuenta del metodo
   renderCredito(id, !!m.credito);
+  if (pago.pagoBancoId && !esBancrecer(m)) pago.pagoBancoId = '';
+  pintarPagosBanco(id);
+  if (esBancrecer(m)) cargarPagosBanco();
   var inf = document.getElementById('cominf_' + id);
   inf.innerHTML = '';
   // Sugerir el monto que falta por cubrir, en la moneda del metodo (el vendedor puede cambiarlo)
@@ -1719,6 +1793,12 @@ function guardarVenta() {
     pagoData.push({metodo:metNom, banco:banNom, monto:monto, moneda:moneda, label:(!isNaN(metIdx) && METODOS[metIdx]) ? METODOS[metIdx].label : ''});
   }
 
+  // v15.14: un pago amarrado a una confirmacion del banco tiene que ser por ese monto exacto
+  for (var pv = 0; pv < pagos.length; pv++) {
+    if (!pagos[pv].pagoBancoId) continue;
+    var cb = PAGOS_BANCO.filter(function(x) { return x.id === pagos[pv].pagoBancoId; })[0], mv = parseFloat((document.getElementById('monto_' + pagos[pv].id) || {}).value) || 0;
+    if (cb && Math.abs(cb.monto - mv) > 0.01) { toast('El monto (Bs ' + mv + ') no es el del pago confirmado (Bs ' + cb.monto + '). Toca "cambiar" o corrige el monto.', 'err'); return; }
+  }
   // Validaciones: primero el cliente, que es obligatorio en toda venta
   if (!modoSocio && !clienteVenta) { toast('Toda venta lleva cliente: buscalo o registralo arriba', 'err'); irACliente(); return; }
   if (FACTURAR && !modoSocio && !(clienteVenta && clienteVenta.rif)) { toast('Para facturar hace falta la cedula o RIF del cliente', 'err'); irACliente(); return; }
@@ -1823,6 +1903,7 @@ function guardarVenta() {
     casheaInicial:cashea.inicial, casheaFinanciado:cashea.financiado,
     casheaComision:cashea.comision, casheaNeto:cashea.neto,
     redondeoBs:RED.activo ? RED.red : 0, listaBs:RED.activo ? RED.listaBs : 0,
+    pagoBancoIds:pagos.map(function(x) { return x.pagoBancoId; }).filter(Boolean),
     casheaFinBCV:cashea.finBCV, casheaRecargo:(CASHEA_ON && cashea.financiado > 0) ? CAS.recargo : 0,
     cliente: cliSel ? {nombre:cliSel.nombre, rif:cliSel.rif || '', tel:cliSel.tel || ''} : null,
     creditoUSD: creditoUSD,

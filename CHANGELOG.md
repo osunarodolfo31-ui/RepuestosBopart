@@ -1,5 +1,16 @@
 # CHANGELOG — Repuesto BoParts
 
+## Apps Script v28.26 + ventas v15.14 — build 2026-11-17.3 — pagos de Bancrecer leidos del correo
+
+- leerCorreosBanco_: lee "Pago Movil recibido" y "Operacion Recibida de Credito Inmediato" de Bancrecer en el Gmail
+  del script (los de BOSC llegan reenviados desde boscsupply@gmail.com) y los anota en PAGOS_BANCO sin duplicar.
+  Cuenta JURIDICA si la cuenta destino es CONFIG B22 (2817 por defecto) o va dirigido a BOSC; si no, PERSONAL.
+- instalarLectorBanco(): correr una vez a mano en el editor (autoriza Gmail y deja un disparador cada 5 min).
+- action=pagos_banco (VENDEDOR): pagos LIBRES de 3 dias. Los de la cuenta personal solo los ve un socio.
+- Ventas: bajo un pago con Bancrecer salen los pagos confirmados; al tocar uno llena el monto y la venta lo amarra
+  (pagoBancoIds). El servidor rechaza un pago ya usado en otra nota. tipo=pago_banco_estado (SOCIO): IGNORADO/LIBRE.
+- Ventas v15.13 (build 17.2): boton Copiar para el reporte y el mensaje de la nota.
+
 ## ventas v15.13 — build 2026-11-17.2 — copiar mensajes
 
 - Boton "Copiar" junto a "Enviar reporte a WhatsApp" (venta terminada) y junto a "Solo mensaje por WhatsApp" (nota).

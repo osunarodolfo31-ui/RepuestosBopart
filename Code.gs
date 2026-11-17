@@ -1,6 +1,17 @@
 /**
  * Repuesto BoParts — Code.gs
- * VERSION: v28.25 (2026-11-15) | compras: nota de entrega o factura fiscal
+ * VERSION: v28.26 (2026-11-17) | pagos de Bancrecer leidos del correo
+ *
+ * v28.26 — PAGOS DEL BANCO. leerCorreosBanco_() lee los correos de Bancrecer (bdigital@ y bservicios@) de esta
+ *   cuenta de Gmail: "Pago Movil recibido" y "Operacion Recibida de Credito Inmediato". Los de la cuenta juridica
+ *   llegan reenviados desde boscsupply@gmail.com. Cada pago va a la hoja PAGOS_BANCO (sin duplicar: la llave es
+ *   el id del mensaje) con CUENTA = JURIDICA (cuenta destino CONFIG B22, por defecto 2817, o dirigido a BOSC)
+ *   o PERSONAL. action=pagos_banco (VENDEDOR) lee lo nuevo (max 1 vez por minuto) y devuelve los LIBRES de 3 dias.
+ *   La venta manda pagoBancoIds: esos pagos pasan a ASIGNADO con su idVenta y nota. tipo=pago_banco_estado
+ *   (SOCIO) los marca IGNORADO (no son ventas: Cashea, prestamos...) o los devuelve a LIBRE.
+ *   instalarLectorBanco() deja un disparador cada 5 minutos. Requiere autorizar el permiso de Gmail.
+ *
+ * VERSION anterior: v28.25 (2026-11-15) | compras: nota de entrega o factura fiscal
  *
  * v28.25 — DOCUMENTO DE LA COMPRA. Al costear se indica si el proveedor dio NOTA de entrega o FACTURA fiscal.
  *   COMPRAS gana U DOCUMENTO, V IVA_USD, W N_CONTROL y X TOTAL_PAGAR_USD. Con factura, los costos de las lineas
@@ -620,7 +631,7 @@ function listaAliados_(ss) {
 var PERMISOS_GET = {
   config:'VENDEDOR', nextNota:'VENDEDOR', nextCot:'VENDEDOR', nextFactura:'VENDEDOR', nota:'VENDEDOR',
   apartados:'VENDEDOR', proveedores:'VENDEDOR', stock:'VENDEDOR', conteos:'VENDEDOR', clientes:'VENDEDOR',
-  cxc:'VENDEDOR', cxc_diferencial:'SOCIO', redondeos:'SOCIO', tasas_dia:'SOCIO', productos:'VENDEDOR', catalogo:'VENDEDOR', metodos:'VENDEDOR', equivalencias:'VENDEDOR', cuentas:'VENDEDOR',
+  cxc:'VENDEDOR', cxc_diferencial:'SOCIO', redondeos:'SOCIO', tasas_dia:'SOCIO', pagos_banco:'VENDEDOR', productos:'VENDEDOR', catalogo:'VENDEDOR', metodos:'VENDEDOR', equivalencias:'VENDEDOR', cuentas:'VENDEDOR',
   tareas:'VENDEDOR',
   producto:'SOCIO',
   ventas:'SOCIO', socios:'SOCIO', cxp:'SOCIO', cliente_stats:'SOCIO', compras:'SOCIO', diag:'SOCIO',
@@ -634,7 +645,7 @@ var PERMISOS_POST = {
   tarea_marcar:'VENDEDOR', tarea_propia:'VENDEDOR', demanda_estado:'VENDEDOR',
   costeo:'SOCIO', cxp_abono:'SOCIO', conteo_revision:'SOCIO', devolucion:'SOCIO', apartado_cerrar:'SOCIO',
   tasa:'SOCIO', bcv_auto:'SOCIO', socio:'SOCIO', liquidar_aliado:'SOCIO', precio:'SOCIO', tarea_def:'SOCIO',
-  anular_venta:'SOCIO', mov_cuenta:'SOCIO', anular_gasto:'SOCIO', consumo_interno:'SOCIO', region:'SOCIO', cambiar_cliente:'SOCIO', cashea_config:'SOCIO'
+  anular_venta:'SOCIO', mov_cuenta:'SOCIO', anular_gasto:'SOCIO', consumo_interno:'SOCIO', region:'SOCIO', cambiar_cliente:'SOCIO', cashea_config:'SOCIO', pago_banco_estado:'SOCIO'
 };
 
 // v27 — FALLA CERRADO (auditoria #5). Antes, si CONFIG no se podia leer o B15 traia cualquier cosa
@@ -864,7 +875,7 @@ function claveDePost_(data) {
 // OJO: esta constante es lo que ven las apps en el menu. Se habia quedado en v21.4 mientras el
 // encabezado ya decia v24, asi que el sello de version — que existe justamente para saber si lo
 // desplegado es lo que crees — estaba mintiendo. Cada version nueva se cambia AQUI tambien.
-var VERSION_SCRIPT = 'v28.25';
+var VERSION_SCRIPT = 'v28.26';
 
 function json_(obj) {
   // La version viaja en cada respuesta: es la forma rapida de saber si lo desplegado es lo que crees
@@ -1094,6 +1105,9 @@ function rutearGet_(e) {
   if (e.parameter.action === 'cxc') {
     var ss2 = SpreadsheetApp.getActiveSpreadsheet();
     return json_({ok:true, tasa:leerTasa_(ss2), bcv:Number(leerConfig_(ss2).bcv) || 0, clientes:estadoCxc_(ss2, e.parameter.cliente || '')});
+  }
+  if (e.parameter.action === 'pagos_banco') {
+    return json_(pagosBanco_(SpreadsheetApp.getActiveSpreadsheet(), e.parameter.todos === '1', usr && usr.rol === 'SOCIO'));
   }
   if (e.parameter.action === 'tasas_dia') {
     return json_(tasasDia_(SpreadsheetApp.getActiveSpreadsheet(), e.parameter.fecha || ''));
@@ -1379,6 +1393,10 @@ function doPost(e) {
     }
 
     // ---- PRECIO CASHEA (v28.20) ----
+    if (data.tipo === 'pago_banco_estado') {
+      var lkP = LockService.getScriptLock(); lkP.waitLock(10000);
+      try { return json_(cambiarEstadoPagoBanco_(ss, data, quien)); } finally { SpreadsheetApp.flush(); lkP.releaseLock(); }
+    }
     if (data.tipo === 'cashea_config') {
       var rc = Number(data.recargo), ct = Number(data.comTotal), cf = Number(data.comFin);
       if (!(rc >= 0 && rc <= 100)) throw rechazo_('El recargo Cashea debe estar entre 0 y 100%');
@@ -1490,7 +1508,11 @@ function doPost(e) {
         // distinguir "quedo registrada" de "ya estaba", y a Reinaldo le daba lo mismo reintentar.
         var previa = ventaPorId_(ss, data.idVenta);
         if (previa) { numNota = previa.numNota; repetida = true; }
-        else numNota = guardarVenta_(ss, data);
+        else {
+          verificarPagosBanco_(ss, data.pagoBancoIds);          // v28.26: un pago ya usado en otra venta -> no se escribe nada
+          numNota = guardarVenta_(ss, data);
+          asignarPagosBanco_(ss, data.pagoBancoIds, data.idVenta, numNota, data.vendedor);
+        }
       } finally {
         // v26.1 — EL CANDADO NO VACIA LA HOJA. Apps Script acumula las escrituras y las manda al final;
         // si se suelta el candado antes, el siguiente intento puede buscar este ID, no encontrarlo
@@ -1951,6 +1973,128 @@ function cuentaBcvEstado_(c, cb, bcvVentas) {
   c.diferencialUSD = round2_(difTotal);
 }
 // Diferencial cambiario de las cuentas en $ BCV entre dos fechas (yyyy-MM-dd), para Gerencia.
+// ============================================================
+// v28.26 — PAGOS DEL BANCO LEIDOS DEL CORREO (Bancrecer)
+// ============================================================
+var PB_COLS = ['ID','FECHA_OP','BANCO','CUENTA','TIPO','MONTO_BS','REFERENCIA','ORDENANTE','TELEFONO','BANCO_ORIGEN',
+               'CUENTA_DESTINO','ESTADO','ID_VENTA','NOTA','ASIGNADO_POR','ASIGNADO_EN','LEIDO_EN'];
+function shPagosBanco_(ss) { return hojaAp_(ss, 'PAGOS_BANCO', PB_COLS); }
+function numVE_(t) { return Number(String(t || '').replace(/\./g, '').replace(',', '.')) || 0; }
+// Lee un correo de Bancrecer. Devuelve null si no es un pago recibido.
+function parsearCorreoBancrecer_(asunto, cuerpo, fechaCorreo, cuentaJur) {
+  var a = String(asunto || ''), t = String(cuerpo || '').replace(/\r/g, '').replace(/\*\*(?=[^*]*\d)/g, '');
+  var tipo = /Pago M[oó]vil recibido/i.test(a) ? 'PAGO_MOVIL' : (/Recibida de Cr[eé]dito Inmediato/i.test(a) ? 'CREDITO_INMEDIATO' : '');
+  if (!tipo) return null;
+  var g = function(re) { var m = t.match(re); return m ? String(m[1]).trim() : ''; };
+  var monto = numVE_(g(/Monto (?:de la transacci[oó]n|Transferido)\s*:\s*Bs\.?\s*([\d.]+,\d{1,2})/i));
+  if (!(monto > 0)) return null;
+  if (/Resultado[^:]*:\s*(Rechaz|Fallid|Anulad)/i.test(t)) return null;
+  var dest = g(/Cuenta Destino\s*:\s*\**\s*(\d{4})/i), cli = g(/Estimado Cliente Sr\(a\)\s*([^,\n]+),/i);
+  var fRaw = t.match(/Fecha(?: de la operaci[oó]n)?\s*:\s*(\d{2})\/(\d{2})\/(\d{4})\s+(\d{1,2}):(\d{2}):(\d{2})\s*([ap])\.?\s*m/i), fIso = '';
+  if (fRaw) {
+    var h = Number(fRaw[4]) % 12 + (/p/i.test(fRaw[7]) ? 12 : 0);
+    fIso = fRaw[3] + '-' + fRaw[2] + '-' + fRaw[1] + ' ' + ('0' + h).slice(-2) + ':' + fRaw[5];
+  } else fIso = Utilities.formatDate(fechaCorreo || new Date(), TZ_VE, 'yyyy-MM-dd HH:mm');
+  var jur = (dest && dest === cuentaJur) || /BOSC/i.test(cli);
+  return {fecha:fIso, tipo:tipo, monto:monto, ref:g(/Referencia(?: No\.)?\s*:\s*(\d+)/i),
+          ordenante:g(/Ordenante\s*:\s*([^\n]+)/i), tel:g(/Tel[eé]fono emisor\s*:\s*(\d+)/i),
+          bancoOrigen:g(/Banco Origen\s*:\s*([^\n]+)/i), destino:dest, cuenta:jur ? 'JURIDICA' : 'PERSONAL'};
+}
+// Revisa el correo (como mucho una vez por minuto, salvo forzar) y anota los pagos nuevos.
+function leerCorreosBanco_(ss, forzar) {
+  var props = PropertiesService.getScriptProperties(), ahora = Date.now();
+  if (!forzar && ahora - Number(props.getProperty('PB_ULTIMA') || 0) < 60000) return {leidos:0, saltado:true};
+  props.setProperty('PB_ULTIMA', String(ahora));
+  var cfg = ss.getSheetByName('CONFIG'), cuentaJur = String((cfg && cfg.getRange('B22').getValue()) || '2817').replace(/\D/g, '').slice(-4) || '2817';
+  var sh = shPagosBanco_(ss), vistos = {};
+  if (sh.getLastRow() >= 2) sh.getRange(2, 1, sh.getLastRow() - 1, 1).getValues().forEach(function(r) { vistos[String(r[0])] = 1; });
+  var hilos = GmailApp.search('from:(bdigital@bancrecer.com.ve OR bservicios@bancrecer.com.ve) newer_than:4d', 0, 100), nuevos = [];
+  hilos.forEach(function(h) {
+    h.getMessages().forEach(function(m) {
+      var id = m.getId(); if (vistos[id]) return;
+      var p = parsearCorreoBancrecer_(m.getSubject(), m.getPlainBody(), m.getDate(), cuentaJur);
+      if (!p) return;
+      vistos[id] = 1;
+      nuevos.push([id, p.fecha, 'Bancrecer', p.cuenta, p.tipo, p.monto, p.ref, p.ordenante, p.tel, p.bancoOrigen, p.destino,
+                   'LIBRE', '', '', '', '', Utilities.formatDate(new Date(), TZ_VE, 'yyyy-MM-dd HH:mm')]);
+    });
+  });
+  if (nuevos.length) {
+    nuevos.sort(function(a, b) { return a[1] < b[1] ? -1 : 1; });
+    sh.getRange(sh.getLastRow() + 1, 1, nuevos.length, PB_COLS.length).setNumberFormat('@').setValues(nuevos);
+    sh.getRange(sh.getLastRow() - nuevos.length + 1, 6, nuevos.length, 1).setNumberFormat('#,##0.00');
+  }
+  return {leidos:nuevos.length};
+}
+// Para el disparador de cada 5 minutos.
+function leerCorreosBancoProgramado() { leerCorreosBanco_(SpreadsheetApp.getActiveSpreadsheet(), true); }
+// Correr UNA vez a mano desde el editor: autoriza Gmail y deja el disparador.
+function instalarLectorBanco() {
+  ScriptApp.getProjectTriggers().forEach(function(t) { if (t.getHandlerFunction() === 'leerCorreosBancoProgramado') ScriptApp.deleteTrigger(t); });
+  ScriptApp.newTrigger('leerCorreosBancoProgramado').timeBased().everyMinutes(5).create();
+  return leerCorreosBanco_(SpreadsheetApp.getActiveSpreadsheet(), true);
+}
+// esSocio: los pagos a la cuenta PERSONAL solo se le muestran a un socio; a un vendedor solo cuantos llegaron hoy.
+function pagosBanco_(ss, todos, esSocio) {
+  var lect = {leidos:0};
+  try { lect = leerCorreosBanco_(ss, false); } catch (e) { lect = {error:String(e.message || e)}; }
+  var sh = ss.getSheetByName('PAGOS_BANCO'), out = [];
+  var limite = Utilities.formatDate(new Date(Date.now() - 3 * 86400000), TZ_VE, 'yyyy-MM-dd');
+  if (sh && sh.getLastRow() >= 2) {
+    sh.getRange(2, 1, sh.getLastRow() - 1, PB_COLS.length).getValues().forEach(function(r) {
+      var f = String(r[1] || ''), est = String(r[11] || 'LIBRE');
+      if (!todos && (est !== 'LIBRE' || f.slice(0, 10) < limite)) return;
+      out.push({id:String(r[0]), fecha:f, banco:String(r[2]), cuenta:String(r[3]), tipo:String(r[4]), monto:Number(r[5]) || 0,
+                ref:String(r[6]), ordenante:String(r[7]), tel:String(r[8]), bancoOrigen:String(r[9]), estado:est,
+                idVenta:String(r[12]), nota:String(r[13])});
+    });
+  }
+  out.sort(function(a, b) { return a.fecha < b.fecha ? 1 : -1; });
+  var hoyP = Utilities.formatDate(new Date(), TZ_VE, 'yyyy-MM-dd');
+  var personalHoy = out.filter(function(x) { return x.cuenta === 'PERSONAL' && x.estado === 'LIBRE' && x.fecha.slice(0, 10) === hoyP; }).length;
+  if (!esSocio) out = out.filter(function(x) { return x.cuenta !== 'PERSONAL'; });
+  return {ok:true, pagos:out, personalHoy:personalHoy, lectura:lect};
+}
+function verificarPagosBanco_(ss, ids) {
+  if (!ids || !ids.length) return;
+  var sh = ss.getSheetByName('PAGOS_BANCO'); if (!sh || sh.getLastRow() < 2) throw rechazo_('No encontre los pagos del banco elegidos');
+  var v = sh.getRange(2, 1, sh.getLastRow() - 1, 14).getValues();
+  ids.forEach(function(id) {
+    var f = v.filter(function(r) { return String(r[0]) === String(id); })[0];
+    if (!f) throw rechazo_('No encontre el pago del banco elegido. Recarga la lista.');
+    if (String(f[11]) === 'ASIGNADO') throw rechazo_('El pago ref ' + f[6] + ' (Bs ' + f[5] + ') ya se uso en la nota ' + f[13] + '. Elige otro.');
+    if (String(f[11]) === 'IGNORADO') throw rechazo_('El pago ref ' + f[6] + ' esta marcado como "no es venta". Avisale a un socio.');
+  });
+}
+function asignarPagosBanco_(ss, ids, idVenta, nota, quien) {
+  if (!ids || !ids.length) return 0;
+  var sh = ss.getSheetByName('PAGOS_BANCO'); if (!sh || sh.getLastRow() < 2) throw new Error('No hay pagos del banco registrados');
+  var v = sh.getRange(2, 1, sh.getLastRow() - 1, 16).getValues(), n = 0, hoy = Utilities.formatDate(new Date(), TZ_VE, 'yyyy-MM-dd HH:mm');
+  ids.forEach(function(id) {
+    for (var i = 0; i < v.length; i++) {
+      if (String(v[i][0]) !== String(id)) continue;
+      if (String(v[i][11]) === 'ASIGNADO' && String(v[i][12]) !== String(idVenta))
+        throw new Error('El pago ref ' + v[i][6] + ' ya estaba asignado a la nota ' + v[i][13]);
+      sh.getRange(i + 2, 12, 1, 5).setValues([['ASIGNADO', idVenta, nota, quien || '', hoy]]);
+      n++; return;
+    }
+  });
+  return n;
+}
+function cambiarEstadoPagoBanco_(ss, d, quien) {
+  var est = String(d.estado || '').toUpperCase();
+  if (est !== 'IGNORADO' && est !== 'LIBRE') throw new Error('Estado invalido');
+  var sh = ss.getSheetByName('PAGOS_BANCO'); if (!sh || sh.getLastRow() < 2) throw new Error('No hay pagos');
+  var ids = sh.getRange(2, 1, sh.getLastRow() - 1, 1).getValues();
+  for (var i = 0; i < ids.length; i++) {
+    if (String(ids[i][0]) !== String(d.id)) continue;
+    sh.getRange(i + 2, 12, 1, 5).setValues([[est, '', est === 'IGNORADO' ? String(d.motivo || '').slice(0, 80) : '', (quien && quien.nombre) || '',
+      Utilities.formatDate(new Date(), TZ_VE, 'yyyy-MM-dd HH:mm')]]);
+    return {ok:true, tipo:'pago_banco_estado', id:d.id, estado:est};
+  }
+  throw new Error('No encontre ese pago');
+}
+
 // v28.24 — tasa de trabajo y BCV vigentes un dia (AAAA-MM-DD). tasa = la ultima fijada hasta el cierre de ese dia;
 // tasaInicio = la que venia del dia anterior (si ese dia se cambio, son distintas). Fuente: hoja TASAS (las filas
 // cuya nota empieza por BCV son del BCV); si no alcanza, la ultima venta hasta ese dia.
