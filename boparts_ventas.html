@@ -1,7 +1,12 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_ventas.html
-  VERSION: v15.11 (2026-11-14) | build 2026-11-15.1 | requiere Apps Script v28.22
+  VERSION: v15.12 (2026-11-17) | build 2026-11-17.1 | requiere Apps Script v28.22
+  v15.12: (1) ARREGLO: "Generar Nota de Entrega" y "Cotizar" no abrian. Desde v15.6 la direccion es por partes y el
+  campo viejo cliDir ya no existe, pero abrirDoc lo seguia limpiando: se caia antes de abrir la ventana.
+  (2) Boton "Enviar reporte a WhatsApp" al terminar la venta: mensaje corto con cliente, productos y $, total y
+  pagos recibidos.
+  VERSION anterior: v15.11 (2026-11-14) | build 2026-11-14.3 | requiere Apps Script v28.22
   v15.11: la lista de productos queda guardada en el telefono y se puede vender con ella si el servidor tarda. Debajo
   del buscador se ve siempre el estado (cargando / no cargo + Reintentar), reintenta sola 3 veces y corta a los 25 s.
   El buscador ya no se queda mudo: dice si la lista no ha llegado o si no hay nada con ese nombre.
@@ -233,6 +238,7 @@ select option{background:#1E1E1E;color:var(--ink)}
 .sbtn{width:100%;padding:14px;border:none;border-radius:var(--radius);font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;margin-bottom:10px}
 .sbtn-y{background:var(--brand);color:#111}
 .sbtn-n{background:var(--card2);color:var(--ink-soft);border:1px solid var(--border)}
+.sbtn-w{background:#25D366;color:#fff}
 
 /* NOTA BUTTONS */
 .nbtn{width:100%;padding:13px;border-radius:var(--radius);font-size:14px;font-weight:700;border:none;cursor:pointer;font-family:inherit;margin-bottom:8px}
@@ -269,7 +275,7 @@ select option{background:#1E1E1E;color:var(--ink)}
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
-<script src="boparts_pdf.js?v=2026-11-15.1"></script>
+<script src="boparts_pdf.js?v=2026-11-17.1"></script>
 </head>
 <body>
 
@@ -443,6 +449,7 @@ select option{background:#1E1E1E;color:var(--ink)}
   <h2>Venta Registrada!</h2>
   <p id="successMsg"></p>
   <button class="sbtn sbtn-y" onclick="abrirNota()">Generar Nota de Entrega</button>
+  <button class="sbtn sbtn-w" onclick="enviarReporteWA()">Enviar reporte a WhatsApp</button>
   <button class="sbtn sbtn-n" onclick="nuevaVenta()">Nueva Venta</button>
 </div>
 
@@ -599,8 +606,8 @@ select option{background:#1E1E1E;color:var(--ink)}
   </div>
 </div>
 
-<script src="boparts_sesion.js?v=2026-11-15.1"></script>
-<script src="boparts_clientes.js?v=2026-11-15.1"></script>
+<script src="boparts_sesion.js?v=2026-11-17.1"></script>
+<script src="boparts_clientes.js?v=2026-11-17.1"></script>
 <script>
 
 
@@ -616,7 +623,7 @@ function sellarVersion(d) {
   if (t) t.textContent = 'app ' + APP_VERSION + ' \u00b7 script ' + VER_SCRIPT;
   return d;
 }
-var APP_VERSION = 'v15.11';
+var APP_VERSION = 'v15.12';
 var TASA        = parseFloat(localStorage.getItem('motoauto_tasa') || '0');
 var TASA_ORIGEN = TASA ? 'guardada' : 'ninguna';
 
@@ -1836,6 +1843,11 @@ function guardarVenta() {
       FACT_CASHEA = cashea.financiado > 0 ? cashea : null;
       if (d.numNota) { NOTA_NUM = parseInt(d.numNota); localStorage.setItem('boparts_nota_num', NOTA_NUM); lastNotaAsignada = NOTA_NUM; } else { lastNotaAsignada = 0; }
       lastCredito = hayCredito ? {cliente:cliSel, usd:creditoUSD} : null;
+      // v15.12: foto de la venta para el reporte corto de WhatsApp (sobrevive a lo que se toque despues)
+      REPORTE = {nota:d.numNota || '', cliente:(clienteVenta && clienteVenta.nombre) || (cliSel && cliSel.nombre) || (modoSocio ? 'Socio ' + (socioSel || '') : ''),
+                 lineas:lastCart.map(function(c) { return {producto:c.producto, cantidad:c.cantidad, precio:c.precio}; }),
+                 usd:usd, bs:bs, pagos:pagoData.filter(function(x) { return x.monto > 0; }).map(function(x) { return {label:x.label || (x.metodo + (x.banco ? ' ' + x.banco : '')), metodo:x.metodo, monto:x.monto, moneda:x.moneda}; }),
+                 credito:hayCredito ? creditoUSD : 0};
       // v14.8: el servidor (v26.1) avisa cuando esa venta YA estaba. Se dice claro, porque es justo el
       // caso en que Reinaldo reintento despues de un error y necesita saber que no quedaron dos.
       document.getElementById('successMsg').textContent =
@@ -1954,7 +1966,7 @@ function nuevaVenta() {
 }
 
 function resetAll() {
-  cart = []; pagos = []; pid = 0;
+  cart = []; pagos = []; pid = 0; REPORTE = null;
   aliadoOn = false; aliadoSel = null; cliSel = null; lastCredito = null;
   olvidarIdVenta(); FACT = null; try { document.getElementById('btnFactura').textContent = 'Generar FACTURA digital'; } catch (eF) {}
   clienteVenta = null; saldoCliente = 0; saldoConocido = false; pintarClienteVenta();
@@ -2145,7 +2157,6 @@ function abrirDoc(modo) {
   document.getElementById('cliNombre').value = '';
   document.getElementById('cliRif').value = '';
   document.getElementById('cliTel').value = '';
-  document.getElementById('cliDir').value = '';
   document.getElementById('cliNota').value = '';
   document.getElementById('notaOv').classList.add('open');
   if (pre) { cliSel = pre; mostrarCliSelected(pre); mostrarBotonesNota(); }
@@ -2352,6 +2363,28 @@ function registrarCotizacion(num) {
   };
   postScript(payload).then(function(d) { if (!d || !d.ok) toast('La cotizacion no quedo registrada en la hoja', 'err'); })
     .catch(function() { toast('La cotizacion no quedo registrada en la hoja (sin conexion)', 'err'); });
+}
+
+// ============================================================
+// v15.12 — REPORTE CORTO A WHATSAPP (al terminar la venta): cliente, productos con $, total y pagos recibidos.
+// Es un reporte interno (precios en $ de lista); al cliente se le manda la nota (Bs y REF BCV).
+// ============================================================
+var REPORTE = null;
+function textoReporte(r) {
+  var num = r.nota ? 'NE-' + ('000' + r.nota).slice(-4) : 'Venta';
+  var t = '*BoParts · ' + num + '*\nCliente: ' + (r.cliente || 'Sin cliente') + '\n';
+  r.lineas.forEach(function(l) { t += '\n• ' + l.producto + (l.cantidad > 1 ? ' x' + l.cantidad : '') + ' — ' + fmtUSD(l.precio * l.cantidad); });
+  t += '\n\n*Total: ' + fmtUSD(r.usd) + '* (' + fmtBS(r.bs) + ')\n\nPagos:';
+  r.pagos.forEach(function(p) {
+    if (String(p.metodo || '').toUpperCase() === 'CREDITO') return;
+    t += '\n• ' + p.label + ': ' + (p.moneda === 'USD' ? fmtUSD(p.monto) : fmtBS(p.monto));
+  });
+  if (r.credito > 0) t += '\n• Credito (pendiente): ' + fmtUSD(r.credito);
+  return t;
+}
+function enviarReporteWA() {
+  if (!REPORTE) { toast('No hay venta para reportar', 'err'); return; }
+  window.open('https://wa.me/?text=' + encodeURIComponent(textoReporte(REPORTE)), '_blank');
 }
 
 function pagosTexto() {

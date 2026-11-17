@@ -1,5 +1,12 @@
 # CHANGELOG — Repuesto BoParts
 
+## ventas v15.12 — build 2026-11-17.1 — boton de nota arreglado y reporte corto a WhatsApp
+
+- ARREGLO: "Generar Nota de Entrega" (y "Cotizar") no abrian desde v15.6: abrirDoc limpiaba el campo cliDir,
+  que ya no existe desde que la direccion es por partes, y se caia antes de abrir la ventana.
+- Al terminar la venta: boton "Enviar reporte a WhatsApp" con cliente, productos y $, total ($ y Bs) y pagos.
+- Sin cambios en Apps Script (sigue v28.25).
+
 ## Apps Script v28.25 + compras v3.2 + gerencia v4.1 — build 2026-11-15.1 — nota de entrega o factura fiscal
 
 - Costeo: "Documento que dio el proveedor" (Nota de entrega / Factura fiscal), obligatorio y recordado por proveedor.
