@@ -1,5 +1,13 @@
 # CHANGELOG — Repuesto BoParts
 
+## Apps Script v28.29 + compras v3.3 — build 2026-11-21.1 — costeo con sugerencias y sin perder lo escrito
+
+- Al costear, cada linea propone el ultimo costo pagado (proveedor y fecha) y el precio de venta vigente. Si el
+  costo cambia, el precio se recalcula con el margen propio del producto. Se marca +/-% contra el anterior.
+- Borrador por compra en el telefono. Si la sesion vence al cerrar el costeo, abre el login y al entrar lo envia solo.
+- Cambiar un costo ya no redibuja la pantalla; Enter pasa a la siguiente casilla; casilla de total del documento
+  que avisa si cuadra.
+
 ## Apps Script v28.28 + dinero v1.8 — build 2026-11-17.5 — reintento de liquidacion
 
 - Si la liquidacion de un aliado ya se hizo hoy y se vuelve a pedir, responde "ya estaba hecha" (repetida) con

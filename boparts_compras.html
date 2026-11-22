@@ -1,7 +1,16 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_compras.html
-  VERSION: v3.2 (2026-11-15) | build 2026-11-17.5 | requiere Apps Script v28.25
+  VERSION: v3.3 (2026-11-21) | build 2026-11-21.1 | requiere Apps Script v28.29
+  v3.3: COSTEO MAS RAPIDO Y SIN PERDER LO ESCRITO.
+  - Cada linea trae el ultimo costo pagado (proveedor y fecha) y el precio de venta vigente como sugerencia (borde
+    punteado). Si el proveedor mantuvo el precio, no se toca. Si el costo cambia, el precio se recalcula con el margen
+    propio de ese producto; el % general solo aplica a productos sin historial. Se marca +/-% contra el anterior.
+  - Lo escrito se guarda en el telefono por compra (borrador). Si la sesion vence al cerrar el costeo, se abre el
+    login y, al entrar, el costeo se envia solo. Antes decia "Tu sesion vencio" y al recargar se perdia todo.
+  - Cambiar un costo ya no redibuja toda la pantalla (se perdia la casilla). Enter pasa a la siguiente casilla.
+  - Casilla "Total impreso en la nota/factura" que dice si cuadra con la suma.
+  VERSION anterior: v3.2 (2026-11-15) | build 2026-11-17.5 | requiere Apps Script v28.25
   v3.2: al costear se indica si el proveedor dio NOTA de entrega o FACTURA fiscal (se recuerda por proveedor). Con
   factura fiscal los costos se escriben SIN IVA: el sistema muestra el IVA (16%, editable), el numero de control
   y el total a pagar. El costo del producto queda sin IVA; la deuda y la salida de dinero, con IVA.
@@ -207,6 +216,7 @@ select option{background:#1E1E1E;color:var(--ink)}
 .lrow:last-child{border:none}
 .lrow .ln{flex:1;font-size:12px;line-height:1.3}
 .lrow input{width:92px;text-align:right;padding:8px}
+.lrow input.sug{border-style:dashed;color:var(--ink-soft)}
 .tot{display:flex;justify-content:space-between;font-size:15px;font-weight:700;padding:10px 0}
 </style>
 </head>
@@ -391,7 +401,7 @@ select option{background:#1E1E1E;color:var(--ink)}
   </div>
 </div>
 
-<script src="boparts_sesion.js?v=2026-11-17.5"></script>
+<script src="boparts_sesion.js?v=2026-11-21.1"></script>
 <script>
 
 
@@ -406,7 +416,7 @@ function sellarVersion(d) {
 }
 function txt_(v) { return v == null ? '' : String(v); }
 var CLOUD = 'c7jufi9v', PRESET = 'boparts_productos';
-var APP_VERSION = 'v3.2';
+var APP_VERSION = 'v3.3';
 
 var PRODUCTS = [], PROVEEDORES = [], lineas = [], provSel = null, fotoUrl = '';
 var idCompraActual = '';   // se mantiene entre reintentos de la MISMA recepcion
@@ -436,7 +446,11 @@ function cargarProductos() {
     if (el) el.onclick = function() { el.onclick = null; el.className = 'toast'; cargarProductos(); };
   });
 }
-function alEntrar() { cargarProductos(); cargarCuentas(); }
+var REINTENTAR_COSTEO = false;
+function alEntrar() {
+  cargarProductos(); cargarCuentas();
+  if (REINTENTAR_COSTEO && costeando) { REINTENTAR_COSTEO = false; setTimeout(guardarCosteo, 300); }
+}
 // v3.0: las cuentas salen de la hoja CUENTAS (action=cuentas); si el script no responde, las de siempre.
 var CUENTAS = ['Efectivo USD', 'Efectivo Bs', 'Banesco', 'Bancamiga', 'Bancrecer', 'Zelle', 'Binance'];
 function cargarCuentas() {
@@ -627,6 +641,7 @@ function guardarFCos() {
   var d = g('csDias'); if (d !== undefined) FCOS.dias = parseInt(d) || 0;
   var m = g('csMet'); if (m !== undefined) FCOS.met = m;
   var q = g('csQuien'); if (q !== undefined) FCOS.quien = q;
+  guardarBorrador();
 }
 var MARGEN = 50;   // % sobre el costo que se propone por defecto
 
@@ -668,44 +683,124 @@ function pintarPendientes() {
   }).join('');
 }
 
+// v3.3 — BORRADOR DEL COSTEO. Lo escrito se guarda en este telefono por compra: si la sesion vence, se cae
+// la conexion o se recarga la pantalla, al volver a abrir la misma compra aparece como se dejo.
+function claveBorrador(id) { return 'boparts_costeo_' + id; }
+function guardarBorrador() {
+  if (!costeando) return;
+  try {
+    localStorage.setItem(claveBorrador(costeando.id), JSON.stringify({t:Date.now(), FCOS:FCOS, margen:MARGEN, totalDoc:TOTAL_DOC,
+      lineas:costeando.productos.map(function(l) { return {codigo:l.codigo, costo:l.costo, precio:l.precio, precioManual:!!l.precioManual, precioEditado:!!l.precioEditado, tocado:!!l.tocado}; })}));
+  } catch (e) {}
+}
+function leerBorrador(id) {
+  try {
+    var b = JSON.parse(localStorage.getItem(claveBorrador(id)) || 'null');
+    if (b && Date.now() - b.t < 14 * 86400000) return b;   // un borrador de mas de 2 semanas ya no sirve
+  } catch (e) {}
+  return null;
+}
+function borrarBorrador(id) { try { localStorage.removeItem(claveBorrador(id)); } catch (e) {} }
+
+var TOTAL_DOC = '';    // total impreso en la nota/factura, solo para comparar con la suma
+
+// v3.3 — SUGERENCIA. Si el producto ya se compro antes, se propone el ultimo costo pagado y el precio de venta
+// vigente. Si el proveedor mantuvo el precio, costear es revisar y cerrar. Si el costo cambia, el precio se
+// recalcula con el MISMO margen que tenia ese producto (no con el 50% general), salvo que se escriba a mano.
+function referenciaLinea(l) {
+  var cRef = parseNumC(l.costoAnt) || parseNumC(l.costoSis);
+  var pRef = parseNumC(l.precioSis);
+  var cMargen = parseNumC(l.costoSis) || cRef;
+  return {costo:cRef, precio:pRef, factor:(cMargen > 0 && pRef > 0) ? pRef / cMargen : 0};
+}
 function abrirCosteo(i) {
   costeando = PENDIENTES[i];
   FCOS = {cond:'CONTADO', dias:DIAS_PROV[costeando.proveedor] || 0, met:'', quien:FCOS.quien,
           doc:DOC_PROV[claveProv(costeando.proveedor)] || '', iva:'', control:''};
-  costeando.productos.forEach(function(l) { if (!l.costo) l.costo = 0; });
+  TOTAL_DOC = '';
+  var b = leerBorrador(costeando.id), porCod = {};
+  if (b) {
+    (b.lineas || []).forEach(function(x) { porCod[x.codigo] = x; });
+    for (var k in b.FCOS) FCOS[k] = b.FCOS[k];
+    if (b.margen) MARGEN = b.margen;
+    TOTAL_DOC = b.totalDoc || '';
+  }
+  costeando.productos.forEach(function(l) {
+    var x = porCod[l.codigo];
+    if (x) { l.costo = x.costo; l.precio = x.precio; l.precioManual = x.precioManual; l.precioEditado = x.precioEditado; l.tocado = x.tocado; return; }
+    var r = referenciaLinea(l);
+    if (!parseNumC(l.costo) && r.costo > 0) l.costo = r.costo;
+    if (!parseNumC(l.precio) && r.precio > 0) { l.precio = r.precio; l.precioManual = true; }
+    if (!l.costo) l.costo = 0;
+    l.tocado = false;
+  });
+  if (b) toast('Se recupero lo que habias escrito en esta compra', 'ok');
   pintarCosteo();
+  // La sesion dura 12 h. Si esta por vencer, mejor entrar de nuevo ANTES de escribir 40 costos.
+  var s = sesionActual();
+  if (s && s.vence - Date.now() < 45 * 60000) {
+    toast('Tu sesion vence en ' + Math.max(1, Math.round((s.vence - Date.now()) / 60000)) + ' min. Entra de nuevo antes de cerrar el costeo.', 'err');
+    mostrarLogin();
+  }
 }
+
+function etiquetaRef(l) {
+  var r = referenciaLinea(l), c = parseNumC(l.costo), out = [];
+  if (r.costo > 0) {
+    var t = 'antes ' + usdC(r.costo) + (l.provAnt ? ' (' + escHtml(l.provAnt) + (l.fechaAnt ? ', ' + l.fechaAnt : '') + ')' : ' (costo en sistema)');
+    if (c > 0 && Math.abs(c - r.costo) > 0.004) {
+      var var_ = Math.round((c / r.costo - 1) * 100);
+      t += ' <b style="color:' + (var_ > 0 ? 'var(--red)' : 'var(--green)') + '">' + (var_ > 0 ? '+' : '') + var_ + '%</b>';
+    } else if (c > 0) t += ' <b style="color:var(--green)">igual</b>';
+    out.push(t);
+  }
+  if (r.precio > 0) out.push('venta actual ' + usdC(r.precio));
+  return out.join(' · ');
+}
+function metaLinea(l) {
+  var costo = parseNumC(l.costo), precio = parseNumC(l.precio);
+  var mg = (costo > 0 && precio > 0) ? Math.round((precio / costo - 1) * 100) : null;
+  return escHtml(l.codigo) + ' · ' + l.cantidad + ' und' + (l.nuevo ? ' · NUEVO' : '') +
+    (mg !== null ? ' · margen <b style="color:' + (mg < 20 ? 'var(--red)' : 'inherit') + '">' + mg + '%</b>' : '') +
+    (etiquetaRef(l) ? '<br>' + etiquetaRef(l) : '');
+}
+function esSugerida(l) { var r = referenciaLinea(l); return !l.tocado && r.costo > 0 && Math.abs(parseNumC(l.costo) - r.costo) < 0.005; }
 
 function pintarCosteo() {
   var c = costeando;
+  var nSug = c.productos.filter(esSugerida).length, nSinRef = c.productos.filter(function(l) { return !(referenciaLinea(l).costo > 0); }).length;
   var h = '<div class="ccost"><div class="t">' + escHtml(c.proveedor) + '</div>' +
     '<div class="m">' + c.fecha + (c.factura ? ' · factura ' + escHtml(c.factura) : '') + '</div>' +
     (c.foto ? '<a href="' + c.foto + '" target="_blank" style="font-size:12px;color:var(--brand)">Abrir foto de la factura</a>' : '<span class="m">Sin foto de factura</span>') +
-    '<div style="margin-top:10px">';
+    '<div class="cominfo" style="margin-top:8px">' + c.productos.length + ' lineas. ' +
+      (nSug ? '<b>' + nSug + '</b> con el costo de la compra anterior (borde punteado): si el proveedor no cambio el precio, no hay que tocarlas. ' : '') +
+      (nSinRef ? '<b>' + nSinRef + '</b> sin historial: escribe su costo. ' : '') +
+      'Enter pasa a la siguiente casilla.</div>' +
+    '<div style="margin-top:6px">';
   c.productos.forEach(function(l, i) {
-    var costo = parseNumC(l.costo), precio = parseNumC(l.precio);
-    var mg = (costo > 0 && precio > 0) ? Math.round((precio / costo - 1) * 100) : 0;
-    h += '<div class="lrow"><div class="ln">' + escHtml(l.producto) + '<div class="m">' + escHtml(l.codigo) + ' · ' + l.cantidad + ' und' + (l.nuevo ? ' · NUEVO' : '') +
-      (costo > 0 && precio > 0 ? ' · margen ' + mg + '%' : '') + '</div></div>' +
+    var costo = parseNumC(l.costo), precio = parseNumC(l.precio), sug = esSugerida(l);
+    h += '<div class="lrow"><div class="ln">' + escHtml(l.producto) + '<div class="m" id="csMeta' + i + '">' + metaLinea(l) + '</div></div>' +
       '<div><label style="font-size:10px;color:var(--ink-muted)">Costo</label>' +
-      '<input type="number" step="0.01" placeholder="0.00" value="' + (costo || '') + '" onchange="setCosto(' + i + ',this.value)"></div>' +
+      '<input class="cin' + (sug ? ' sug' : '') + '" id="csC' + i + '" type="text" inputmode="decimal" placeholder="0.00" value="' + (costo || '') + '" onfocus="this.select()" onchange="setCosto(' + i + ',this.value)"></div>' +
       '<div><label style="font-size:10px;color:var(--ink-muted)">Precio venta</label>' +
-      '<input type="number" step="0.01" placeholder="0.00" value="' + (precio || '') + '" onchange="setPrecio(' + i + ',this.value)"></div></div>';
+      '<input class="cin" id="csP' + i + '" type="text" inputmode="decimal" placeholder="0.00" value="' + (precio || '') + '" onfocus="this.select()" onchange="setPrecio(' + i + ',this.value)"></div></div>';
   });
-  var total = c.productos.reduce(function(a, l) { return a + (parseNumC(l.costo) * l.cantidad); }, 0);
-  h += '</div><div class="field" style="margin-top:8px"><label>Margen sobre el costo (%)</label>' +
+  h += '</div><div class="field" style="margin-top:8px"><label>Margen para productos SIN historial (%)</label>' +
     '<input type="number" step="1" value="' + MARGEN + '" onchange="setMargen(this.value)">' +
-    '<div class="cominfo">Propone el precio de venta de cada linea. Puedes cambiar el precio de una linea sin tocar las demas.</div></div>' +
-    '<div class="tot"><span>' + (FCOS.doc === 'FACTURA' ? 'Base (sin IVA)' : 'Total de la compra') + '</span><span>' + usdC(total) + '</span></div>' +
+    '<div class="cominfo">Los productos que ya se habian comprado conservan su propio margen al cambiar el costo.</div></div>' +
+    '<div class="tot"><span>' + (FCOS.doc === 'FACTURA' ? 'Base (sin IVA)' : 'Total de la compra') + '</span><span id="csTotal"></span></div>' +
+    '<div class="field"><label>Total impreso en la nota/factura (para comparar)</label>' +
+      '<input type="text" inputmode="decimal" id="csTotDoc" placeholder="Ej: 595,00" value="' + escHtml(TOTAL_DOC) + '" onchange="TOTAL_DOC=this.value;guardarBorrador();actualizarTotales()">' +
+      '<div class="cominfo" id="csCuadre" style="display:none"></div></div>' +
     '<div class="field"><label>Documento que dio el proveedor *</label><select id="csDoc" onchange="guardarFCos();pintarCosteo()">' +
       '<option value="">Seleccionar...</option>' +
       '<option value="NOTA"' + (FCOS.doc === 'NOTA' ? ' selected' : '') + '>Nota de entrega</option>' +
       '<option value="FACTURA"' + (FCOS.doc === 'FACTURA' ? ' selected' : '') + '>Factura fiscal</option></select></div>' +
     (FCOS.doc === 'FACTURA'
       ? '<div class="cominfo">Con factura fiscal escribe arriba los costos <b>sin IVA</b> (la base de cada producto). El IVA no entra al costo: es credito fiscal.</div>' +
-        '<div class="row2"><div class="field"><label>IVA de la factura (USD)</label><input type="number" id="csIva" step="0.01" value="' + ivaCosteo().toFixed(2) + '" onchange="FCOS.iva=this.value;guardarFCos();pintarCosteo()"></div>' +
+        '<div class="row2"><div class="field"><label>IVA de la factura (USD)</label><input type="number" id="csIva" step="0.01" value="' + ivaCosteo().toFixed(2) + '" onchange="FCOS.iva=this.value;guardarFCos();actualizarTotales()"></div>' +
         '<div class="field"><label>N° de control</label><input type="text" id="csControl" value="' + escHtml(FCOS.control || '') + '" placeholder="00-000000" onchange="guardarFCos()"></div></div>' +
-        '<div class="tot"><span>Total a pagar (con IVA)</span><span>' + usdC(total + ivaCosteo()) + '</span></div>'
+        '<div class="tot"><span>Total a pagar (con IVA)</span><span id="csTotal2"></span></div>'
       : (FCOS.doc === 'NOTA' ? '<div class="cominfo">Nota de entrega: no genera credito fiscal de IVA. El costo es lo que se paga.</div>' : '')) +
     '<div class="field"><label>Condicion *</label><select id="csCond" onchange="guardarFCos();pintarCosteo2()">' +
       '<option value="CONTADO"' + (FCOS.cond === 'CONTADO' ? ' selected' : '') + '>Pagada de contado</option>' +
@@ -714,10 +809,46 @@ function pintarCosteo() {
     '<div class="field"><label>Quien costea *</label><select id="csQuien" onchange="guardarFCos()"><option value="">Seleccionar...</option>' +
       '<option' + (FCOS.quien === 'Rodolfo Osuna' ? ' selected' : '') + '>Rodolfo Osuna</option>' +
       '<option' + (FCOS.quien === 'Javier Boves' ? ' selected' : '') + '>Javier Boves</option></select></div>' +
-    '<button class="nbtn nbtn-p" onclick="guardarCosteo()">Cerrar costeo</button>' +
+    '<button class="nbtn nbtn-p" id="btnCostear" onclick="guardarCosteo()">Cerrar costeo</button>' +
     '<button class="nbtn nbtn-s" onclick="costeando=null;pintarPendientes()">Volver</button></div>';
   document.getElementById('listaCostear').innerHTML = h;
   pintarCosteo2();
+  actualizarTotales();
+  try { fijarPersonaDeSesion(); } catch (e) {}
+}
+// Enter salta a la siguiente casilla de costo/precio (en el telefono, el boton "ir" del teclado)
+document.addEventListener('keydown', function(e) {
+  if (e.key !== 'Enter' || !e.target.classList || !e.target.classList.contains('cin')) return;
+  e.preventDefault();
+  var ins = Array.prototype.slice.call(document.querySelectorAll('#listaCostear input.cin'));
+  var k = ins.indexOf(e.target);
+  e.target.dispatchEvent(new Event('change'));      // refrescarLinea no rehace la lista: los indices siguen valiendo
+  if (ins[k + 1]) ins[k + 1].focus(); else e.target.blur();
+});
+function actualizarTotales() {
+  if (!costeando) return;
+  var total = totalBaseCosteo();
+  var t1 = document.getElementById('csTotal'); if (t1) t1.textContent = usdC(total);
+  var t2 = document.getElementById('csTotal2'); if (t2) t2.textContent = usdC(total + ivaCosteo());
+  var cu = document.getElementById('csCuadre'), doc = parseNumC(TOTAL_DOC);
+  if (cu) {
+    if (doc > 0) {
+      var comparar = FCOS.doc === 'FACTURA' ? total + ivaCosteo() : total, dif = Math.round((comparar - doc) * 100) / 100;
+      cu.style.display = 'block';
+      cu.style.borderLeftColor = Math.abs(dif) < 0.05 ? 'var(--green)' : 'var(--red)';
+      cu.innerHTML = Math.abs(dif) < 0.05 ? 'Cuadra con el documento ✓'
+        : 'Diferencia con el documento: <b>' + (dif > 0 ? '+' : '') + usdC(dif).replace('$-', '-$') + '</b>. Revisa costos o cantidades.';
+    } else cu.style.display = 'none';
+  }
+}
+// Repinta UNA linea sin rehacer la pantalla: antes cada cambio redibujaba todo y se perdia la casilla activa.
+function refrescarLinea(i) {
+  var l = costeando.productos[i];
+  var m = document.getElementById('csMeta' + i); if (m) m.innerHTML = metaLinea(l);
+  var ic = document.getElementById('csC' + i); if (ic) { ic.value = parseNumC(l.costo) || ''; ic.classList.toggle('sug', esSugerida(l)); }
+  var ip = document.getElementById('csP' + i); if (ip && document.activeElement !== ip) ip.value = parseNumC(l.precio) || '';
+  actualizarTotales();
+  guardarBorrador();
 }
 
 function pintarCosteo2() {
@@ -737,28 +868,31 @@ function pintarCosteo2() {
       '<div class="cominfo">Si lo pago un socio, la tienda se lo debe: queda como prestamo en su cuenta, igual que en Gastos.</div>';
   }
 }
-// Al poner el costo se propone el precio con el margen; si ya se escribio un precio a mano, no se toca.
+// Al poner el costo se propone el precio: con el margen propio del producto si ya tenia precio, con el % general
+// si es nuevo. Un precio escrito a mano (distinto al sugerido) no se toca.
 function setCosto(i, v) {
   guardarFCos();
-  var l = costeando.productos[i];
-  l.costo = parseNumC(v);
-  if (!l.precioManual) l.precio = Math.round(l.costo * (1 + MARGEN / 100) * 100) / 100;
-  pintarCosteo();
+  var l = costeando.productos[i], r = referenciaLinea(l);
+  l.costo = parseNumC(v); l.tocado = true;
+  if (r.factor > 0 && (!l.precioEditado)) l.precio = Math.round(l.costo * r.factor * 100) / 100;
+  else if (!l.precioManual) l.precio = Math.round(l.costo * (1 + MARGEN / 100) * 100) / 100;
+  refrescarLinea(i);
 }
 function setPrecio(i, v) {
   guardarFCos();
   var l = costeando.productos[i];
   l.precio = parseNumC(v);
-  l.precioManual = true;
-  pintarCosteo();
+  l.precioManual = true; l.precioEditado = true;
+  refrescarLinea(i);
 }
-// Cambia el margen de toda la compra y recalcula los precios que no se hayan tocado a mano
+// Cambia el margen de los productos sin historial y recalcula los precios que no se hayan tocado a mano
 function setMargen(v) {
   guardarFCos();
   MARGEN = parseNumC(v) || 0;
   costeando.productos.forEach(function(l) {
     if (!l.precioManual && parseNumC(l.costo) > 0) l.precio = Math.round(parseNumC(l.costo) * (1 + MARGEN / 100) * 100) / 100;
   });
+  guardarBorrador();
   pintarCosteo();
 }
 
@@ -787,6 +921,8 @@ function guardarCosteo() {
   else if (sel.indexOf('S:') === 0) { pagadoPor = sel.slice(2); met = 'Socio'; }
   else if (sel) { met = sel; }       // valor guardado de una version anterior
   var now = new Date();
+  var btnC = document.getElementById('btnCostear'); if (btnC) { btnC.disabled = true; btnC.textContent = 'Guardando...'; }
+  guardarBorrador();
   postScript({tipo:'costeo', id:c.id, fila:c.fila, proveedor:c.proveedor, factura:c.factura,
     fecha:now.toLocaleDateString('es-VE'), hora:now.toLocaleTimeString('es-VE', {hour:'2-digit', minute:'2-digit'}),
     condicion:cond, dias:dias, metodo:met, banco:banco, pagadoPor:pagadoPor, costeadoPor:quien,
@@ -800,9 +936,20 @@ function guardarCosteo() {
       if (d.repetida) toast('Esa compra ya estaba costeada (' + usdC(d.total) + '). No se duplico nada.', 'err');
       else toast('Costeada: ' + usdC(d.totalPagar || d.total) + (d.ivaUSD ? ' (base ' + usdC(d.total) + ' + IVA ' + usdC(d.ivaUSD) + ')' : '') +
         (d.condicion === 'CREDITO' ? ' a credito, vence ' + d.vence : ' de contado'), 'ok');
+      borrarBorrador(c.id);
       costeando = null; cargarPendientes();
     })
-    .catch(function(e) { toast('No se pudo costear: ' + e.message, 'err'); });
+    .catch(function(e) {
+      if (btnC) { btnC.disabled = false; btnC.textContent = 'Cerrar costeo'; }
+      if (e && e.message === 'SESION') {
+        // v3.3 — antes: "Tu sesion vencio" y nada mas; al recargar se perdia todo lo escrito.
+        // Ahora lo escrito queda guardado y, al entrar de nuevo, el costeo se envia solo.
+        REINTENTAR_COSTEO = true;
+        toast('Tu sesion vencio. Entra con tu PIN: lo que escribiste esta guardado y el costeo se envia solo.', 'err');
+        return;
+      }
+      toast('No se pudo costear: ' + e.message + '. Lo escrito queda guardado: reintenta.', 'err');
+    });
 }
 
 function parseNumC(v) {
@@ -862,9 +1009,15 @@ function nueva() {
   document.getElementById('inFactura').value = ''; document.getElementById('txtNotas').value = '';
   var box = document.getElementById('fotoBox'); box.className = 'fotobox'; box.innerHTML = 'Tocar para fotografiar o elegir de galeria<input type="file" accept="image/*" onchange="subirFoto(this)">';
 }
+// v3.3 — los POST tambien reconocen la sesion vencida y abren el login (antes solo lo hacian las consultas).
 function postScript(payload) {
   return fetch(SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body:JSON.stringify(payload)})
-    .then(function(r) { return r.text(); }).then(function(t) { try { return JSON.parse(t); } catch (e) { throw new Error('El script respondio: ' + t.replace(/<[^>]+>/g, ' ').slice(0, 100)); } });
+    .then(function(r) { return r.text(); }).then(function(t) {
+      var d;
+      try { d = JSON.parse(t); } catch (e) { throw new Error('El script respondio: ' + t.replace(/<[^>]+>/g, ' ').slice(0, 100)); }
+      if (d && d.sesion) { olvidarSesion(); mostrarLogin(); throw new Error('SESION'); }
+      return d;
+    });
 }
 function pad2(n) { return (n < 10 ? '0' : '') + n; }
 function parseCSV(txt) {

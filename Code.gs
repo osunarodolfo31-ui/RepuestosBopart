@@ -1,6 +1,12 @@
 /**
  * Repuesto BoParts — Code.gs
- * VERSION: v28.28 (2026-11-17) | liquidar aliado: reintento sin error
+ * VERSION: v28.29 (2026-11-21) | costeo: costo y precio anteriores como sugerencia
+ *
+ * v28.29 — action=compras&estado=PENDIENTE COSTO trae en cada linea costoAnt (ultimo costo unitario pagado en
+ *   una compra ya costeada), fechaAnt, provAnt, costoSis (costo final en LISTA DE PRODUCTOS) y precioSis (precio
+ *   de venta vigente). La pantalla de Compras los propone al costear. No cambia nada de lo que se guarda.
+ *
+ * VERSION anterior: v28.28 (2026-11-17) | liquidar aliado: reintento sin error
  *
  * v28.28 — Si la liquidacion ya se hizo hoy y se vuelve a pedir (se perdio la respuesta y se reintento), devuelve
  *   esa liquidacion con repetida:true en vez de "no tiene comisiones por pagar".
@@ -888,7 +894,7 @@ function claveDePost_(data) {
 // OJO: esta constante es lo que ven las apps en el menu. Se habia quedado en v21.4 mientras el
 // encabezado ya decia v24, asi que el sello de version — que existe justamente para saber si lo
 // desplegado es lo que crees — estaba mintiendo. Cada version nueva se cambia AQUI tambien.
-var VERSION_SCRIPT = 'v28.28';
+var VERSION_SCRIPT = 'v28.29';
 
 function json_(obj) {
   // La version viaja en cada respuesta: es la forma rapida de saber si lo desplegado es lo que crees
@@ -3702,11 +3708,45 @@ function listaCompras_(ss, estado) {
         cantidad:Number(r[5]) || 0, costo:Number(r[6]) || 0, nuevo:String(r[8] || '') === 'SI'});
     });
   }
+  // v28.29 — REFERENCIA PARA COSTEAR. Por cada codigo: el ultimo costo unitario pagado en una compra YA costeada
+  // (con su fecha y proveedor) y el costo y precio vigentes en LISTA DE PRODUCTOS. La app los propone como
+  // sugerencia; si el proveedor no cambio el precio, costear es confirmar. Solo se arma para las pendientes.
+  var ref = {};
+  if (estado === 'PENDIENTE COSTO') {
+    var estadoDe = {};
+    rows.forEach(function(r) { estadoDe[String(r[0] || '')] = {est:String(r[8] || ''), fecha:r[1], prov:String(r[3] || '')}; });
+    Object.keys(det).forEach(function(idC) {
+      var ec = estadoDe[idC];
+      if (!ec || ec.est !== 'COSTEADA') return;
+      det[idC].forEach(function(l) {
+        var k = l.codigo.trim().toUpperCase();
+        if (!k || !(l.costo > 0)) return;
+        var t = esFecha_(ec.fecha) ? ec.fecha.getTime() : 0;
+        if (!ref[k] || t >= ref[k].t) ref[k] = {t:t, costoAnt:l.costo, fechaAnt:fmtFecha_(ec.fecha), provAnt:ec.prov};
+      });
+    });
+    var shP = ss.getSheetByName('LISTA DE PRODUCTOS');
+    if (shP && shP.getLastRow() >= 3) {
+      shP.getRange(3, 1, shP.getLastRow() - 2, 9).getValues().forEach(function(r) {
+        var k = String(r[0] || '').trim().toUpperCase();
+        if (!k) return;
+        ref[k] = ref[k] || {};
+        ref[k].costoSis = Number(r[COL_COSTO_FINAL - 1]) || 0;
+        ref[k].precioSis = Number(r[8]) || 0;
+      });
+    }
+  }
   var out = [];
   rows.forEach(function(r, i) {
     var est = String(r[8] || '');
     if (estado && est !== estado) return;
     var id = String(r[0] || '');
+    if (estado === 'PENDIENTE COSTO') (det[id] || []).forEach(function(l) {
+      var x = ref[l.codigo.trim().toUpperCase()];
+      if (!x) return;
+      l.costoAnt = x.costoAnt || 0; l.fechaAnt = x.fechaAnt || ''; l.provAnt = x.provAnt || '';
+      l.costoSis = x.costoSis || 0; l.precioSis = x.precioSis || 0;
+    });
     out.push({fila:i + 2, id:id, fecha:fmtFecha_(r[1]), proveedor:String(r[3] || ''), factura:String(r[4] || ''),
               recibidoPor:String(r[5] || ''), lineas:Number(r[6]) || 0, unidades:Number(r[7]) || 0, estado:est,
               costoTotal:Number(r[9]) || 0, foto:String(r[10] || ''), notas:String(r[11] || ''),
