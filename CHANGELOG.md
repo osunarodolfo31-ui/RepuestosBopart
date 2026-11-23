@@ -1,5 +1,12 @@
 # CHANGELOG — Repuesto BoParts
 
+## Apps Script v28.30 + dinero v1.9 — build 2026-11-22.1 — liquidar Cashea
+
+- Dinero: boton "Liquidar Cashea" en la cuenta Cashea. Fecha, monto, referencia y cuenta del recibo; trae la BCV del
+  dia y las ventas pendientes con financiado, comisiones (4% total + IVA - ISLR 2% + 4% financiado) y neto; marca
+  solas las que cuadran. Registra TRASPASO Cashea -> banco + AJUSTE, y la liquidacion en la hoja CASHEA_LIQ.
+- Hoja CASHEA_LIQ creada con las dos liquidaciones hechas a mano (NE-398; NE-432/454/458).
+
 ## Apps Script v28.29 + compras v3.3 — build 2026-11-21.1 — costeo con sugerencias y sin perder lo escrito
 
 - Al costear, cada linea propone el ultimo costo pagado (proveedor y fecha) y el precio de venta vigente. Si el

@@ -1,6 +1,14 @@
 /**
  * Repuesto BoParts — Code.gs
- * VERSION: v28.29 (2026-11-21) | costeo: costo y precio anteriores como sugerencia
+ * VERSION: v28.30 (2026-11-22) | liquidar Cashea
+ *
+ * v28.30 — LIQUIDAR CASHEA. action=cashea_pendientes (&fecha= trae la BCV de ese dia) lista las ventas Cashea aun
+ *   no liquidadas con su calculo: total y financiado en $ BCV, servicio 4% del total + IVA - ISLR 2%, Express 4% del
+ *   financiado, neto. tipo=cashea_liquidar {idLiq, fecha, hora, referencia, montoBs, bcv, cuenta, ventas[]} registra
+ *   el TRASPASO Cashea -> cuenta y el AJUSTE por la diferencia, y guarda la liquidacion en la hoja CASHEA_LIQ.
+ *   Misma referencia o mismo id = repetida (no duplica). Solo socios.
+ *
+ * VERSION anterior: v28.29 (2026-11-21) | costeo: costo y precio anteriores como sugerencia
  *
  * v28.29 — action=compras&estado=PENDIENTE COSTO trae en cada linea costoAnt (ultimo costo unitario pagado en
  *   una compra ya costeada), fechaAnt, provAnt, costoSis (costo final en LISTA DE PRODUCTOS) y precioSis (precio
@@ -650,7 +658,7 @@ function listaAliados_(ss) {
 var PERMISOS_GET = {
   config:'VENDEDOR', nextNota:'VENDEDOR', nextCot:'VENDEDOR', nextFactura:'VENDEDOR', nota:'VENDEDOR',
   apartados:'VENDEDOR', proveedores:'VENDEDOR', stock:'VENDEDOR', conteos:'VENDEDOR', clientes:'VENDEDOR',
-  cxc:'VENDEDOR', cxc_diferencial:'SOCIO', redondeos:'SOCIO', tasas_dia:'SOCIO', pagos_banco:'VENDEDOR', productos:'VENDEDOR', catalogo:'VENDEDOR', metodos:'VENDEDOR', equivalencias:'VENDEDOR', cuentas:'VENDEDOR',
+  cxc:'VENDEDOR', cxc_diferencial:'SOCIO', redondeos:'SOCIO', tasas_dia:'SOCIO', cashea_pendientes:'SOCIO', pagos_banco:'VENDEDOR', productos:'VENDEDOR', catalogo:'VENDEDOR', metodos:'VENDEDOR', equivalencias:'VENDEDOR', cuentas:'VENDEDOR',
   tareas:'VENDEDOR',
   producto:'SOCIO',
   ventas:'SOCIO', socios:'SOCIO', cxp:'SOCIO', cliente_stats:'SOCIO', compras:'SOCIO', diag:'SOCIO',
@@ -664,7 +672,7 @@ var PERMISOS_POST = {
   tarea_marcar:'VENDEDOR', tarea_propia:'VENDEDOR', demanda_estado:'VENDEDOR',
   costeo:'SOCIO', cxp_abono:'SOCIO', conteo_revision:'SOCIO', devolucion:'SOCIO', apartado_cerrar:'SOCIO',
   tasa:'SOCIO', bcv_auto:'SOCIO', socio:'SOCIO', liquidar_aliado:'SOCIO', precio:'SOCIO', tarea_def:'SOCIO',
-  anular_venta:'SOCIO', mov_cuenta:'SOCIO', anular_gasto:'SOCIO', consumo_interno:'SOCIO', region:'SOCIO', cambiar_cliente:'SOCIO', cashea_config:'SOCIO', pago_banco_estado:'SOCIO'
+  anular_venta:'SOCIO', mov_cuenta:'SOCIO', anular_gasto:'SOCIO', consumo_interno:'SOCIO', region:'SOCIO', cambiar_cliente:'SOCIO', cashea_config:'SOCIO', cashea_liquidar:'SOCIO', pago_banco_estado:'SOCIO'
 };
 
 // v27 — FALLA CERRADO (auditoria #5). Antes, si CONFIG no se podia leer o B15 traia cualquier cosa
@@ -894,7 +902,7 @@ function claveDePost_(data) {
 // OJO: esta constante es lo que ven las apps en el menu. Se habia quedado en v21.4 mientras el
 // encabezado ya decia v24, asi que el sello de version — que existe justamente para saber si lo
 // desplegado es lo que crees — estaba mintiendo. Cada version nueva se cambia AQUI tambien.
-var VERSION_SCRIPT = 'v28.29';
+var VERSION_SCRIPT = 'v28.30';
 
 function json_(obj) {
   // La version viaja en cada respuesta: es la forma rapida de saber si lo desplegado es lo que crees
@@ -1128,6 +1136,7 @@ function rutearGet_(e) {
   if (e.parameter.action === 'pagos_banco') {
     return json_(pagosBanco_(SpreadsheetApp.getActiveSpreadsheet(), e.parameter.todos === '1', usr && usr.rol === 'SOCIO'));
   }
+  if (e.parameter.action === 'cashea_pendientes') return json_(casheaPendientes_(ss, e.parameter.fecha));
   if (e.parameter.action === 'tasas_dia') {
     return json_(tasasDia_(SpreadsheetApp.getActiveSpreadsheet(), e.parameter.fecha || ''));
   }
@@ -1415,6 +1424,10 @@ function doPost(e) {
     if (data.tipo === 'pago_banco_estado') {
       var lkP = LockService.getScriptLock(); lkP.waitLock(10000);
       try { return json_(cambiarEstadoPagoBanco_(ss, data, quien)); } finally { SpreadsheetApp.flush(); lkP.releaseLock(); }
+    }
+    if (data.tipo === 'cashea_liquidar') {
+      var lkCL = LockService.getScriptLock(); lkCL.waitLock(20000);
+      try { return json_(casheaLiquidar_(ss, data, quien)); } finally { SpreadsheetApp.flush(); lkCL.releaseLock(); }
     }
     if (data.tipo === 'cashea_config') {
       var rc = Number(data.recargo), ct = Number(data.comTotal), cf = Number(data.comFin);
@@ -2114,6 +2127,100 @@ function cambiarEstadoPagoBanco_(ss, d, quien) {
     return {ok:true, tipo:'pago_banco_estado', id:d.id, estado:est};
   }
   throw new Error('No encontre ese pago');
+}
+
+// v28.30 — LIQUIDACION DE CASHEA. Cashea paga a los ~7 dias, en Bs, el financiado de cada venta en $ BCV a la BCV
+// del DIA DEL PAGO, menos: servicio (CONFIG B19, 4%) sobre el TOTAL + IVA 16% de ese servicio - retencion ISLR 2%
+// del servicio + Express (CONFIG B20, 4%) sobre el FINANCIADO. Formula comprobada al centavo con las liquidaciones
+// del 10/11 (NE-398) y del 17/11 (NE-432, 454 y 458). En Dinero, la cuenta Cashea tiene lo financiado en Bs a la
+// BCV de cada venta; al liquidar, sale de Cashea lo que llego (TRASPASO a la cuenta del banco) y la diferencia
+// (comisiones menos lo que se gana por la subida del BCV) como AJUSTE. Las ventas liquidadas quedan en CASHEA_LIQ.
+var CL_COLS = ['ID','FECHA','HORA','REFERENCIA','CUENTA','MONTO_BS','BCV_PAGO','MONTO_USD_BCV','ESPERADO_BS','AJUSTE_BS',
+               'COMISION_USD_BCV','VENTAS','NOTAS_NUM','REGISTRADO_POR','NOTAS'];
+function hojaCasheaLiq_(ss) { return hojaAp_(ss, 'CASHEA_LIQ', CL_COLS); }
+function casheaLiquidadas_(ss) {
+  var sh = hojaCasheaLiq_(ss), ids = {}, refs = {}, lista = [];
+  if (sh.getLastRow() >= 2) sh.getRange(2, 1, sh.getLastRow() - 1, CL_COLS.length).getValues().forEach(function(r) {
+    if (!String(r[0] || '').trim()) return;
+    String(r[11] || '').split(',').forEach(function(x) { x = x.trim(); if (x) ids[x] = String(r[0]); });
+    var ref = String(r[3] || '').replace(/^0+/, '').trim(); if (ref) refs[ref] = String(r[0]);
+    lista.push({id:String(r[0]), fecha:iso_(r[1]) || '', referencia:String(r[3] || ''), cuenta:String(r[4] || ''), montoBs:Number(r[5]) || 0,
+                bcv:Number(r[6]) || 0, montoUSD:Number(r[7]) || 0, ajusteBs:Number(r[9]) || 0, notas:String(r[12] || '')});
+  });
+  return {ids:ids, refs:refs, lista:lista};
+}
+function casheaCalculo_(r, ct, cf) {
+  var casBs = 0;
+  [[7, 9], [10, 12], [13, 15]].forEach(function(p) { if (String(r[p[0]] || '').trim().toUpperCase() === 'CASHEA') casBs += Number(r[p[1]]) || 0; });
+  if (!(casBs > 0)) return null;
+  var bcv = Number(r[34]) || 0, totBs = Number(r[6]) || 0;
+  if (!(bcv > 0)) return null;
+  var fin = Number(r[41]) > 0 ? Number(r[41]) : casBs / bcv, tot = totBs / bcv;
+  var serv = tot * ct / 100, iva = serv * 0.16, islr = serv * 0.02, expr = fin * cf / 100;
+  var com = serv + iva - islr + expr;
+  return {casheaBs:round2_(casBs), bcvVenta:bcv, totalBCV:round2_(tot), finBCV:round2_(fin), servicio:round2_(serv), iva:round2_(iva),
+          islr:round2_(islr), express:round2_(expr), comisionBCV:round2_(com), netoBCV:Math.round((fin - com) * 10000) / 10000};
+}
+function casheaPendientes_(ss, fecha) {
+  var cfg = leerConfig_(ss), ct = cfg.casheaComTotal, cf = cfg.casheaComFin;
+  var liq = casheaLiquidadas_(ss), out = [];
+  var sh = ss.getSheetByName('VENTAS');
+  if (sh && sh.getLastRow() >= 2) sh.getRange(2, 1, sh.getLastRow() - 1, 42).getValues().forEach(function(r) {
+    var id = String(r[23] || '').trim(); if (!id || liq.ids[id]) return;
+    var c = casheaCalculo_(r, ct, cf); if (!c) return;
+    c.id = id; c.nota = String(r[24] || ''); c.fecha = iso_(r[0]) || ''; c.cliente = String(r[25] || '');
+    out.push(c);
+  });
+  out.sort(function(a, b) { return a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : 0; });
+  var bcv = 0;
+  try { if (fecha) bcv = tasasDia_(ss, fecha).bcv; } catch (e) {}
+  return {ok:true, pendientes:out, bcv:bcv, comTotal:ct, comFin:cf, liquidaciones:liq.lista.slice(-8).reverse()};
+}
+function casheaLiquidar_(ss, d, quien) {
+  var idL = String(d.idLiq || '').trim(); if (!idL) throw rechazo_('Falta el identificador de la liquidacion');
+  var ref = String(d.referencia || '').trim(); if (!ref) throw rechazo_('Escribe la referencia del pago de Cashea');
+  var monto = round2_(Number(d.montoBs)); if (!(monto > 0)) throw rechazo_('Monto recibido invalido');
+  var bcv = Number(d.bcv); if (!(bcv > 0)) throw rechazo_('Falta la BCV del dia del pago');
+  var f = iso_(d.fecha); if (!f) throw rechazo_('Fecha invalida');
+  if (f > iso_(new Date())) throw rechazo_('La fecha del pago no puede ser futura');
+  var cuenta = String(d.cuenta || '').trim(); if (!cuenta) throw rechazo_('Indica a que cuenta llego el pago');
+  var liq = casheaLiquidadas_(ss);
+  // Reintento (se perdio la respuesta): mismo id o misma referencia -> ya estaba, no se duplica.
+  var refN = ref.replace(/^0+/, '');
+  var previa = liq.lista.filter(function(x) { return x.id === idL || (refN && x.id === liq.refs[refN]); })[0];
+  if (previa) return {ok:true, tipo:'cashea_liquidar', repetida:true, id:previa.id, notas:previa.notas, montoBs:previa.montoBs};
+  var ids = (d.ventas || []).map(function(x) { return String(x).trim(); }).filter(String);
+  if (!ids.length) throw rechazo_('Marca las ventas que cubre este pago');
+  var pend = {};
+  casheaPendientes_(ss).pendientes.forEach(function(p) { pend[p.id] = p; });
+  var sel = ids.map(function(id) {
+    if (liq.ids[id]) throw rechazo_('La venta ' + id + ' ya fue liquidada en ' + liq.ids[id]);
+    if (!pend[id]) throw rechazo_('La venta ' + id + ' no esta pendiente con Cashea');
+    return pend[id];
+  });
+  var esperado = 0, netoUSD = 0, comUSD = 0;
+  sel.forEach(function(p) { esperado += p.casheaBs; netoUSD += p.netoBCV; comUSD += p.comisionBCV; });
+  esperado = round2_(esperado);
+  var ajuste = round2_(esperado - monto);
+  var notasNum = sel.map(function(p) { return p.nota; }).join(',');
+  var lista = sel.map(function(p) { return 'NE-' + p.nota; }).join(', ');
+  var indexBs = round2_(sel.reduce(function(a, p) { return a + p.finBCV * bcv; }, 0) - esperado);
+  var nota1 = 'Liquidacion Cashea ' + lista + '. Ref ' + ref + '. $' + (monto / bcv).toFixed(2) + ' BCV a ' + bcv + '.' +
+              (d.notas ? ' ' + String(d.notas).slice(0, 100) : '');
+  var nota2 = 'Cierre ' + lista + ': se esperaban Bs ' + esperado.toFixed(2) + ', Cashea pago ' + monto.toFixed(2) + '. Comisiones $' +
+              comUSD.toFixed(2) + ' BCV (Bs ' + (comUSD * bcv).toFixed(2) + ')' +
+              (indexBs ? (indexBs > 0 ? ' menos' : ' mas') + ' efecto del BCV entre la venta y el pago (Bs ' + Math.abs(indexBs).toFixed(2) + ')' : '') + '.';
+  var hora = d.hora || Utilities.formatDate(new Date(), TZ_VE, 'HH:mm');
+  movCuenta_(ss, {tipoMov:'TRASPASO', idMov:idL + '-T', origen:'Cashea', destino:cuenta, montoOrigen:monto, montoDestino:monto,
+                  fecha:d.fecha, hora:hora, notas:nota1}, quien);
+  if (ajuste > 0.004) movCuenta_(ss, {tipoMov:'AJUSTE_SALE', idMov:idL + '-A', origen:'Cashea', montoOrigen:ajuste, fecha:d.fecha, hora:hora, notas:nota2}, quien);
+  else if (ajuste < -0.004) movCuenta_(ss, {tipoMov:'AJUSTE_ENTRA', idMov:idL + '-A', destino:'Cashea', montoDestino:-ajuste, fecha:d.fecha, hora:hora, notas:nota2}, quien);
+  var sh = hojaCasheaLiq_(ss);
+  sh.appendRow([idL, fechaVE_(d.fecha), hora, ref, cuenta, monto, bcv, round2_(monto / bcv), esperado, ajuste, round2_(comUSD),
+                ids.join(','), notasNum, (quien && quien.nombre) || '', String(d.notas || '').slice(0, 200)]);
+  formatoFecha_(sh, sh.getLastRow(), 2);
+  return {ok:true, tipo:'cashea_liquidar', repetida:false, id:idL, montoBs:monto, esperadoBs:esperado, ajusteBs:ajuste,
+          calculadoBs:round2_(netoUSD * bcv), notas:notasNum};
 }
 
 // v28.24 — tasa de trabajo y BCV vigentes un dia (AAAA-MM-DD). tasa = la ultima fijada hasta el cierre de ese dia;

@@ -1,7 +1,11 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_dinero.html
-  VERSION: v1.8 (2026-11-17) | build 2026-11-21.1 | requiere Apps Script v28.28
+  VERSION: v1.9 (2026-11-22) | build 2026-11-22.1 | requiere Apps Script v28.30
+  v1.9: LIQUIDAR CASHEA. Boton en la cuenta Cashea: fecha, monto, referencia y cuenta del recibo; trae la BCV del dia
+  y las ventas pendientes con su calculo (financiado, comisiones, neto) y marca solas las que cuadran con el monto.
+  Registra el traspaso Cashea -> banco y el ajuste. Reintentar no duplica.
+  VERSION anterior: v1.8 (2026-11-17) | build 2026-11-21.1 | requiere Apps Script v28.28
   v1.8: si la liquidacion ya estaba hecha (respuesta perdida y reintento) lo dice claro; si falla la conexion,
   recarga la lista para ver si quedo.
   VERSION anterior: v1.7 (2026-11-17) | build 2026-11-17.4 | requiere Apps Script v28.27
@@ -401,6 +405,30 @@ select option{background:#1E1E1E;color:var(--ink)}
   </div>
 </div>
 
+<div class="overlay" id="casOv" onclick="if(event.target===this)cerrarCashea()">
+  <div class="sheet">
+    <div class="sheet-title">Liquidar Cashea</div>
+    <div class="sheet-sub">Copia los datos del recibo del banco. El sistema busca que ventas cubre el pago.</div>
+    <div class="row2" style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      <div class="field"><label>Fecha del pago *</label><input type="date" id="caFecha" onchange="casFecha()"></div>
+      <div class="field"><label>Hora</label><input type="time" id="caHora"></div>
+    </div>
+    <div class="row2" style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      <div class="field"><label>Monto recibido (Bs) *</label><input type="text" inputmode="decimal" id="caMonto" placeholder="80.759,78" oninput="casAuto()"></div>
+      <div class="field"><label>Referencia *</label><input type="text" id="caRef" placeholder="00475203"></div>
+    </div>
+    <div class="row2" style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      <div class="field"><label>Llego a *</label><select id="caCta"></select></div>
+      <div class="field"><label>BCV del dia del pago *</label><input type="text" inputmode="decimal" id="caBcv" oninput="casAuto()"></div>
+    </div>
+    <div id="caLista"><div class="cart-empty">Cargando ventas pendientes...</div></div>
+    <div class="aviso" id="caRes" style="margin:10px 0"></div>
+    <div class="field"><label>Notas</label><input type="text" id="caNotas" placeholder="Opcional"></div>
+    <button class="tab on" id="caBtn" style="width:100%;padding:12px;margin-top:6px" onclick="guardarCashea()">Registrar liquidacion</button>
+    <button class="tab" style="width:100%;padding:12px;margin-top:8px" onclick="cerrarCashea()">Cancelar</button>
+  </div>
+</div>
+
 <div class="overlay" id="arqOv" onclick="if(event.target===this)cerrarArqueo()">
   <div class="sheet">
     <div class="sheet-title" id="arqTit">Arqueo</div>
@@ -496,11 +524,11 @@ select option{background:#1E1E1E;color:var(--ink)}
 </div>
 
 
-<script src="boparts_sesion.js?v=2026-11-21.1"></script>
+<script src="boparts_sesion.js?v=2026-11-22.1"></script>
 <script>
 var SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
 var SCRIPT_URL_SESION = SCRIPT_URL;
-var APP_VERSION = 'v1.8';
+var APP_VERSION = 'v1.9';
 var VER_SCRIPT = '?';
 var periodo = 'mes', DIN = null, CXP = [], LIQ = [], liqTasa = 0, SALIDAS = [], CUENTAS = [];
 var VER_PAGADAS = {}, FACT_ABIERTA = '', PAGO_PEND = {}, ID_MOV = '', ARQ = null, FILTRO_CTA = '';
@@ -659,6 +687,7 @@ function pintarTodo() {
       '<div style="font-size:11px;color:var(--ink-muted)">Entro<b style="display:block;font-size:13px;color:var(--green)">' + enMon(c.entra, c.moneda) + '</b></div>' +
       '<div style="font-size:11px;color:var(--ink-muted)">Salio<b style="display:block;font-size:13px;color:var(--red)">' + enMon(c.sale, c.moneda) + '</b></div>' +
       '<div style="font-size:11px;color:var(--ink-muted)">Comision<b style="display:block;font-size:13px;color:var(--ink)">' + enMon(c.comision, c.moneda) + '</b></div></div>' +
+      (c.activa && c.porCobrar ? '<button class="tab on" style="width:100%;margin-top:8px;padding:10px" onclick="abrirCashea()">Liquidar Cashea (llego un pago)</button>' : '') +
       (c.activa ? '<div style="display:flex;gap:8px;margin-top:8px">' +
         (tieneSaldo ? '<button class="tab" style="flex:1" onclick="abrirArqueo(\'' + escAttr(c.cuenta) + '\')">Arqueo</button>' : '') +
         '<button class="tab' + (tieneSaldo ? '' : ' on') + '" style="flex:1" onclick="abrirInicial(\'' + escAttr(c.cuenta) + '\')">' + (tieneSaldo ? 'Nuevo saldo inicial' : 'Cargar saldo inicial') + '</button>' +
@@ -1230,6 +1259,136 @@ function enviarLiq(a, pago) {
       // v1.8: si se perdio la respuesta, la liquidacion pudo quedar hecha. Se recarga para que se vea.
       toast('No se pudo confirmar (' + e.message + '). Revisa la lista: si ya no aparece pendiente, SI quedo liquidado.', 'err');
       cerrarLiq(); cargarLiquidacion(); cargarDinero();
+    });
+}
+
+/* ---------- v1.9 LIQUIDAR CASHEA ----------
+   Cashea paga el financiado de cada venta en $ BCV a la BCV del DIA DEL PAGO, menos sus comisiones. Aqui se pone
+   lo que dice el recibo; el sistema propone que ventas cubre (la combinacion que mas se acerca al monto), muestra
+   el calculo por venta y registra el traspaso Cashea -> banco y el ajuste por la diferencia. */
+var CAS = null;
+function numVE(v) {
+  var t = String(v == null ? '' : v).trim().replace(/\s/g, '').replace(/^Bs\.?/i, '');
+  if (t.indexOf(',') >= 0) t = t.replace(/\./g, '').replace(',', '.');
+  var n = parseFloat(t); return isNaN(n) ? 0 : n;
+}
+function abrirCashea() {
+  CAS = {pend:[], sel:{}, manual:false};
+  var d = new Date();
+  document.getElementById('caFecha').value = iso(d);
+  document.getElementById('caHora').value = '';
+  ['caMonto', 'caRef', 'caBcv', 'caNotas'].forEach(function(id) { document.getElementById(id).value = ''; });
+  var bancos = (DIN && DIN.cuentas || []).filter(function(c) { return c.activa && c.moneda === 'BS' && !c.porCobrar && !c.de; });
+  var ult = ''; try { ult = localStorage.getItem('boparts_cashea_cta') || 'Bancrecer'; } catch (e) { ult = 'Bancrecer'; }
+  document.getElementById('caCta').innerHTML = bancos.map(function(c) { return '<option' + (c.cuenta === ult ? ' selected' : '') + '>' + escHtml(c.cuenta) + '</option>'; }).join('');
+  document.getElementById('caLista').innerHTML = '<div class="cart-empty">Cargando ventas pendientes...</div>';
+  document.getElementById('caRes').innerHTML = '';
+  document.getElementById('casOv').classList.add('open');
+  casFecha();
+}
+function cerrarCashea() { document.getElementById('casOv').classList.remove('open'); CAS = null; }
+function casFecha() {
+  if (!CAS) return;
+  var f = document.getElementById('caFecha').value;
+  fetch(SCRIPT_URL + '?action=cashea_pendientes&fecha=' + encodeURIComponent(f) + '&t=' + Date.now())
+    .then(leerJSON)
+    .then(function(d) {
+      if (!CAS) return;
+      if (!d || !d.ok) throw new Error(d && d.error ? d.error : 'sin datos');
+      CAS.pend = d.pendientes || []; CAS.liqs = d.liquidaciones || [];
+      if (d.bcv) document.getElementById('caBcv').value = String(d.bcv).replace('.', ',');
+      casAuto();
+    })
+    .catch(function(e) {
+      if (e && e.message === 'SESION') return;
+      document.getElementById('caLista').innerHTML = '<div class="cart-empty" style="color:var(--red)">No se pudo cargar: ' + escHtml(e.message) +
+        '<br><span style="font-size:12px">Si dice "accion desconocida", falta desplegar Apps Script v28.30.</span></div>';
+    });
+}
+// Propone la combinacion de ventas cuyo neto a la BCV del pago mas se acerca al monto. Con empate, las mas viejas.
+function casAuto() {
+  if (!CAS) return;
+  var monto = numVE(document.getElementById('caMonto').value), bcv = numVE(document.getElementById('caBcv').value), P = CAS.pend;
+  if (!CAS.manual && monto > 0 && bcv > 0 && P.length) {
+    var n = Math.min(P.length, 16), mejor = null;
+    for (var m = 1; m < (1 << n); m++) {
+      var t = 0, ult = 0;
+      for (var i = 0; i < n; i++) if (m & (1 << i)) { t += P[i].netoBCV * bcv; ult = i; }
+      var dif = Math.abs(t - monto);
+      if (!mejor || dif < mejor.dif - 0.5 || (Math.abs(dif - mejor.dif) <= 0.5 && ult < mejor.ult)) mejor = {m:m, dif:dif, ult:ult};
+    }
+    CAS.sel = {};
+    for (var j = 0; j < n; j++) if (mejor.m & (1 << j)) CAS.sel[P[j].id] = true;
+  }
+  pintarCashea();
+}
+function casToggle(id) { if (!CAS) return; CAS.manual = true; CAS.sel[id] = !CAS.sel[id]; pintarCashea(); }
+function pintarCashea() {
+  var P = CAS.pend, bcv = numVE(document.getElementById('caBcv').value), monto = numVE(document.getElementById('caMonto').value);
+  if (!P.length) {
+    document.getElementById('caLista').innerHTML = '<div class="cart-empty">No hay ventas Cashea pendientes de liquidar.</div>';
+    document.getElementById('caRes').innerHTML = ''; return;
+  }
+  var h = '<table class="tbl"><tr><th></th><th>Venta</th><th class="n">Financ. $</th><th class="n">Comis. $</th><th class="n">Neto ' + (bcv ? 'Bs' : '$') + '</th></tr>';
+  var sumNeto = 0, sumEsp = 0, sumCom = 0, sumFin = 0, k = 0;
+  P.forEach(function(p) {
+    var on = !!CAS.sel[p.id], netoBs = bcv ? p.netoBCV * bcv : 0;
+    if (on) { sumNeto += netoBs; sumEsp += p.casheaBs; sumCom += p.comisionBCV; sumFin += p.finBCV; k++; }
+    h += '<tr style="' + (on ? '' : 'opacity:.5') + ';cursor:pointer" onclick="casToggle(\'' + escAttr(p.id) + '\')">' +
+      '<td><input type="checkbox"' + (on ? ' checked' : '') + ' style="pointer-events:none"></td>' +
+      '<td><b>NE-' + escHtml(p.nota) + '</b> · ' + fechaES(p.fecha) + '<br><span style="font-size:11px;color:var(--ink-muted)">' + escHtml(p.cliente) +
+        ' · total $' + p.totalBCV.toFixed(2) + ' BCV</span></td>' +
+      '<td class="n">' + p.finBCV.toFixed(2) + '</td>' +
+      '<td class="n" title="servicio ' + p.servicio + ' + IVA ' + p.iva + ' - ISLR ' + p.islr + ' + express ' + p.express + '">' + p.comisionBCV.toFixed(2) + '</td>' +
+      '<td class="n">' + (bcv ? bs(netoBs) : '$' + p.netoBCV.toFixed(2)) + '</td></tr>';
+  });
+  h += '</table><div style="font-size:11px;color:var(--ink-muted);margin-top:4px">Toca una venta para marcarla o desmarcarla. Montos en $ BCV.</div>';
+  document.getElementById('caLista').innerHTML = h;
+  var r = '';
+  if (!k) r = 'Marca las ventas que cubre el pago.';
+  else {
+    var dif = monto ? monto - sumNeto : 0, tol = Math.max(5, monto * 0.001);
+    r = k + ' venta(s). Cashea debia pagar <b>' + (bcv ? bs(sumNeto) : '?') + '</b> ($' + (sumFin - sumCom).toFixed(2) + ' BCV)';
+    if (monto && bcv) r += Math.abs(dif) <= tol
+      ? ' · <b style="color:var(--green)">cuadra</b>' + (Math.abs(dif) >= 0.01 ? ' (dif. ' + bs(dif) + ', redondeo)' : '')
+      : ' · <b style="color:var(--red)">diferencia ' + bs(dif) + '</b>: revisa monto, BCV o ventas marcadas';
+    r += '<br>En Dinero se esperaban ' + bs(sumEsp) + ' (financiado a la BCV de cada venta).';
+    if (monto) r += ' Sale de Cashea: ' + bs(monto) + ' a ' + escHtml(document.getElementById('caCta').value) + ' + ajuste ' + bs(sumEsp - monto) +
+                    ' (comisiones $' + sumCom.toFixed(2) + ' BCV menos la subida del BCV).';
+  }
+  document.getElementById('caRes').innerHTML = r;
+}
+function guardarCashea() {
+  if (!CAS) return;
+  var monto = numVE(document.getElementById('caMonto').value), bcv = numVE(document.getElementById('caBcv').value);
+  var ref = document.getElementById('caRef').value.trim(), cta = document.getElementById('caCta').value, f = document.getElementById('caFecha').value;
+  var ids = CAS.pend.filter(function(p) { return CAS.sel[p.id]; }).map(function(p) { return p.id; });
+  if (!f) { toast('Falta la fecha del pago', 'err'); return; }
+  if (!(monto > 0)) { toast('Escribe el monto que llego', 'err'); return; }
+  if (!ref) { toast('Escribe la referencia del recibo', 'err'); return; }
+  if (!(bcv > 0)) { toast('Falta la BCV del dia del pago', 'err'); return; }
+  if (!ids.length) { toast('Marca las ventas que cubre el pago', 'err'); return; }
+  var sumNeto = CAS.pend.filter(function(p) { return CAS.sel[p.id]; }).reduce(function(a, p) { return a + p.netoBCV * bcv; }, 0);
+  if (Math.abs(monto - sumNeto) > Math.max(5, monto * 0.001) &&
+      !confirm('El pago no cuadra con las ventas marcadas (diferencia ' + bs(monto - sumNeto) + ').\n\nSi Cashea cobro algo distinto, la diferencia queda como ajuste. Registrar igual?')) return;
+  try { localStorage.setItem('boparts_cashea_cta', cta); } catch (e) {}
+  if (!CAS.idLiq) CAS.idLiq = nuevoId('LQC');
+  var btn = document.getElementById('caBtn'); btn.disabled = true; btn.textContent = 'Registrando...';
+  var hora = document.getElementById('caHora').value;
+  post({tipo:'cashea_liquidar', idLiq:CAS.idLiq, fecha:f, hora:hora, referencia:ref, montoBs:monto, bcv:bcv, cuenta:cta, ventas:ids,
+        notas:document.getElementById('caNotas').value.trim()})
+    .then(function(d) {
+      btn.disabled = false; btn.textContent = 'Registrar liquidacion';
+      if (!d || !d.ok) throw new Error(d && d.error ? d.error : 'no se registro');
+      cerrarCashea();
+      if (d.repetida) toast('Ese pago YA estaba registrado (' + escHtml(d.id) + ', NE ' + escHtml(d.notas) + '). No se duplico.', 'ok');
+      else toast('Cashea liquidado: NE ' + d.notas + ' · ' + bs(d.montoBs) + ' a ' + cta + (d.ajusteBs ? ' · ajuste ' + bs(d.ajusteBs) : ''), 'ok');
+      cargarDinero();
+    })
+    .catch(function(e) {
+      btn.disabled = false; btn.textContent = 'Registrar liquidacion';
+      if (e && e.message === 'SESION') return;
+      toast('No se pudo registrar: ' + e.message + '. Si fue la conexion, vuelve a tocar el boton: no se duplica.', 'err');
     });
 }
 
