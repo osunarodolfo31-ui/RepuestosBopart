@@ -1,5 +1,11 @@
 # CHANGELOG — Repuesto BoParts
 
+## Apps Script v28.32 + sesion.js — build 2026-11-22.3 — medicion de tiempos (fase 0)
+
+- Cada llamada anota en la hoja TIEMPOS cuanto tardo el servidor (SERVIDOR) y cuanto espero el telefono (CLIENTE:
+  red + arranque de Google + servidor), con accion, tamano de la respuesta y usuario. Ejecutar instalarMedicion()
+  una vez en el editor de Apps Script.
+
 ## Apps Script v28.31 + compras v3.4 + dinero v1.10 + gerencia v4.3 — build 2026-11-22.2 — recepcion mas comoda
 
 - Recepcion: el producto que se agrega queda de primero (si ya estaba, suma 1 y sube); cada linea con su #. A la

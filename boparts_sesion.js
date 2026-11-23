@@ -183,7 +183,26 @@ function revisarSesion(alTener) {
   if (window.__tokenEnFetch) return;
   window.__tokenEnFetch = true;
   var original = window.fetch.bind(window);
+  // v28.32 — MEDICION (fase 0): cuanto espera el telefono cada llamada al script (red + arranque de Google +
+  // servidor). Se guarda aqui y viaja en la llamada siguiente como _ct; el servidor lo anota en la hoja TIEMPOS.
+  function leerCT() { try { return JSON.parse(localStorage.getItem('boparts_ct') || '[]') || []; } catch (e) { return []; } }
+  function guardarCT(l) { try { localStorage.setItem('boparts_ct', JSON.stringify(l.slice(-10))); } catch (e) {} }
+  function sacarCT() { var l = leerCT(); guardarCT([]); return l.map(function(x) { return x.join(':'); }).join(';'); }
   window.fetch = function(u, o) {
+    var medir = null;
+    try {
+      if (typeof u === 'string' && u.indexOf(SCRIPT_URL_SESION) === 0) {
+        var esPost = o && o.body && String(o.method || '').toUpperCase() === 'POST', acc = '?';
+        if (esPost) { try { var bb = JSON.parse(o.body); acc = bb.tipo || '?'; } catch (e) {} }
+        else { var m = /[?&]action=([^&]+)/.exec(u); acc = m ? decodeURIComponent(m[1]) : '?'; }
+        var ct = sacarCT();
+        if (ct) {
+          if (esPost) { try { var b0 = JSON.parse(o.body); b0._ct = ct; var o1 = {}; for (var k0 in o) o1[k0] = o[k0]; o1.body = JSON.stringify(b0); o = o1; } catch (e) {} }
+          else u += (u.indexOf('?') < 0 ? '?' : '&') + '_ct=' + encodeURIComponent(ct);
+        }
+        medir = {acc:String(acc).replace(/[:;]/g, '').slice(0, 40), met:esPost ? 'POST' : 'GET', t0:Date.now()};
+      }
+    } catch (e) {}
     try {
       // SCRIPT_URL_SESION se lee AQUI, no al instalar: cuando este modulo corre todavia no esta asignada.
       if (typeof u === 'string' && u.indexOf(SCRIPT_URL_SESION) === 0) {
@@ -202,7 +221,20 @@ function revisarSesion(alTener) {
         }
       }
     } catch (e) {}
-    return original(u, o);
+    var pr = original(u, o);
+    if (!medir) return pr;
+    return pr.then(function(r) {
+      try {
+        // El tiempo hasta tener el cuerpo completo: se lee una copia para no tocar la respuesta original.
+        r.clone().text().then(function(t) {
+          var l = leerCT(); l.push([medir.acc, Date.now() - medir.t0, t.length, medir.met, /^\{"ok":true/.test(t) ? 'SI' : 'NO']); guardarCT(l);
+        }).catch(function() {});
+      } catch (e) {}
+      return r;
+    }, function(err) {
+      try { var l = leerCT(); l.push([medir.acc, Date.now() - medir.t0, 0, medir.met, 'ERROR']); guardarCT(l); } catch (e) {}
+      throw err;
+    });
   };
 })();
 
@@ -397,7 +429,7 @@ if (document.readyState === 'loading') document.addEventListener('DOMContentLoad
    version.json dice cual es la buena, y si no coinciden aparece una barra con un boton que borra la
    cache y recarga. Nadie tiene que saber que es "borrar cache".
    Ademas, todo enlace entre pantallas lleva ?v=BUILD: moverse por el menu ya no trae copias viejas. */
-var BUILD = '2026-11-22.2';
+var BUILD = '2026-11-22.3';
 (function() {
   var intentos = 0;
   function sellarEnlaces() {

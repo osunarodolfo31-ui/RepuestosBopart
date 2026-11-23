@@ -1,6 +1,12 @@
 /**
  * Repuesto BoParts — Code.gs
- * VERSION: v28.31 (2026-11-22) | compras con varias fotos de factura
+ * VERSION: v28.32 (2026-11-22) | medicion de tiempos (fase 0)
+ *
+ * v28.32 — MEDICION. doGet/doPost anotan cuanto tarda cada accion por dentro (SERVIDOR) y cuanto espero el telefono
+ *   (CLIENTE, lo manda la app en la llamada siguiente como _ct). Van a la hoja TIEMPOS: FECHA_HORA, ORIGEN, METODO,
+ *   ACCION, MS, OK, BYTES, USUARIO. Ejecutar instalarMedicion() una vez (vuelca cada 10 min). No cambia respuestas.
+ *
+ * VERSION anterior: v28.31 (2026-11-22) | compras con varias fotos de factura
  *
  * v28.31 — COMPRAS FOTO_FACTURA acepta varias fotos en la misma celda separadas por " | " (compras grandes). Se
  *   guardan y se devuelven solo las URLs de Cloudinary (fotosOk_). Las pantallas muestran "Foto 1, Foto 2...".
@@ -912,7 +918,7 @@ function claveDePost_(data) {
 // OJO: esta constante es lo que ven las apps en el menu. Se habia quedado en v21.4 mientras el
 // encabezado ya decia v24, asi que el sello de version — que existe justamente para saber si lo
 // desplegado es lo que crees — estaba mintiendo. Cada version nueva se cambia AQUI tambien.
-var VERSION_SCRIPT = 'v28.31';
+var VERSION_SCRIPT = 'v28.32';
 
 function json_(obj) {
   // La version viaja en cada respuesta: es la forma rapida de saber si lo desplegado es lo que crees
@@ -924,7 +930,76 @@ function json_(obj) {
 // ============================================================
 // GET
 // ============================================================
+// ============================================================
+// v28.32 — MEDICION DE TIEMPOS (fase 0). Cada llamada al script anota cuanto tardo POR DENTRO (SERVIDOR) y la app
+// manda en la llamada siguiente cuanto espero el telefono en la anterior (CLIENTE: red + arranque de Google +
+// servidor). Se juntan en memoria (CacheService) y se vuelcan a la hoja TIEMPOS cada 10 min (instalarMedicion)
+// o al pasar de 250 anotaciones. Anotar cuesta pocos milisegundos y nunca rompe una respuesta. Si dos llamadas
+// llegan a la vez se puede perder alguna anotacion: es una muestra, no contabilidad.
+var TIEMPOS_COLS = ['FECHA_HORA','ORIGEN','METODO','ACCION','MS','OK','BYTES','USUARIO'];
+function anotarTiempo_(lineas) {
+  try {
+    var c = CacheService.getScriptCache(), prev = c.get('TLOG') || '';
+    var todo = prev + (prev ? '\n' : '') + lineas.join('\n');
+    if (todo.split('\n').length >= 250 || todo.length > 90000) { c.remove('TLOG'); volcarTiempos_(todo); }
+    else c.put('TLOG', todo, 21600);
+  } catch (e) {}
+}
+function volcarTiempos_(texto) {
+  if (!texto) return;
+  var filas = texto.split('\n').map(function(l) { var p = l.split('\t'); while (p.length < TIEMPOS_COLS.length) p.push(''); return p.slice(0, TIEMPOS_COLS.length); })
+    .filter(function(p) { return p[0]; })
+    .map(function(p) { return [p[0], p[1], p[2], p[3], Number(p[4]) || 0, p[5], Number(p[6]) || 0, p[7]]; });
+  if (!filas.length) return;
+  var sh = hojaAp_(SpreadsheetApp.getActiveSpreadsheet(), 'TIEMPOS', TIEMPOS_COLS);
+  sh.getRange(sh.getLastRow() + 1, 1, filas.length, TIEMPOS_COLS.length).setValues(filas);
+}
+function volcarTiemposProgramado() {
+  var c = CacheService.getScriptCache(), t = c.get('TLOG');
+  if (t) { c.remove('TLOG'); volcarTiempos_(t); }
+}
+// Ejecutar UNA vez desde el editor de Apps Script (como instalarLectorBanco).
+function instalarMedicion() {
+  ScriptApp.getProjectTriggers().forEach(function(t) { if (t.getHandlerFunction() === 'volcarTiemposProgramado') ScriptApp.deleteTrigger(t); });
+  ScriptApp.newTrigger('volcarTiemposProgramado').timeBased().everyMinutes(10).create();
+  volcarTiemposProgramado();
+  return 'Medicion instalada: la hoja TIEMPOS se llena cada 10 minutos.';
+}
+function lineaTiempo_(origen, metodo, accion, ms, ok, bytes, usuario) {
+  return [Utilities.formatDate(new Date(), TZ_VE, 'yyyy-MM-dd HH:mm:ss'), origen, metodo, String(accion || '').slice(0, 40),
+          Math.round(ms), ok, bytes || 0, String(usuario || '').slice(0, 30)].join('\t').replace(/\n/g, ' ');
+}
+// _ct = "accion:ms:bytes;accion:ms:bytes" con lo que espero el telefono en sus llamadas anteriores
+function lineasCliente_(ct, metodo, usuario) {
+  return String(ct || '').split(';').slice(0, 10).map(function(x) {
+    var p = x.split(':'); var ms = Number(p[1]);
+    if (!p[0] || !(ms >= 0) || ms > 600000) return null;
+    return lineaTiempo_('CLIENTE', p[3] || metodo, p[0], ms, p[4] || '', Number(p[2]) || 0, usuario);
+  }).filter(Boolean);
+}
+function usuarioDeToken_(token) {
+  try { var v = CacheService.getScriptCache().get('ses_' + token); return v ? v.split('|')[0] : ''; } catch (e) { return ''; }
+}
+function medir_(metodo, accion, ct, token, fn) {
+  var t0 = Date.now(), out = fn();
+  try {
+    var txt = out && out.getContent ? out.getContent() : '', ok = /^\{"ok":true/.test(txt) ? 'SI' : 'NO';
+    var usr = usuarioDeToken_(token);
+    anotarTiempo_([lineaTiempo_('SERVIDOR', metodo, accion, Date.now() - t0, ok, txt.length, usr)].concat(lineasCliente_(ct, metodo, usr)));
+  } catch (e) {}
+  return out;
+}
 function doGet(e) {
+  var p = (e && e.parameter) || {};
+  return medir_('GET', p.action || '?', p._ct, p.token, function() { return doGetReal_(e); });
+}
+function doPost(e) {
+  var tipo = '?', ct = '', tok = '';
+  try { var d = JSON.parse(e.postData.contents); tipo = d.tipo || (d.codigo || d.row !== undefined ? 'fotos' : '?'); ct = d._ct; tok = d.token; } catch (x) {}
+  return medir_('POST', tipo, ct, tok, function() { return doPostReal_(e); });
+}
+
+function doGetReal_(e) {
   try {
     return rutearGet_(e);
   } catch (err) {
@@ -1167,7 +1242,7 @@ function leerTasa_(ss) {
 // ============================================================
 // POST
 // ============================================================
-function doPost(e) {
+function doPostReal_(e) {
   try {
     const data = JSON.parse(e.postData.contents);
     const ss = SpreadsheetApp.getActiveSpreadsheet();
