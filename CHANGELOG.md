@@ -1,5 +1,12 @@
 # CHANGELOG — Repuesto BoParts
 
+## Apps Script v28.31 + compras v3.4 + dinero v1.10 + gerencia v4.3 — build 2026-11-22.2 — recepcion mas comoda
+
+- Recepcion: el producto que se agrega queda de primero (si ya estaba, suma 1 y sube); cada linea con su #. A la
+  hoja y al costeo van en el orden de carga (el de la factura).
+- Varias fotos por factura (se guardan en la misma celda separadas por " | "); miniaturas con boton para quitar.
+  Costeo, Dinero y Gerencia muestran Foto 1, Foto 2...
+
 ## Apps Script v28.30 + dinero v1.9 — build 2026-11-22.1 — liquidar Cashea
 
 - Dinero: boton "Liquidar Cashea" en la cuenta Cashea. Fecha, monto, referencia y cuenta del recibo; trae la BCV del

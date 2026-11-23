@@ -1,7 +1,11 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_compras.html
-  VERSION: v3.3 (2026-11-21) | build 2026-11-22.1 | requiere Apps Script v28.29
+  VERSION: v3.4 (2026-11-22) | build 2026-11-22.2 | requiere Apps Script v28.31
+  v3.4: RECEPCION (pedido de Reinaldo). El producto que se agrega queda de PRIMERO y los demas bajan; si ya estaba,
+  suma 1 y sube. Cada linea lleva su numero (#1, #2...) del orden de carga. A la hoja y al costeo van en el orden de
+  la factura. VARIAS FOTOS de la factura: se eligen varias a la vez o una por una, con miniatura y boton para quitar.
+  VERSION anterior: v3.3 (2026-11-21) | build 2026-11-21.1 | requiere Apps Script v28.29
   v3.3: COSTEO MAS RAPIDO Y SIN PERDER LO ESCRITO.
   - Cada linea trae el ultimo costo pagado (proveedor y fecha) y el precio de venta vigente como sugerencia (borde
     punteado). Si el proveedor mantuvo el precio, no se toca. Si el costo cambia, el precio se recalcula con el margen
@@ -271,7 +275,8 @@ select option{background:#1E1E1E;color:var(--ink)}
       <button class="nbtn nbtn-s" onclick="document.getElementById('formProv').style.display='none'">Cancelar</button>
     </div>
     <label style="margin-top:6px">Foto de la factura</label>
-    <div class="fotobox" id="fotoBox">Tocar para fotografiar o elegir de galeria<input type="file" accept="image/*" onchange="subirFoto(this)"></div>
+    <div id="fotosLista"></div>
+    <div class="fotobox" id="fotoBox">Tocar para fotografiar o elegir de galeria (puedes elegir varias)<input type="file" accept="image/*" multiple onchange="subirFoto(this)"></div>
   </div>
 
   <div class="section">
@@ -401,7 +406,7 @@ select option{background:#1E1E1E;color:var(--ink)}
   </div>
 </div>
 
-<script src="boparts_sesion.js?v=2026-11-22.1"></script>
+<script src="boparts_sesion.js?v=2026-11-22.2"></script>
 <script>
 
 
@@ -416,9 +421,9 @@ function sellarVersion(d) {
 }
 function txt_(v) { return v == null ? '' : String(v); }
 var CLOUD = 'c7jufi9v', PRESET = 'boparts_productos';
-var APP_VERSION = 'v3.3';
+var APP_VERSION = 'v3.4';
 
-var PRODUCTS = [], PROVEEDORES = [], lineas = [], provSel = null, fotoUrl = '';
+var PRODUCTS = [], PROVEEDORES = [], lineas = [], provSel = null, fotoUrl = '', FOTOS = [], NUM_LINEA = 0;
 var idCompraActual = '';   // se mantiene entre reintentos de la MISMA recepcion
 document.getElementById('fechaHdr').textContent = APP_VERSION + ' · ' + new Date().toLocaleDateString('es-VE', {weekday:'long', day:'numeric', month:'long'});
 
@@ -508,21 +513,53 @@ function guardarProveedor() {
     .catch(function() { toast('Proveedor NO guardado (sin conexion)', 'err'); });
 }
 
+// v-fotos — la celda de foto de una compra puede traer varias URLs separadas por " | "
+function linksFotos(v, estilo) {
+  var us = String(v || '').split('|').map(function(x) { return x.trim(); }).filter(function(x) { return /^https:\/\//.test(x); });
+  if (!us.length) return '';
+  return us.map(function(u, i) { return '<a href="' + escHtml(u) + '" target="_blank" rel="noopener" style="' + (estilo || 'color:var(--brand)') + '">' +
+    (us.length === 1 ? 'Abrir foto de la factura' : 'Foto ' + (i + 1)) + '</a>'; }).join(' · ');
+}
 // ---- foto factura ----
+// v3.4 — VARIAS FOTOS por factura (compras grandes). Se pueden elegir varias a la vez o ir agregando una por una;
+// suben en orden y se guardan juntas (separadas por " | "). Cada una se puede quitar.
+var FOTO_INPUT = '<input type="file" accept="image/*" multiple onchange="subirFoto(this)">';
+function pintarFotos() {
+  var l = document.getElementById('fotosLista'), box = document.getElementById('fotoBox');
+  l.innerHTML = FOTOS.length ? '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px">' + FOTOS.map(function(u, i) {
+    return '<div style="position:relative;width:72px;height:72px;border-radius:8px;overflow:hidden;border:1px solid var(--border)">' +
+      '<a href="' + u + '" target="_blank"><img src="' + u.replace('/upload/', '/upload/c_fill,w_144,h_144/') + '" style="width:100%;height:100%;object-fit:cover"></a>' +
+      '<span style="position:absolute;left:4px;top:3px;font-size:10px;font-weight:700;background:rgba(0,0,0,.6);color:#fff;border-radius:4px;padding:0 4px">' + (i + 1) + '</span>' +
+      '<button onclick="quitarFoto(' + i + ')" style="position:absolute;right:2px;top:2px;width:22px;height:22px;border-radius:50%;border:none;background:rgba(0,0,0,.65);color:#fff;font-size:12px">&#x2715;</button></div>';
+  }).join('') + '</div>' : '';
+  fotoUrl = FOTOS.join(' | ');
+  box.className = 'fotobox' + (FOTOS.length ? ' ok' : '');
+  box.innerHTML = (FOTOS.length ? FOTOS.length + ' foto' + (FOTOS.length === 1 ? '' : 's') + ' ✓ · tocar para agregar otra pagina' : 'Tocar para fotografiar o elegir de galeria (puedes elegir varias)') + FOTO_INPUT;
+}
+function quitarFoto(i) { FOTOS.splice(i, 1); pintarFotos(); }
 function subirFoto(input) {
-  var file = input.files[0]; if (!file) return;
-  var box = document.getElementById('fotoBox'); box.textContent = 'Subiendo...';
-  comprimir(file, 1600, 0.8).then(function(blob) {
-    // Nombre unico por foto. Sin esto, Cloudinary reutiliza el nombre 'factura' y cada subida
-    // SOBREESCRIBE la anterior: todas las compras terminan apuntando a la misma imagen.
-    var st = Date.now() + '_' + Math.random().toString(36).substr(2, 5);
-    var fd = new FormData(); fd.append('file', blob, 'factura.jpg'); fd.append('upload_preset', PRESET);
-    fd.append('folder', 'boparts/facturas'); fd.append('public_id', 'boparts/facturas/factura_' + st);
-    return fetch('https://api.cloudinary.com/v1_1/' + CLOUD + '/image/upload', {method:'POST', body:fd}).then(leerJSON);
-  }).then(function(d) {
-    if (!d.secure_url) throw new Error('sin url');
-    fotoUrl = d.secure_url; box.className = 'fotobox ok'; box.innerHTML = 'Factura subida ✓ <a href="' + fotoUrl + '" target="_blank" style="color:var(--green)">ver</a><input type="file" accept="image/*" onchange="subirFoto(this)">';
-  }).catch(function() { box.className = 'fotobox'; box.innerHTML = 'Error al subir. Tocar para reintentar<input type="file" accept="image/*" onchange="subirFoto(this)">'; });
+  var files = Array.prototype.slice.call(input.files || []); if (!files.length) return;
+  var box = document.getElementById('fotoBox'), hechas = 0, malas = 0;
+  function una(k) {
+    if (k >= files.length) {
+      pintarFotos();
+      if (malas) toast(malas + ' foto(s) no subieron. Toca de nuevo para reintentarlas.', 'err');
+      return;
+    }
+    box.textContent = 'Subiendo ' + (k + 1) + ' de ' + files.length + '...';
+    comprimir(files[k], 1600, 0.8).then(function(blob) {
+      // Nombre unico por foto. Sin esto, Cloudinary reutiliza el nombre 'factura' y cada subida
+      // SOBREESCRIBE la anterior: todas las compras terminan apuntando a la misma imagen.
+      var st = Date.now() + '_' + Math.random().toString(36).substr(2, 5);
+      var fd = new FormData(); fd.append('file', blob, 'factura.jpg'); fd.append('upload_preset', PRESET);
+      fd.append('folder', 'boparts/facturas'); fd.append('public_id', 'boparts/facturas/factura_' + st);
+      return fetch('https://api.cloudinary.com/v1_1/' + CLOUD + '/image/upload', {method:'POST', body:fd}).then(leerJSON);
+    }).then(function(d) {
+      if (!d.secure_url) throw new Error('sin url');
+      FOTOS.push(d.secure_url); hechas++;
+    }).catch(function() { malas++; }).then(function() { una(k + 1); });
+  }
+  una(0);
 }
 function comprimir(file, maxPx, calidad) {
   return new Promise(function(res) {
@@ -554,8 +591,12 @@ prodSearch.addEventListener('input', function() {
 function addLinea(i) {
   var p = prodRes[i]; prodDrop.classList.remove('open'); prodSearch.value = '';
   var ex = lineas.filter(function(l) { return l.codigo === p.codigo && !l.nuevo; })[0];
-  if (ex) { ex.cantidad++; } else lineas.push({codigo:p.codigo, producto:p.producto, marca:p.marca, categoria:p.categoria, cantidad:1, nuevo:false});
+  // v3.4 — lo ultimo que se agrega queda ARRIBA (antes iba al final y con 10+ productos habia que bajar a buscarlo).
+  // Si ya estaba, suma 1 y tambien sube al primer lugar, para ver la cantidad sin buscarla.
+  if (ex) { ex.cantidad++; lineas.splice(lineas.indexOf(ex), 1); lineas.unshift(ex); }
+  else lineas.unshift({codigo:p.codigo, producto:p.producto, marca:p.marca, categoria:p.categoria, cantidad:1, nuevo:false, n:++NUM_LINEA});
   renderLineas();
+  prodSearch.focus();
 }
 function nuevoProd() {
   prodDrop.classList.remove('open');
@@ -567,13 +608,14 @@ function agregarNuevo() {
   var n = {producto:document.getElementById('npNombre').value.trim().toUpperCase(), codigo:document.getElementById('npCodigo').value.trim().toUpperCase(), marca:document.getElementById('npMarca').value.trim().toUpperCase(), categoria:document.getElementById('npCat').value.trim().toUpperCase(), cantidad:1, nuevo:true};
   if (!n.producto || !n.codigo) { toast('Nombre y codigo son obligatorios', 'err'); return; }
   if (PRODUCTS.some(function(p) { return p.codigo && p.codigo.toUpperCase() === n.codigo; })) { toast('Ese codigo ya existe en la lista. Buscalo en vez de crearlo.', 'err'); return; }
-  lineas.push(n); document.getElementById('formNuevo').style.display = 'none'; prodSearch.value = ''; renderLineas();
+  n.n = ++NUM_LINEA; lineas.unshift(n); document.getElementById('formNuevo').style.display = 'none'; prodSearch.value = ''; renderLineas();
 }
 function procesarBulk() {
   var txt = document.getElementById('bulkTxt').value;
   var ls = txt.split(/\r?\n/), ok = 0, malas = [];
   var idx = {};
   PRODUCTS.forEach(function(p) { if (p.codigo) idx[p.codigo.toUpperCase()] = p; });
+  var bloque = [];   // v3.4 — lo pegado va arriba, numerado en el orden en que se pego
   ls.forEach(function(line) {
     var t = line.trim(); if (!t) return;
     var parts = t.split(/[\t;,]+|\s{2,}|\s+(?=\d+(?:[.,]\d+)?$)/).map(function(x) { return x.trim(); }).filter(Boolean);
@@ -587,9 +629,13 @@ function procesarBulk() {
     var p = idx[codigo];
     if (!p || !(cant > 0)) { malas.push(t); return; }
     var ex = lineas.filter(function(l) { return l.codigo === p.codigo && !l.nuevo; })[0];
-    if (ex) ex.cantidad += cant; else lineas.push({codigo:p.codigo, producto:p.producto, marca:p.marca, categoria:p.categoria, cantidad:cant, nuevo:false});
+    var exB = bloque.filter(function(l) { return l.codigo === p.codigo && !l.nuevo; })[0];
+    if (ex) ex.cantidad += cant; else if (exB) exB.cantidad += cant;
+    else bloque.push({codigo:p.codigo, producto:p.producto, marca:p.marca, categoria:p.categoria, cantidad:cant, nuevo:false});
     ok++;
   });
+  bloque.forEach(function(l) { l.n = ++NUM_LINEA; });
+  lineas = bloque.reverse().concat(lineas);   // igual que una por una: el numero mas alto (lo ultimo) arriba
   renderLineas();
   document.getElementById('bulkTxt').value = malas.join('\n');
   document.getElementById('bulkRes').innerHTML = '<div class="cominfo" style="margin-top:8px' + (malas.length ? ';border-left-color:var(--red)' : '') + '">' + ok + ' linea(s) agregadas. ' +
@@ -605,7 +651,7 @@ function renderLineas() {
   var h = '', u = 0;
   lineas.forEach(function(l, i) {
     u += l.cantidad;
-    h += '<div class="linea"><div class="ltop"><div class="lname">' + escHtml(l.producto) + (l.nuevo ? ' <span class="tagnuevo">NUEVO</span>' : '') + '<div class="lmeta">' + escHtml(l.codigo) + (l.marca ? ' · ' + escHtml(l.marca) : '') + '</div></div>' +
+    h += '<div class="linea"><div class="ltop"><div class="lname">' + (l.n ? '<span style="color:var(--ink-muted);font-weight:600;margin-right:4px">#' + l.n + '</span>' : '') + escHtml(l.producto) + (l.nuevo ? ' <span class="tagnuevo">NUEVO</span>' : '') + '<div class="lmeta">' + escHtml(l.codigo) + (l.marca ? ' · ' + escHtml(l.marca) : '') + '</div></div>' +
       '<button class="cdel" onclick="delLinea(' + i + ')">&#x2715;</button></div>' +
       '<div class="lbot"><span style="font-size:12px;color:var(--ink-muted)">Cantidad recibida</span><div class="qwrap"><button class="qbtn" onclick="setCant(' + i + ',' + (l.cantidad - 1) + ')">-</button>' +
       '<input class="qin" type="number" value="' + l.cantidad + '" onchange="setCant(' + i + ',this.value)"><button class="qbtn" onclick="setCant(' + i + ',' + (l.cantidad + 1) + ')">+</button></div></div></div>';
@@ -771,7 +817,7 @@ function pintarCosteo() {
   var nSug = c.productos.filter(esSugerida).length, nSinRef = c.productos.filter(function(l) { return !(referenciaLinea(l).costo > 0); }).length;
   var h = '<div class="ccost"><div class="t">' + escHtml(c.proveedor) + '</div>' +
     '<div class="m">' + c.fecha + (c.factura ? ' · factura ' + escHtml(c.factura) : '') + '</div>' +
-    (c.foto ? '<a href="' + c.foto + '" target="_blank" style="font-size:12px;color:var(--brand)">Abrir foto de la factura</a>' : '<span class="m">Sin foto de factura</span>') +
+    (c.foto ? '<div style="font-size:12px">' + linksFotos(c.foto) + '</div>' : '<span class="m">Sin foto de factura</span>') +
     '<div class="cominfo" style="margin-top:8px">' + c.productos.length + ' lineas. ' +
       (nSug ? '<b>' + nSug + '</b> con el costo de la compra anterior (borde punteado): si el proveedor no cambio el precio, no hay que tocarlas. ' : '') +
       (nSinRef ? '<b>' + nSinRef + '</b> sin historial: escribe su costo. ' : '') +
@@ -984,7 +1030,9 @@ function guardarCompra() {
     fecha:now.toLocaleDateString('es-VE'), hora:now.toLocaleTimeString('es-VE', {hour:'2-digit', minute:'2-digit'}),
     recibidoPor:quien, proveedor:provSel.nombre, factura:document.getElementById('inFactura').value.trim(),
     fotoUrl:fotoUrl, notas:document.getElementById('txtNotas').value.trim(),
-    lineas:lineas.map(function(l) { return {codigo:l.codigo, producto:l.producto, marca:l.marca||'', categoria:l.categoria||'', cantidad:l.cantidad, nuevo:!!l.nuevo}; })
+    // v3.4 — en pantalla lo ultimo va arriba; a la hoja va en el orden en que se cargo (el de la factura), que es
+    // el que se usa al costear con la factura en la mano.
+    lineas:lineas.slice().sort(function(a, b) { return (a.n || 0) - (b.n || 0); }).map(function(l) { return {codigo:l.codigo, producto:l.producto, marca:l.marca||'', categoria:l.categoria||'', cantidad:l.cantidad, nuevo:!!l.nuevo}; })
   };
   var btn = document.getElementById('btnGuardar'); btn.disabled = true; btn.textContent = 'Guardando...';
   postScript(payload).then(function(d) {
@@ -1005,9 +1053,9 @@ function guardarCompra() {
 }
 function nueva() {
   document.getElementById('success').classList.remove('open');
-  lineas = []; provSel = null; fotoUrl = ''; idCompraActual = ''; renderLineas(); mostrarProv();
+  lineas = []; NUM_LINEA = 0; provSel = null; fotoUrl = ''; idCompraActual = ''; renderLineas(); mostrarProv();
   document.getElementById('inFactura').value = ''; document.getElementById('txtNotas').value = '';
-  var box = document.getElementById('fotoBox'); box.className = 'fotobox'; box.innerHTML = 'Tocar para fotografiar o elegir de galeria<input type="file" accept="image/*" onchange="subirFoto(this)">';
+  FOTOS = []; pintarFotos();
 }
 // v3.3 — los POST tambien reconocen la sesion vencida y abren el login (antes solo lo hacian las consultas).
 function postScript(payload) {

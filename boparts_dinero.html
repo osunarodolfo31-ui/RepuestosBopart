@@ -1,7 +1,9 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_dinero.html
-  VERSION: v1.9 (2026-11-22) | build 2026-11-22.1 | requiere Apps Script v28.30
+  VERSION: v1.10 (2026-11-22) | build 2026-11-22.2 | requiere Apps Script v28.31
+  v1.10: una factura de proveedor puede tener varias fotos (Foto 1, Foto 2...).
+  VERSION anterior: v1.9 (2026-11-22) | build 2026-11-22.1 | requiere Apps Script v28.30
   v1.9: LIQUIDAR CASHEA. Boton en la cuenta Cashea: fecha, monto, referencia y cuenta del recibo; trae la BCV del dia
   y las ventas pendientes con su calculo (financiado, comisiones, neto) y marca solas las que cuadran con el monto.
   Registra el traspaso Cashea -> banco y el ajuste. Reintentar no duplica.
@@ -524,11 +526,11 @@ select option{background:#1E1E1E;color:var(--ink)}
 </div>
 
 
-<script src="boparts_sesion.js?v=2026-11-22.1"></script>
+<script src="boparts_sesion.js?v=2026-11-22.2"></script>
 <script>
 var SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
 var SCRIPT_URL_SESION = SCRIPT_URL;
-var APP_VERSION = 'v1.9';
+var APP_VERSION = 'v1.10';
 var VER_SCRIPT = '?';
 var periodo = 'mes', DIN = null, CXP = [], LIQ = [], liqTasa = 0, SALIDAS = [], CUENTAS = [];
 var VER_PAGADAS = {}, FACT_ABIERTA = '', PAGO_PEND = {}, ID_MOV = '', ARQ = null, FILTRO_CTA = '';
@@ -563,6 +565,13 @@ function bs(n) {
 function enMon(n, mon) { return mon === 'BS' ? bs(n) : usd(n); }
 function fechaES(f) { var p = String(f).split('-'); return p.length === 3 ? p[2] + '/' + p[1] + '/' + p[0] : f; }
 function escHtml(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+// v-fotos — la celda de foto de una compra puede traer varias URLs separadas por " | "
+function linksFotos(v, estilo) {
+  var us = String(v || '').split('|').map(function(x) { return x.trim(); }).filter(function(x) { return /^https:\/\//.test(x); });
+  if (!us.length) return '';
+  return us.map(function(u, i) { return '<a href="' + escHtml(u) + '" target="_blank" rel="noopener" style="' + (estilo || 'color:var(--brand)') + '">' +
+    (us.length === 1 ? 'Ver foto de la factura' : 'Foto ' + (i + 1)) + '</a>'; }).join(' · ');
+}
 function escAttr(s) { return String(s || '').split('\\').join('').split("'").join("\\'").split('"').join('&quot;'); }
 function idSafe(n) { return String(n).replace(/[^a-zA-Z0-9]/g, ''); }
 function kpi(k, v, s, cls) { return '<div class="kpi ' + (cls || '') + '"><div class="k">' + k + '</div><div class="v">' + v + '</div>' + (s ? '<div class="s">' + s + '</div>' : '') + '</div>'; }
@@ -1088,7 +1097,7 @@ function pintarPagar(sinCostear) {
         h += '<div style="margin-top:8px;font-size:12px;color:var(--ink-soft)"><div>Factura: <b>' + usd(f.montoUSD) + '</b> · pagado: <b>' + usd(f.abonado) + '</b> · falta: <b>' + usd(f.pendienteUSD) + '</b></div>' +
           (f.pagos.length ? '<div style="margin-top:4px">Pagos: ' + f.pagos.map(function(x) { return x.fecha + ' ' + usd(x.montoUSD) + (x.metodo ? ' (' + escHtml(x.metodo) + (x.banco ? ' ' + escHtml(x.banco) : '') + ')' : ''); }).join(' · ') + '</div>' : '') +
           (f.productos.length ? '<div style="margin-top:6px">' + f.productos.map(function(x) { return escHtml(x.producto) + ' x' + x.cantidad + (x.costo ? ' · ' + usd(x.costo) : ''); }).join('<br>') + '</div>' : '') +
-          (f.foto ? '<div style="margin-top:6px"><a href="' + escHtml(f.foto) + '" target="_blank" rel="noopener" style="color:var(--brand)">Ver foto de la factura</a></div>' : '') + '</div>';
+          (f.foto ? '<div style="margin-top:6px">' + linksFotos(f.foto) + '</div>' : '') + '</div>';
         if (f.estado !== 'PAGADA') {
           h += '<div class="cfg" style="margin-top:8px"><div><label style="font-size:11px">Pagar USD</label><input type="number" step="0.01" id="fm-' + fid + '" value="' + f.pendienteUSD.toFixed(2) + '"></div>' +
             '<div><label style="font-size:11px">Sale por</label>' + selSalidas('fc-' + fid) + '</div>' +

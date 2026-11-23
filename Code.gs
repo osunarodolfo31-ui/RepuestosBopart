@@ -1,6 +1,11 @@
 /**
  * Repuesto BoParts — Code.gs
- * VERSION: v28.30 (2026-11-22) | liquidar Cashea
+ * VERSION: v28.31 (2026-11-22) | compras con varias fotos de factura
+ *
+ * v28.31 — COMPRAS FOTO_FACTURA acepta varias fotos en la misma celda separadas por " | " (compras grandes). Se
+ *   guardan y se devuelven solo las URLs de Cloudinary (fotosOk_). Las pantallas muestran "Foto 1, Foto 2...".
+ *
+ * VERSION anterior: v28.30 (2026-11-22) | liquidar Cashea
  *
  * v28.30 — LIQUIDAR CASHEA. action=cashea_pendientes (&fecha= trae la BCV de ese dia) lista las ventas Cashea aun
  *   no liquidadas con su calculo: total y financiado en $ BCV, servicio 4% del total + IVA - ISLR 2%, Express 4% del
@@ -855,6 +860,11 @@ function auth_(ss, token, rolMin) {
 function urlFotoOk_(u) {
   return /^https:\/\/res\.cloudinary\.com\/[^\s"'<>`]+$/.test(String(u || '').trim());
 }
+// v28.31 — una compra grande puede tener VARIAS fotos de factura: se guardan en la misma celda separadas por " | ".
+// Devuelve solo las que son de Cloudinary, en el mismo formato.
+function fotosOk_(v) {
+  return String(v || '').split('|').map(function(x) { return x.trim(); }).filter(urlFotoOk_).join(' | ');
+}
 
 // v27 — un rechazo es un NO del servidor ANTES de escribir nada (validacion). La pantalla puede decir
 // "no se registro" sin mentir. Cualquier otro error puede haber llegado a escribir algo: ahi la pantalla
@@ -902,7 +912,7 @@ function claveDePost_(data) {
 // OJO: esta constante es lo que ven las apps en el menu. Se habia quedado en v21.4 mientras el
 // encabezado ya decia v24, asi que el sello de version — que existe justamente para saber si lo
 // desplegado es lo que crees — estaba mintiendo. Cada version nueva se cambia AQUI tambien.
-var VERSION_SCRIPT = 'v28.30';
+var VERSION_SCRIPT = 'v28.31';
 
 function json_(obj) {
   // La version viaja en cada respuesta: es la forma rapida de saber si lo desplegado es lo que crees
@@ -2615,7 +2625,7 @@ function guardarCompra_(ss, d) {
   shD.getRange(r0, 2, rows.length, 1).setNumberFormat('dd/MM/yyyy');
 
   shC.appendRow([d.idCompra||'', fecha, d.hora||'', d.proveedor, d.factura||'', d.recibidoPor||'', lineas.length, unidades,
-                 'PENDIENTE COSTO', '', d.fotoUrl||'', d.notas||'', '', '']);
+                 'PENDIENTE COSTO', '', fotosOk_(d.fotoUrl), d.notas||'', '', '']);
   formatoFecha_(shC, shC.getLastRow(), 2);
   return {nuevos:nuevos, asignados:asignados};
 }
@@ -4064,7 +4074,7 @@ function estadoCxp_(ss) {
   var c = ss.getSheetByName('COMPRAS');
   if (c && c.getLastRow() >= 2) {
     c.getRange(2, 1, c.getLastRow() - 1, 19).getValues().forEach(function(r) {
-      compra[String(r[0])] = {vence:r[16] ? iso_(r[16]) : '', foto:urlFotoOk_(r[10]) ? String(r[10]) : '', productos:[]};
+      compra[String(r[0])] = {vence:r[16] ? iso_(r[16]) : '', foto:fotosOk_(r[10]), productos:[]};
     });
   }
   var cd = ss.getSheetByName('COMPRAS_DETALLE');
