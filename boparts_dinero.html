@@ -1,7 +1,11 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_dinero.html
-  VERSION: v1.10 (2026-11-22) | build 2026-11-23.1 | requiere Apps Script v28.31
+  VERSION: v1.11 (2026-11-24) | build 2026-11-24.1 | requiere Apps Script v28.31
+  v1.11: PAGO A PROVEEDOR COMPLETO. Tasa del pago (BCV, trabajo, otra o Bs exactos), Bs que salieron del banco, fecha
+  del pago, referencia y capture (Cloudinary). Muestra cuanto se ahorra pagando a BCV frente a la tasa de trabajo.
+  La referencia, la tasa y el enlace del capture quedan en NOTAS de CXP_MOV.
+  VERSION anterior: v1.10 (2026-11-22) | build 2026-11-23.1 | requiere Apps Script v28.31
   v1.10: una factura de proveedor puede tener varias fotos (Foto 1, Foto 2...).
   VERSION anterior: v1.9 (2026-11-22) | build 2026-11-22.1 | requiere Apps Script v28.30
   v1.9: LIQUIDAR CASHEA. Boton en la cuenta Cashea: fecha, monto, referencia y cuenta del recibo; trae la BCV del dia
@@ -526,11 +530,11 @@ select option{background:#1E1E1E;color:var(--ink)}
 </div>
 
 
-<script src="boparts_sesion.js?v=2026-11-23.1"></script>
+<script src="boparts_sesion.js?v=2026-11-24.1"></script>
 <script>
 var SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwSOG2btzrvEt-VklzXY8_LlYlkT2nGACRNK2gt61t3gDRs8ZDsmUFRhN99teDTKIlsSg/exec';
 var SCRIPT_URL_SESION = SCRIPT_URL;
-var APP_VERSION = 'v1.10';
+var APP_VERSION = 'v1.11';
 var VER_SCRIPT = '?';
 var periodo = 'mes', DIN = null, CXP = [], LIQ = [], liqTasa = 0, SALIDAS = [], CUENTAS = [];
 var VER_PAGADAS = {}, FACT_ABIERTA = '', PAGO_PEND = {}, ID_MOV = '', ARQ = null, FILTRO_CTA = '';
@@ -1043,9 +1047,10 @@ function cargarPagar() {
     pintarPagar((res[1] && res[1].compras) ? res[1].compras.length : 0);
   }).catch(function(e) { if (e && e.message !== 'SESION') document.getElementById('pagarBox').innerHTML = ''; });
 }
-function selSalidas(id) {
+function selSalidas(id, sel, onch) {
   if (!SALIDAS.length) return '<select id="' + id + '"><option value="">Cargando metodos...</option></select>';
-  return '<select id="' + id + '">' + SALIDAS.map(function(m, i) { return '<option value="' + i + '">' + escHtml(m.label) + ' (' + m.moneda + ')</option>'; }).join('') + '</select>';
+  return '<select id="' + id + '"' + (onch ? ' onchange="' + onch + '"' : '') + '>' + SALIDAS.map(function(m, i) {
+    return '<option value="' + i + '"' + (String(sel) === String(i) ? ' selected' : '') + '>' + escHtml(m.label) + ' (' + m.moneda + ')</option>'; }).join('') + '</select>';
 }
 var SIN_COSTEAR = 0;
 function pintarPagar(sinCostear) {
@@ -1099,10 +1104,18 @@ function pintarPagar(sinCostear) {
           (f.productos.length ? '<div style="margin-top:6px">' + f.productos.map(function(x) { return escHtml(x.producto) + ' x' + x.cantidad + (x.costo ? ' · ' + usd(x.costo) : ''); }).join('<br>') + '</div>' : '') +
           (f.foto ? '<div style="margin-top:6px">' + linksFotos(f.foto) + '</div>' : '') + '</div>';
         if (f.estado !== 'PAGADA') {
-          h += '<div class="cfg" style="margin-top:8px"><div><label style="font-size:11px">Pagar USD</label><input type="number" step="0.01" id="fm-' + fid + '" value="' + f.pendienteUSD.toFixed(2) + '"></div>' +
-            '<div><label style="font-size:11px">Sale por</label>' + selSalidas('fc-' + fid) + '</div>' +
-            '<div><label style="font-size:11px">&nbsp;</label><button class="tab on" style="padding:9px 14px" onclick="pagarFactura(\'' + escAttr(p.proveedor) + '\',\'' + escAttr(f.id) + '\',\'' + fid + '\')">Pagar</button></div></div>' +
-            '<div class="aviso" style="margin:6px 0 0">La deuda es en dolares. Si sale de una cuenta en Bs, se registra en Bs a la tasa de trabajo.</div>';
+          // v1.11 — PAGO COMPLETO: tasa (trabajo, BCV u otra), Bs exactos que salieron, fecha, referencia y capture.
+          var pf = PAGO_FORM[fid] || (PAGO_FORM[fid] = {usd:f.pendienteUSD.toFixed(2), sal:'', tasaTipo:'BCV', bs:'', fecha:iso(new Date()), ref:'', comp:''});
+          h += '<div class="cfg" style="margin-top:8px"><div><label style="font-size:11px">Pagar USD (deuda)</label><input type="number" step="0.01" id="fm-' + fid + '" value="' + escHtml(pf.usd) + '" oninput="pagoForm(\'' + fid + '\',\'usd\',this.value)"></div>' +
+            '<div><label style="font-size:11px">Sale por</label>' + selSalidas('fc-' + fid, pf.sal, 'pagoForm(\'' + fid + '\',\'sal\',this.value)') + '</div></div>' +
+            '<div id="pfx-' + fid + '"></div>' +
+            '<div class="cfg" style="margin-top:6px"><div><label style="font-size:11px">Fecha del pago</label><input type="date" id="fd-' + fid + '" value="' + escHtml(pf.fecha) + '" onchange="pagoForm(\'' + fid + '\',\'fecha\',this.value)"></div>' +
+            '<div><label style="font-size:11px">Referencia</label><input type="text" id="fr-' + fid + '" value="' + escHtml(pf.ref) + '" placeholder="12557029" oninput="pagoForm(\'' + fid + '\',\'ref\',this.value)"></div></div>' +
+            '<div style="margin-top:6px"><label class="tab" style="display:inline-block;padding:8px 12px;cursor:pointer">' +
+              '<input type="file" accept="image/*" style="display:none" onchange="subirComprobante(\'' + fid + '\',this)">' +
+              '<span id="fk-' + fid + '">' + (pf.comp ? '&#10003; Capture adjunto (cambiar)' : 'Adjuntar capture del pago') + '</span></label>' +
+              (pf.comp ? ' <a href="' + escHtml(pf.comp) + '" target="_blank" style="font-size:12px;color:var(--brand)">ver</a>' : '') + '</div>' +
+            '<button class="tab on" style="width:100%;padding:11px;margin-top:8px" onclick="pagarFactura(\'' + escAttr(p.proveedor) + '\',\'' + escAttr(f.id) + '\',\'' + fid + '\')">Registrar pago</button>';
         }
       }
       h += '</div>';
@@ -1121,28 +1134,114 @@ function pintarPagar(sinCostear) {
     (VER_PAGADAS.__todos ? 'Ocultar proveedores al dia' : 'Ver proveedores al dia (' + alDia + ')') + '</a></div>';
   h += '</div>';
   document.getElementById('pagarBox').innerHTML = h;
+  if (FACT_ABIERTA && PAGO_FORM[FACT_ABIERTA]) pintarPagoExtra(FACT_ABIERTA);
 }
 function abrirFactura(fid) { FACT_ABIERTA = FACT_ABIERTA === fid ? '' : fid; pintarPagar(); }
-function pagarFactura(prov, idFact, fid) { enviarPagoCxp(prov, idFact, num(document.getElementById('fm-' + fid).value), document.getElementById('fc-' + fid).value, fid); }
+/* ---------- v1.11 PAGO A PROVEEDOR: tasa, Bs exactos, fecha, referencia y capture ----------
+   La deuda es en dolares. Si el pago sale de una cuenta en Bs, lo que importa para Dinero son los Bs que salieron
+   del banco; la tasa es Bs / USD. Muchos proveedores cobran a BCV: pagar a BCV salda el mismo dolar con menos Bs. */
+var PAGO_FORM = {};
+function pagoForm(fid, k, v) {
+  var pf = PAGO_FORM[fid]; if (!pf) return;
+  pf[k] = v;
+  if (k === 'usd' || k === 'tasaTipo' || k === 'sal') { if (pf.tasaTipo !== 'BS') pf.bs = ''; }
+  if (k === 'bs') pf.tasaTipo = 'BS';
+  pintarPagoExtra(fid);
+}
+function tasaPago(pf) {
+  var t = DIN ? num(DIN.tasa) : 0, b = DIN ? num(DIN.bcv) : 0;
+  if (pf.tasaTipo === 'TRABAJO') return t;
+  if (pf.tasaTipo === 'BCV') return b;
+  if (pf.tasaTipo === 'OTRA') return num(pf.tasaOtra);
+  var u = num(pf.usd), bs = numVE(pf.bs); return u > 0 && bs > 0 ? Math.round(bs / u * 10000) / 10000 : 0;
+}
+function salidaDe(fid) { var pf = PAGO_FORM[fid]; var i = parseInt(pf && pf.sal !== '' ? pf.sal : (document.getElementById('fc-' + fid) || {}).value); return SALIDAS[i]; }
+function pintarPagoExtra(fid) {
+  var el = document.getElementById('pfx-' + fid), pf = PAGO_FORM[fid]; if (!el || !pf) return;
+  var m = salidaDe(fid);
+  if (!m || m.moneda !== 'BS') { el.innerHTML = m ? '<div class="aviso" style="margin:6px 0 0">Sale en ' + m.moneda + ': se registran ' + usd(num(pf.usd)) + '.</div>' : ''; return; }
+  var t = DIN ? num(DIN.tasa) : 0, b = DIN ? num(DIN.bcv) : 0, tasa = tasaPago(pf), u = num(pf.usd);
+  var bsCalc = pf.tasaTipo === 'BS' ? numVE(pf.bs) : Math.round(u * tasa * 100) / 100;
+  var h = '<div class="cfg" style="margin-top:6px"><div><label style="font-size:11px">Tasa del pago</label><select onchange="pagoForm(\'' + fid + '\',\'tasaTipo\',this.value)">' +
+    (b ? '<option value="BCV"' + (pf.tasaTipo === 'BCV' ? ' selected' : '') + '>BCV (' + b + ')</option>' : '') +
+    '<option value="TRABAJO"' + (pf.tasaTipo === 'TRABAJO' ? ' selected' : '') + '>Trabajo (' + t + ')</option>' +
+    '<option value="OTRA"' + (pf.tasaTipo === 'OTRA' ? ' selected' : '') + '>Otra tasa</option>' +
+    '<option value="BS"' + (pf.tasaTipo === 'BS' ? ' selected' : '') + '>Escribo los Bs exactos</option></select></div>' +
+    (pf.tasaTipo === 'OTRA' ? '<div><label style="font-size:11px">Tasa</label><input type="text" inputmode="decimal" value="' + escHtml(pf.tasaOtra || '') + '" onchange="pagoForm(\'' + fid + '\',\'tasaOtra\',this.value)"></div>' : '') +
+    '<div><label style="font-size:11px">Bs que salieron del banco</label><input type="text" inputmode="decimal" id="fb-' + fid + '" value="' +
+      (pf.tasaTipo === 'BS' ? escHtml(pf.bs) : (bsCalc ? bsCalc.toFixed(2).replace('.', ',') : '')) + '" onchange="pagoForm(\'' + fid + '\',\'bs\',this.value)"></div></div>';
+  if (u > 0 && bsCalc > 0 && t > 0) {
+    var aTrabajo = Math.round(u * t * 100) / 100, ahorro = aTrabajo - bsCalc;
+    h += '<div class="aviso" style="margin:6px 0 0">Salen <b>' + bs(bsCalc) + '</b> (tasa ' + (Math.round(bsCalc / u * 100) / 100) + ') y saldan <b>' + usd(u) + '</b> de deuda.' +
+      (Math.abs(ahorro) >= 1 ? ' A tasa de trabajo serian ' + bs(aTrabajo) + ': ' + (ahorro > 0 ? 'ahorro de <b style="color:var(--green)">' + bs(ahorro) + ' (' + usd(ahorro / t) + ')</b>.' : 'cuesta <b style="color:var(--red)">' + bs(-ahorro) + ' mas</b>.') : '') + '</div>';
+  }
+  el.innerHTML = h;
+}
+function subirComprobante(fid, input) {
+  var f = input.files && input.files[0]; if (!f) return;
+  var lbl = document.getElementById('fk-' + fid); if (lbl) lbl.textContent = 'Subiendo...';
+  comprimirImg(f, 1600, 0.8).then(function(blob) {
+    var st = Date.now() + '_' + Math.random().toString(36).substr(2, 5);
+    var fd = new FormData(); fd.append('file', blob, 'pago.jpg'); fd.append('upload_preset', 'boparts_productos');
+    fd.append('folder', 'boparts/pagos'); fd.append('public_id', 'boparts/pagos/pago_' + st);
+    return fetch('https://api.cloudinary.com/v1_1/c7jufi9v/image/upload', {method:'POST', body:fd}).then(function(r) { return r.json(); });
+  }).then(function(d) {
+    if (!d || !d.secure_url) throw new Error('sin url');
+    PAGO_FORM[fid].comp = d.secure_url; pintarPagar(); toast('Capture adjunto', 'ok');
+  }).catch(function() { if (lbl) lbl.textContent = 'No subio: toca para reintentar'; toast('No se pudo subir el capture', 'err'); });
+}
+function comprimirImg(file, maxPx, calidad) {
+  return new Promise(function(res) {
+    var img = new Image(), url = URL.createObjectURL(file);
+    img.onload = function() {
+      var sc = Math.min(1, maxPx / Math.max(img.width, img.height));
+      var cv = document.createElement('canvas'); cv.width = Math.round(img.width * sc); cv.height = Math.round(img.height * sc);
+      cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+      URL.revokeObjectURL(url);
+      cv.toBlob(function(b) { res(b || file); }, 'image/jpeg', calidad);
+    };
+    img.onerror = function() { res(file); };
+    img.src = url;
+  });
+}
+function pagarFactura(prov, idFact, fid) {
+  var pf = PAGO_FORM[fid] || {};
+  enviarPagoCxp(prov, idFact, num(document.getElementById('fm-' + fid).value), document.getElementById('fc-' + fid).value, fid, pf);
+}
 function pagarProveedor(prov) { var id = idSafe(prov); enviarPagoCxp(prov, '', num(document.getElementById('pg-' + id).value), document.getElementById('pm-' + id).value, id); }
-function enviarPagoCxp(prov, idFact, monto, idxSalida, clave) {
+function enviarPagoCxp(prov, idFact, monto, idxSalida, clave, pf) {
   if (!(monto > 0)) { toast('Indica el monto', 'err'); return; }
   var m = SALIDAS[parseInt(idxSalida)];
   if (!m) { toast('Elige por donde sale el pago', 'err'); return; }
   var p = CXP.filter(function(x) { return x.proveedor === prov; })[0];
   if (p && monto > p.saldoUSD + 0.05) { toast('El pago supera lo que se le debe (' + usd(p.saldoUSD) + ')', 'err'); return; }
-  var tasa = DIN ? num(DIN.tasa) : 0;
-  if (m.moneda === 'BS' && !tasa) { toast('No hay tasa de trabajo: no se puede pagar desde una cuenta en Bs', 'err'); return; }
-  var pagado = m.moneda === 'BS' ? Math.round(monto * tasa) : monto;
-  if (!confirm('Pagar ' + usd(monto) + ' a ' + prov + '\nSale por ' + m.label + ': ' + enMon(pagado, m.moneda) + (m.moneda === 'BS' ? ' (tasa ' + tasa + ')' : '') + '\n\nConfirmas?')) return;
-  var k = prov + '|' + idFact + '|' + monto.toFixed(2) + '|' + m.label;
+  var tasa = DIN ? num(DIN.tasa) : 0, pagado, fechaP = hoyDMY(), notas = '', tasaTxt = 'trabajo';
+  pf = pf || {};
+  if (m.moneda === 'BS') {
+    // v1.11 — con el formulario completo: tasa elegida o Bs exactos
+    if (pf.tasaTipo) {
+      tasa = tasaPago(pf);
+      pagado = pf.tasaTipo === 'BS' ? Math.round(numVE(pf.bs) * 100) / 100 : Math.round(monto * tasa * 100) / 100;
+      tasaTxt = {BCV:'BCV', TRABAJO:'trabajo', OTRA:'negociada', BS:'segun Bs pagados'}[pf.tasaTipo] || '';
+    } else pagado = Math.round(monto * tasa);
+    if (!(tasa > 0) || !(pagado > 0)) { toast('Falta la tasa o los Bs del pago', 'err'); return; }
+  } else pagado = monto;
+  if (pf.fecha) {
+    if (pf.fecha > iso(new Date())) { toast('La fecha del pago no puede ser futura', 'err'); return; }
+    var pz = pf.fecha.split('-'); fechaP = parseInt(pz[2], 10) + '/' + parseInt(pz[1], 10) + '/' + pz[0];
+  }
+  notas = [pf.ref ? 'Ref ' + String(pf.ref).trim() : '', m.moneda === 'BS' ? 'Tasa ' + tasaTxt + ' ' + (Math.round(tasa * 100) / 100) : '',
+           pf.comp ? 'Capture: ' + pf.comp : ''].filter(String).join(' · ');
+  if (!confirm('Pagar ' + usd(monto) + ' a ' + prov + '\nSale por ' + m.label + ': ' + enMon(pagado, m.moneda) + (m.moneda === 'BS' ? ' (tasa ' + (Math.round(tasa * 100) / 100) + ')' : '') +
+               '\nFecha: ' + fechaP + (pf.ref ? '\nRef: ' + pf.ref : '') + (pf.comp ? '\nCon capture' : '') + '\n\nConfirmas?')) return;
+  var k = prov + '|' + idFact + '|' + monto.toFixed(2) + '|' + m.label + '|' + pagado + '|' + fechaP;
   var pp = PAGO_PEND[clave];
   if (!pp || pp.k !== k) pp = PAGO_PEND[clave] = {k:k, id:'P' + Date.now() + '-' + Math.random().toString(36).slice(2, 6).toUpperCase()};
   post({tipo:'cxp_abono', idPago:pp.id, proveedor:prov, id:idFact, montoUSD:monto, metodo:m.metodo, banco:m.banco, moneda:m.moneda,
-        montoPagado:pagado, tasa:tasa, fecha:hoyDMY(), hora:horaAhora()})
+        montoPagado:pagado, tasa:tasa, fecha:fechaP, hora:horaAhora(), notas:notas})
     .then(function(d) {
       if (!d || !d.ok) { var e = new Error(d && d.error ? d.error : 'no se guardo'); e.rechazo = !!(d && d.rechazada); throw e; }
-      delete PAGO_PEND[clave];
+      delete PAGO_PEND[clave]; delete PAGO_FORM[clave];
       toast(d.repetido ? 'Ese pago YA estaba registrado. No se duplico.' : 'Pagado ' + usd(monto) + ' a ' + prov, 'ok');
       FACT_ABIERTA = ''; cargarPagar(); cargarDinero();
     })

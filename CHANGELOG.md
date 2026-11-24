@@ -1,5 +1,11 @@
 # CHANGELOG — Repuesto BoParts
 
+## dinero v1.11 — build 2026-11-24.1 — pago a proveedor con tasa, fecha, referencia y capture
+
+- Al pagar una factura de proveedor desde una cuenta en Bs: tasa del pago (BCV, trabajo, otra o Bs exactos), Bs que
+  salieron, fecha del pago, referencia y capture. Muestra el ahorro de pagar a BCV. Ref, tasa y capture en NOTAS.
+- CANALES: Transferencia Bancrecer habilitada para SALIR (fila 19). Sin cambios en Apps Script.
+
 ## devoluciones v2.1 — build 2026-11-23.1 — mensaje de WhatsApp al registrar un cambio
 
 - Al registrar un cambio o devolucion aparece el mensaje corto (devuelve, se lleva, diferencia en $ y Bs, metodo,
