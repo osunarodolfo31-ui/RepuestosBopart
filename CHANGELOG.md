@@ -1,5 +1,10 @@
 # CHANGELOG — Repuesto BoParts
 
+## devoluciones v2.1 — build 2026-11-23.1 — mensaje de WhatsApp al registrar un cambio
+
+- Al registrar un cambio o devolucion aparece el mensaje corto (devuelve, se lleva, diferencia en $ y Bs, metodo,
+  motivo) con botones Copiar mensaje y Enviar por WhatsApp. Sin cambios en Apps Script.
+
 ## Apps Script v28.32 + sesion.js — build 2026-11-22.3 — medicion de tiempos (fase 0)
 
 - Cada llamada anota en la hoja TIEMPOS cuanto tardo el servidor (SERVIDOR) y cuanto espero el telefono (CLIENTE:

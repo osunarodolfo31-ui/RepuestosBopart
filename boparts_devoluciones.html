@@ -1,7 +1,10 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_devoluciones.html
-  VERSION: v2.0 (2026-11-02) | build 2026-11-22.3 | requiere Apps Script v28.6
+  VERSION: v2.1 (2026-11-23) | build 2026-11-23.1 | requiere Apps Script v28.6
+  v2.1: al registrar un cambio o devolucion aparece el mensaje corto para WhatsApp (devuelve, se lleva, diferencia
+  en $ y Bs, como se pago o devolvio, motivo) con botones Copiar mensaje y Enviar por WhatsApp.
+  VERSION anterior: v2.0 (2026-11-02) | build 2026-11-22.3 | requiere Apps Script v28.6
   v2.0: se abre con la nota ya cargada desde Documentos (boparts_devoluciones.html?nota=379). Si no sabes el
   numero, el enlace "Buscar la nota" lleva a Documentos (por cliente, cedula, producto o factura).
   VERSION anterior: v1.9 (2026-11-01) | build 2026-11-02.5 | requiere Apps Script v28
@@ -315,7 +318,7 @@ select option{background:#1E1E1E;color:var(--ink)}
   </div>
 </div>
 
-<script src="boparts_sesion.js?v=2026-11-22.3"></script>
+<script src="boparts_sesion.js?v=2026-11-23.1"></script>
 <script>
 
 
@@ -329,7 +332,7 @@ function sellarVersion(d) {
   return d;
 }
 function txt_(v) { return v == null ? '' : String(v); }
-var APP_VERSION = 'v2.0';
+var APP_VERSION = 'v2.1';
 var SALIDAS = [];
 var PIN_HASH_SOCIOS = 911136;      // mismo PIN de Gerencia
 var PLAZO_DIAS = 5;                // maximo acordado para aceptar un cambio
@@ -593,13 +596,52 @@ function guardar() {
     .then(function(t) { var d; try { d = JSON.parse(t); } catch (e) { throw new Error('El script respondio: ' + t.replace(/<[^>]+>/g, ' ').slice(0, 90)); } 
       if (!d || !d.ok) throw new Error(d && d.error ? d.error : 'no se guardo');
       toast('Registrado: ' + (nuevas.length ? 'cambio' : 'devolucion') + ' #' + d.num, 'ok');
+      // v2.1 — mensaje corto para WhatsApp, igual que al terminar una venta
+      REPORTE_DEV = {num:d.num, nota:NOTA.nota, cliente:payload.cliente || NOTA.cliente || '', devueltas:devueltas, nuevas:nuevas.slice(),
+                     dif:dif, res:res, metodo:met ? met.label : '', motivo:motivo, tasa:TASA};
       NOTA = null; sel = {}; nuevas = [];
       document.getElementById('cuerpo').innerHTML = '';
-      document.getElementById('notaInfo').innerHTML = '<div class="cominfo">Listo. El producto devuelto vuelve al inventario y la venta queda corregida.</div>';
+      document.getElementById('notaInfo').innerHTML = '<div class="cominfo">Listo. El producto devuelto vuelve al inventario y la venta queda corregida.</div>' +
+        '<div class="section" style="margin-top:10px"><div class="stitle">Mensaje para WhatsApp</div>' +
+        '<pre style="white-space:pre-wrap;font-family:inherit;font-size:13px;margin:0 0 10px;color:var(--ink-soft)">' + escHtml(textoDev(REPORTE_DEV)) + '</pre>' +
+        '<div class="row2"><button class="nbtn nbtn-s" onclick="copiarTexto(textoDev(REPORTE_DEV))">Copiar mensaje</button>' +
+        '<button class="nbtn nbtn-p" onclick="enviarDevWA()">Enviar por WhatsApp</button></div></div>';
       document.getElementById('inNota').value = '';
     })
     .catch(function(e) { toast('No se registro: ' + e.message, 'err'); });
 }
+
+// v2.1 — MENSAJE DEL CAMBIO/DEVOLUCION para WhatsApp: corto, como el reporte de venta.
+var REPORTE_DEV = null;
+function textoDev(r) {
+  var bs = function(n) { return 'Bs ' + (Math.round(n * 100) / 100).toLocaleString('es-VE', {minimumFractionDigits:2, maximumFractionDigits:2}); };
+  var t = '*BoParts · ' + (r.nuevas.length ? 'Cambio' : 'Devolucion') + ' #' + r.num + '* (NE-' + ('000' + r.nota).slice(-4) + ')\n' +
+          'Cliente: ' + (r.cliente || 'Sin cliente') + '\n\nDevuelve:';
+  r.devueltas.forEach(function(l) { t += '\n• ' + l.producto + (l.cantidad > 1 ? ' x' + l.cantidad : '') + ' — ' + usd(l.precio * l.cantidad); });
+  if (r.nuevas.length) {
+    t += '\n\nSe lleva:';
+    r.nuevas.forEach(function(l) { t += '\n• ' + l.producto + (l.cantidad > 1 ? ' x' + l.cantidad : '') + ' — ' + usd(l.precio * l.cantidad); });
+  }
+  var a = Math.abs(r.dif), enBs = r.tasa > 0 ? ' (' + bs(a * r.tasa) + ')' : '';
+  if (r.dif > 0.009) t += '\n\n*Paga diferencia: ' + usd(a) + '*' + enBs + (r.metodo ? '\nPago: ' + r.metodo : '');
+  else if (r.dif < -0.009) t += '\n\n*A favor del cliente: ' + usd(a) + '*' + enBs +
+    (r.res === 'CREDITO_A_FAVOR' ? '\nQueda como saldo a favor' : (r.metodo ? '\nSe le devolvio por: ' + r.metodo : ''));
+  else t += '\n\n*Sin diferencia*';
+  if (r.motivo) t += '\nMotivo: ' + r.motivo;
+  return t;
+}
+function copiarTexto(t) {
+  function viejo() {
+    var ta = document.createElement('textarea'); ta.value = t; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    var ok = false; try { ok = document.execCommand('copy'); } catch (e) {}
+    document.body.removeChild(ta);
+    toast(ok ? 'Copiado: pegalo en WhatsApp' : 'No se pudo copiar', ok ? 'ok' : 'err');
+  }
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(t).then(function() { toast('Copiado: pegalo en WhatsApp', 'ok'); }, viejo);
+  else viejo();
+}
+function enviarDevWA() { if (REPORTE_DEV) window.open('https://wa.me/?text=' + encodeURIComponent(textoDev(REPORTE_DEV)), '_blank'); }
 
 var METODOS = [
   {label:'Efectivo USD',        metodo:'Efectivo',        banco:'',                     moneda:'USD', fijo:0,    pct:0  },
