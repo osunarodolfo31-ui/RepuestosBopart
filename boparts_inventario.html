@@ -1,7 +1,14 @@
 <!DOCTYPE html>
 <!--
   Repuesto BoParts — boparts_inventario.html
-  VERSION: v2.5 (2026-11-03) | build 2026-11-24.1 | requiere Apps Script v28.8
+  VERSION: v3.0 (2026-11-26) | build 2026-11-26.1 | requiere Apps Script v28.8
+  v3.0: INVENTARIO Y FOTOS EN UNA SOLA PANTALLA. Una lista de productos (buscador, filtros Sin contar / Sin foto /
+  Contados / Mas vendidos / Todos, categorias y paginas) y en cada producto tres botones: CONTAR (a ciegas, como
+  siempre), FOTO (las 3 fotos del catalogo: camara o galeria, se suben a Cloudinary y se guardan) y DETALLE. El
+  detalle depende del perfil: el socio ve la ficha completa (stock explicado, costo, precio editable, historial);
+  el vendedor ve codigo, marca, categoria, precio, stock y fotos. Quien cuenta sale de la sesion. boparts_fotos.html
+  queda como redireccion a esta pantalla con el filtro Sin foto.
+  VERSION anterior: v2.5 (2026-11-03) | build 2026-11-24.1 | requiere Apps Script v28.8
   v2.5: el stock explica tambien lo que salio por consumo interno ("uso interno -3").
   VERSION anterior: v2.4 (2026-10-30) | build 2026-11-02.9 | requiere Apps Script v27
   v2.4: la lista tiene PAGINAS (40 por pagina, Anterior/Siguiente arriba y abajo) y filtro por CATEGORIA con
@@ -229,6 +236,25 @@ select option{background:#1E1E1E;color:var(--ink)}
 .tabs{display:flex;gap:6px;overflow-x:auto;padding:2px 0 10px}
 .tab{flex:0 0 auto;padding:8px 14px;border-radius:20px;border:1.5px solid var(--border);background:var(--card2);color:var(--ink-soft);font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap}
 .tab.on{background:var(--brand);color:#111;border-color:var(--brand)}
+/* v3.0 — tarjeta unificada y fotos */
+.pcard .top{display:flex;gap:10px;align-items:flex-start}
+.pcard .thumb{width:52px;height:52px;border-radius:8px;object-fit:cover;background:var(--card);border:1px solid var(--border);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:20px;color:var(--ink-muted)}
+.pcard .acts{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:8px}
+.pcard .acts .tab{text-align:center;padding:8px 6px;font-size:12px}
+.fdot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--border);margin-right:2px;vertical-align:middle}
+.fdot.on{background:var(--green)}
+.pgrid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin:6px 0 12px}
+.slot{position:relative;aspect-ratio:1;border:1.5px dashed var(--border);border-radius:10px;overflow:hidden;display:flex;flex-direction:column;align-items:center;justify-content:center;background:var(--card2);color:var(--ink-muted);font-size:11px}
+.slot img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.slot .sact{position:absolute;bottom:0;left:0;right:0;display:flex;background:rgba(0,0,0,.6)}
+.slot .sact label{flex:1;text-align:center;padding:6px 0;font-size:16px;cursor:pointer}
+.slot .sact input{display:none}
+.slot .sdel{position:absolute;top:4px;right:4px;width:24px;height:24px;border-radius:50%;border:none;background:rgba(0,0,0,.65);color:#fff;font-size:13px}
+.slot .smsg{position:absolute;top:0;left:0;right:0;background:rgba(0,0,0,.6);color:#fff;padding:3px;text-align:center}
+.dgal{display:flex;gap:8px;overflow-x:auto;margin:8px 0}
+.dgal img{width:110px;height:110px;object-fit:cover;border-radius:10px;border:1px solid var(--border)}
+.dkv{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:13px;margin-top:8px}
+.dkv b{color:var(--ink-muted);font-weight:600}
 </style>
 </head>
 <body>
@@ -244,13 +270,8 @@ select option{background:#1E1E1E;color:var(--ink)}
 
 <div class="container">
 
-  <div class="tabs" style="margin-bottom:12px">
-    <button class="tab on" id="tabCont" onclick="verTabInv('contar')">Contar</button>
-    <button class="tab" id="tabProd" onclick="verTabInv('producto')">Producto</button>
-  </div>
-
   <div id="paneContar">
-  <div class="section">
+  <div class="section" id="secQuien">
     <div class="stitle">Quien cuenta</div>
     <select id="selQ"><option value="">Seleccionar...</option><option>Reinaldo Cuicas</option><option>Rodolfo Osuna</option><option>Javier Boves</option></select>
     <div class="cominfo" style="margin-top:10px">Cuenta lo que ves en el estante. La app no te muestra cuanto deberia haber: eso se compara despues de guardar.<br>Lo que se venda despues de contar se descuenta solo; lo vendido antes ya esta reflejado en lo que contaste.</div>
@@ -263,6 +284,7 @@ select option{background:#1E1E1E;color:var(--ink)}
     </div>
     <div class="tabs" id="tabs">
       <button class="tab on" data-f="sin">Sin contar</button>
+      <button class="tab" data-f="sinfoto">Sin foto</button>
       <button class="tab" data-f="con">Contados</button>
       <button class="tab" data-f="movidos">Los que mas se venden</button>
       <button class="tab" data-f="todos">Todos</button>
@@ -272,14 +294,6 @@ select option{background:#1E1E1E;color:var(--ink)}
   </div>
   </div>
 
-  <div id="paneProducto" style="display:none">
-    <div class="section">
-      <div class="stitle">Buscar producto</div>
-      <input type="search" id="buscarP" placeholder="Nombre, codigo o marca..." autocomplete="off" oninput="pintarBusqueda()">
-      <div id="resultP" style="margin-top:10px"></div>
-    </div>
-    <div id="fichaBox"></div>
-  </div>
 
 </div>
 
@@ -296,6 +310,24 @@ select option{background:#1E1E1E;color:var(--ink)}
       <button class="nbtn nbtn-s" onclick="cerrarOv()">Cancelar</button>
     </div>
     <div id="ovRes" style="display:none"></div>
+  </div>
+</div>
+
+<div class="overlay" id="ovFoto" onclick="if(event.target===this)cerrarFotos()">
+  <div class="sheet">
+    <div class="sheet-title">Fotos del producto</div>
+    <div class="sheet-sub" id="foSub"></div>
+    <div class="pgrid" id="foGrid"></div>
+    <div class="cominfo" style="margin-bottom:12px">📷 toma la foto con la camara · 🖼️ la elige de la galeria. La primera es la que se ve en la lista de precios.</div>
+    <button class="nbtn nbtn-p" id="foBtn" onclick="guardarFotos()">Guardar fotos</button>
+    <button class="nbtn nbtn-s" onclick="cerrarFotos()">Cancelar</button>
+  </div>
+</div>
+
+<div class="overlay" id="ovFicha" onclick="if(event.target===this)cerrarFicha()">
+  <div class="sheet" style="padding-top:12px">
+    <div id="fichaBox"></div>
+    <button class="nbtn nbtn-s" style="margin-top:8px" onclick="cerrarFicha()">Cerrar</button>
   </div>
 </div>
 
@@ -321,11 +353,6 @@ select option{background:#1E1E1E;color:var(--ink)}
       <span class="nicon">💰</span>
       <span class="nlbl">Registrar Venta</span>
       <span class="ndesc">Nueva venta</span>
-    </a>
-    <a class="ncard" href="boparts_fotos.html">
-      <span class="nicon">📷</span>
-      <span class="nlbl">Cargar Fotos</span>
-      <span class="ndesc">Catalogo imagenes</span>
     </a>
     <a class="ncard" href="boparts_demanda.html">
       <span class="nicon">📝</span>
@@ -370,12 +397,12 @@ select option{background:#1E1E1E;color:var(--ink)}
     <a class="ncard cur" href="boparts_inventario.html">
       <span class="nicon">🧮</span>
       <span class="nlbl">Inventario</span>
-      <span class="ndesc">Conteo de stock</span>
+      <span class="ndesc">Conteo y fotos</span>
     </a>
   </div>
 </div>
 
-<script src="boparts_sesion.js?v=2026-11-24.1"></script>
+<script src="boparts_sesion.js?v=2026-11-26.1"></script>
 <script>
 
 
@@ -388,11 +415,25 @@ function sellarVersion(d) {
   if (t) t.textContent = 'app ' + APP_VERSION + ' \u00b7 script ' + VER_SCRIPT;
   return d;
 }
-var APP_VERSION = 'v2.5';
+var APP_VERSION = 'v3.0';
 var STOCK = [], filtro = 'sin', actual = null;
 
 document.getElementById('fechaHdr').textContent = APP_VERSION + ' · ' + new Date().toLocaleDateString('es-VE', {weekday:'long', day:'numeric', month:'long'});
 try { document.getElementById('selQ').value = localStorage.getItem('boparts_conteo_quien') || ''; } catch (e) {}
+// v3.0 — quien cuenta sale de la sesion; el selector solo aparece si el login esta apagado
+function fijarQuien() {
+  var n = miNombre(), sel = document.getElementById('selQ');
+  if (n) {
+    if (![].some.call(sel.options, function(o) { return o.value === n; })) { var o = document.createElement('option'); o.textContent = n; sel.appendChild(o); }
+    sel.value = n; document.getElementById('secQuien').style.display = 'none';
+  } else document.getElementById('secQuien').style.display = '';
+}
+// ?f=sinfoto (viene de boparts_fotos.html) y ?codigo=X abren directo
+(function() {
+  var q = new URLSearchParams(location.search), f = q.get('f');
+  if (f) { filtro = f; [].forEach.call(document.querySelectorAll('#tabs .tab'), function(t) { t.classList.toggle('on', t.dataset.f === f); }); }
+  if (q.get('codigo')) document.getElementById('buscar').value = q.get('codigo');
+})();
 document.getElementById('selQ').addEventListener('change', function() {
   try { localStorage.setItem('boparts_conteo_quien', this.value); } catch (e) {}
 });
@@ -406,12 +447,30 @@ var PAG_INV = 1, CAT_INV = '';
 function irPaginaInv(n) { PAG_INV = n; pintar(); var l = document.getElementById('catInv'); if (l) l.scrollIntoView({behavior:'smooth', block:'start'}); }
 function elegirCatInv(c) { CAT_INV = c; PAG_INV = 1; pintar(); }
 
+// v3.0 — el stock (conteos) y la lista de productos (marca, precio, fotos y fila) se piden juntos y se unen por codigo
+var PROD = {};
 function cargar() {
-  fetch(SCRIPT_URL + '?action=stock&t=' + Date.now())
-    .then(leerJSON)
-    .then(function(d) {
+  fijarQuien();
+  Promise.all([
+    fetch(SCRIPT_URL + '?action=stock&t=' + Date.now()).then(leerJSON),
+    fetch(SCRIPT_URL + '?action=productos&t=' + Date.now()).then(leerJSON).catch(function() { return null; })
+  ])
+    .then(function(res) {
+      var d = res[0], pr = res[1];
       if (!d || !d.ok) throw new Error('sin datos');
-      STOCK = d.productos || [];
+      sellarVersion(d);
+      PROD = {};
+      if (pr && pr.ok) (pr.filas || []).forEach(function(r) {
+        var c = String(r[0] || '').trim(); if (!c) return;
+        PROD[c.toUpperCase()] = {fila:Number(r[14]) || 0, marca:String(r[1] || ''), precio:parseFloat(String(r[8] || '').replace(',', '.')) || 0,
+          fotos:[r[11], r[12], r[13]].map(function(u) { return String(u || '').trim(); })};
+      });
+      STOCK = (d.productos || []).map(function(p) {
+        var x = PROD[String(p.codigo || '').toUpperCase()] || {};
+        p.fila = x.fila || 0; p.marca = x.marca || p.marca || ''; p.precioLista = x.precio || 0;
+        p.fotos = x.fotos || ['', '', ''];
+        return p;
+      });
       pintar();
     })
     .catch(function(e) { document.getElementById('lista').innerHTML = '<div class="cart-empty" style="color:var(--red)">No se pudo cargar: ' + escHtml(e.message) + '</div>'; });
@@ -424,6 +483,7 @@ function pintar() {
     if (filtro === 'sin') return p.contado === null;
     if (filtro === 'con') return p.contado !== null;
     if (filtro === 'movidos') return p.vendido > 0;
+    if (filtro === 'sinfoto') return nFotos(p) === 0;
     return true;
   });
   if (filtro === 'movidos') lista.sort(function(a, b) { return b.vendido - a.vendido; });
@@ -431,14 +491,18 @@ function pintar() {
   lista = lista.filter(function(p) { return enCategoria(p, CAT_INV); });
   var pg = paginar(lista, PAG_INV); PAG_INV = pg.pagina;
   var sinContar = STOCK.filter(function(p) { return p.contado === null; }).length;
+  var sinFoto = STOCK.filter(function(p) { return nFotos(p) === 0; }).length;
   var h = '<div class="aviso" style="font-size:11px;color:var(--ink-muted);margin-bottom:10px">' +
-    (STOCK.length - sinContar) + ' de ' + STOCK.length + ' productos con conteo · ' + lista.length + ' en esta lista</div>';
+    (STOCK.length - sinContar) + ' de ' + STOCK.length + ' con conteo · ' + (STOCK.length - sinFoto) + ' con foto · ' + lista.length + ' en esta lista</div>';
   if (!lista.length) { document.getElementById('lista').innerHTML = h + '<div class="cart-empty">Sin resultados</div>'; return; }
   h += htmlPaginas(pg, 'irPaginaInv');
   pg.items.forEach(function(p) {
-    var tieneStock = p.stock !== null && p.stock !== undefined;
-    h += '<div class="pcard"><div class="nm">' + escHtml(p.producto) + '</div>' +
-      '<div class="mt">' + escHtml(p.codigo) + (p.categoria ? ' · ' + escHtml(p.categoria) : '') + '</div>' +
+    var tieneStock = p.stock !== null && p.stock !== undefined, nf = nFotos(p), f0 = primeraFoto(p), dots = '';
+    for (var k = 0; k < 3; k++) dots += '<span class="fdot' + (k < nf ? ' on' : '') + '"></span>';
+    h += '<div class="pcard"><div class="top">' +
+      (f0 ? '<img class="thumb" loading="lazy" src="' + escHtml(miniatura(f0, 104)) + '" alt="">' : '<div class="thumb">📷</div>') +
+      '<div style="flex:1;min-width:0"><div class="nm">' + escHtml(p.producto) + '</div>' +
+      '<div class="mt">' + escHtml(p.codigo) + (p.categoria ? ' · ' + escHtml(p.categoria) : '') + ' · ' + dots + '</div></div></div>' +
       '<div class="row">' +
         (tieneStock
           ? '<div><span class="stk' + (p.stock <= 0 ? ' bajo' : '') + '">' + p.stock + '</span>' +
@@ -448,7 +512,10 @@ function pintar() {
             (p.apartado ? '<div class="mt" style="color:var(--brand)">' + p.apartado + ' apartado · disponible <b>' + p.disponible + '</b></div>' : '') +
             '</div>'
           : '<div><span class="stk sin">Sin conteo</span>' + (p.vendido ? '<span class="mt"> · se vendieron ' + p.vendido + '</span>' : '') + '</div>') +
+      '</div><div class="acts">' +
         '<button class="tab' + (tieneStock ? '' : ' on') + '" onclick="abrir(\'' + escAttr(p.codigo) + '\')">' + (tieneStock ? 'Recontar' : 'Contar') + '</button>' +
+        '<button class="tab' + (nf ? '' : ' on') + '" onclick="abrirFotos(\'' + escAttr(p.codigo) + '\')">📷 Foto ' + nf + '/3</button>' +
+        '<button class="tab" onclick="abrirDetalle(\'' + escAttr(p.codigo) + '\')">Detalle</button>' +
       '</div></div>';
   });
   h += htmlPaginas(pg, 'irPaginaInv');
@@ -573,41 +640,9 @@ revisarSesion(cargar);
 // ============================================================
 // PESTANA PRODUCTO (v2) — solo socios
 // ============================================================
-// Con el login encendido, un socio pasa directo: pedirle otra clave seria la misma puerta dos veces.
-// Con el login apagado, el PIN es la unica puerta que hay.
-var PIN_HASH_SOCIOS = 911136;
-function hashPin(t) { var h = 5381; for (var i = 0; i < t.length; i++) h = ((h * 33) ^ t.charCodeAt(i)) >>> 0; return h % 1000000; }
-
 var FICHA = null;
-
-function verTabInv(t) {
-  var prod = t === 'producto';
-  if (prod && !soySocio()) {
-    var pin = prompt('PIN de socios: la ficha del producto muestra costos y deja cambiar precios');
-    if (pin === null) return;
-    if (hashPin(String(pin).trim()) !== PIN_HASH_SOCIOS) { toast('PIN incorrecto', 'err'); return; }
-  }
-  document.getElementById('tabCont').classList.toggle('on', !prod);
-  document.getElementById('tabProd').classList.toggle('on', prod);
-  document.getElementById('paneContar').style.display = prod ? 'none' : 'block';
-  document.getElementById('paneProducto').style.display = prod ? 'block' : 'none';
-  if (prod) setTimeout(function() { document.getElementById('buscarP').focus(); }, 150);
-}
-
-function pintarBusqueda() {
-  var q = norm(document.getElementById('buscarP').value).trim();
-  var box = document.getElementById('resultP');
-  if (q.length < 2) { box.innerHTML = '<div class="cart-empty" style="padding:12px">Escribe al menos dos letras</div>'; return; }
-  var lista = STOCK.filter(function(p) { return norm(p.producto + ' ' + p.codigo).indexOf(q) >= 0; }).slice(0, 12);
-  if (!lista.length) { box.innerHTML = '<div class="cart-empty" style="padding:12px">Sin resultados</div>'; return; }
-  box.innerHTML = lista.map(function(p) {
-    return '<div class="pcard" style="cursor:pointer;margin-bottom:6px" onclick="abrirFicha(\'' + escAttr(p.codigo) + '\')">' +
-           '<div class="nm">' + escHtml(p.producto) + '</div>' +
-           '<div class="mt">' + escHtml(p.codigo) + (p.categoria ? ' · ' + escHtml(p.categoria) : '') + '</div></div>';
-  }).join('');
-}
-
 function abrirFicha(codigo) {
+  document.getElementById('ovFicha').classList.add('open');
   document.getElementById('fichaBox').innerHTML = '<div class="section"><div class="cart-empty">Cargando ficha...</div></div>';
   fetch(SCRIPT_URL + '?action=producto&codigo=' + encodeURIComponent(codigo) + '&t=' + Date.now())
     .then(leerJSON)
@@ -627,9 +662,11 @@ function pintarFicha() {
   var p = FICHA.producto, M = FICHA.movimientos || [];
   var tieneStock = p.stock !== null && p.stock !== undefined;
 
+  var loc = STOCK.filter(function(x) { return x.codigo === p.codigo; })[0];
   var h = '<div class="section">' +
     '<div class="fnm">' + escHtml(p.nombre) + '</div>' +
-    '<div class="fmt">' + escHtml(p.codigo) + (p.marca ? ' · ' + escHtml(p.marca) : '') + (p.categoria ? ' · ' + escHtml(p.categoria) : '') + '</div>';
+    '<div class="fmt">' + escHtml(p.codigo) + (p.marca ? ' · ' + escHtml(p.marca) : '') + (p.categoria ? ' · ' + escHtml(p.categoria) : '') + '</div>' +
+    (loc ? galeria(loc) : '');
 
   // Stock explicado: de aqui sale el porque del numero
   h += '<div class="fstk">' +
@@ -682,7 +719,6 @@ function pintarFicha() {
   h += '</div>';
   document.getElementById('fichaBox').innerHTML = h;
   calcMargen();
-  document.getElementById('fichaBox').scrollIntoView({behavior:'smooth', block:'start'});
 }
 
 // El margen se ve mientras se escribe: un precio bajo el costo se nota ANTES de guardar, no despues.
@@ -734,6 +770,116 @@ function guardarPrecio() {
 }
 
 
+
+/* ---------- v3.0 FOTOS Y DETALLE ---------- */
+var CLOUDINARY_CLOUD = 'c7jufi9v', CLOUDINARY_UPLOAD_PRESET = 'boparts_productos';
+function nFotos(p) { return (p.fotos || []).filter(function(u) { return String(u || '').trim(); }).length; }
+function primeraFoto(p) { return (p.fotos || []).filter(function(u) { return String(u || '').trim(); })[0] || ''; }
+function miniatura(u, px) { u = urlSegura(u) || ''; return u.indexOf('/upload/') > 0 ? u.replace('/upload/', '/upload/c_fill,w_' + px + ',h_' + px + ',q_auto/') : u; }
+function galeria(p) {
+  var fs = (p.fotos || []).filter(function(u) { return String(u || '').trim(); });
+  return fs.length ? '<div class="dgal">' + fs.map(function(u) { return '<a href="' + escHtml(urlSegura(u)) + '" target="_blank"><img src="' + escHtml(miniatura(u, 220)) + '" alt=""></a>'; }).join('') + '</div>'
+                   : '<div class="cominfo">Sin fotos. Toca 📷 Foto para agregarlas.</div>';
+}
+function cerrarFicha() { document.getElementById('ovFicha').classList.remove('open'); }
+
+// DETALLE segun perfil: socio -> ficha completa (action=producto, solo socios); vendedor -> datos de la lista
+function abrirDetalle(codigo) {
+  if (soySocio()) { abrirFicha(codigo); return; }
+  var p = STOCK.filter(function(x) { return x.codigo === codigo; })[0]; if (!p) return;
+  var tieneStock = p.stock !== null && p.stock !== undefined;
+  document.getElementById('fichaBox').innerHTML = '<div class="section"><div class="fnm">' + escHtml(p.producto) + '</div>' +
+    galeria(p) +
+    '<div class="dkv"><b>Codigo</b><span>' + escHtml(p.codigo) + '</span>' +
+    (p.marca ? '<b>Marca</b><span>' + escHtml(p.marca) + '</span>' : '') +
+    (p.categoria ? '<b>Categoria</b><span>' + escHtml(p.categoria) + '</span>' : '') +
+    (p.precioLista ? '<b>Precio</b><span>' + usd(p.precioLista) + '</span>' : '') +
+    '<b>Stock</b><span>' + (tieneStock ? p.stock + (p.apartado ? ' (' + p.apartado + ' apartado, disponible ' + p.disponible + ')' : '') : 'sin conteo') + '</span></div>' +
+    '<div class="cominfo" style="margin-top:10px">Costo, cambio de precio e historial: solo socios.</div></div>';
+  document.getElementById('ovFicha').classList.add('open');
+}
+
+// FOTOS: las mismas 3 casillas que tenia boparts_fotos.html
+var FOTO_P = null, FOTO_URLS = ['', '', ''], FOTO_PREV = [null, null, null], FOTO_SUBIENDO = 0;
+function abrirFotos(codigo) {
+  FOTO_P = STOCK.filter(function(x) { return x.codigo === codigo; })[0]; if (!FOTO_P) return;
+  if (!FOTO_P.fila) { toast('No se encontro la fila del producto en la lista: recarga la pantalla', 'err'); return; }
+  FOTO_PREV.forEach(function(u, i) { if (u) URL.revokeObjectURL(u); FOTO_PREV[i] = null; });
+  FOTO_URLS = (FOTO_P.fotos || ['', '', '']).slice(0, 3); while (FOTO_URLS.length < 3) FOTO_URLS.push('');
+  document.getElementById('foSub').textContent = FOTO_P.producto + ' · ' + FOTO_P.codigo;
+  pintarSlots();
+  document.getElementById('ovFoto').classList.add('open');
+}
+function cerrarFotos() { if (FOTO_SUBIENDO && !confirm('Hay fotos subiendo. Cerrar igual?')) return; document.getElementById('ovFoto').classList.remove('open'); FOTO_P = null; }
+function pintarSlots() {
+  document.getElementById('foGrid').innerHTML = [0, 1, 2].map(function(i) {
+    var u = FOTO_PREV[i] || urlSegura(FOTO_URLS[i]);
+    return '<div class="slot" id="slot' + i + '">' +
+      (u ? '<img src="' + escHtml(FOTO_PREV[i] ? u : miniatura(u, 300)) + '"><button class="sdel" onclick="quitarFoto(' + i + ')">✕</button>'
+         : '<span style="font-size:22px">📷</span><span>Foto ' + (i + 1) + '</span>') +
+      '<div class="sact"><label>📷<input type="file" accept="image/*" capture="environment" onchange="subirFotoSlot(this,' + i + ')"></label>' +
+      '<label>🖼️<input type="file" accept="image/*" onchange="subirFotoSlot(this,' + i + ')"></label></div></div>';
+  }).join('');
+}
+function quitarFoto(i) { FOTO_URLS[i] = ''; if (FOTO_PREV[i]) { URL.revokeObjectURL(FOTO_PREV[i]); FOTO_PREV[i] = null; } pintarSlots(); }
+function comprimirFoto(file, maxPx, calidad) {
+  return new Promise(function(res) {
+    var img = new Image(), url = URL.createObjectURL(file);
+    img.onload = function() {
+      var sc = Math.min(1, maxPx / Math.max(img.width, img.height));
+      var cv = document.createElement('canvas'); cv.width = Math.round(img.width * sc); cv.height = Math.round(img.height * sc);
+      cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+      URL.revokeObjectURL(url);
+      cv.toBlob(function(b) { res(b || file); }, 'image/jpeg', calidad);
+    };
+    img.onerror = function() { URL.revokeObjectURL(url); res(file); };
+    img.src = url;
+  });
+}
+function subirFotoSlot(input, i) {
+  var file = input.files && input.files[0]; if (!file || !FOTO_P) return;
+  if (FOTO_PREV[i]) URL.revokeObjectURL(FOTO_PREV[i]);
+  FOTO_PREV[i] = URL.createObjectURL(file); pintarSlots();
+  var slot = document.getElementById('slot' + i);
+  slot.insertAdjacentHTML('beforeend', '<div class="smsg">Subiendo...</div>');
+  FOTO_SUBIENDO++;
+  var p = FOTO_P;
+  comprimirFoto(file, 1400, 0.82).then(function(blob) {
+    var slug = String(p.codigo || 'sin-codigo').toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace(/^-|-$/g, '');
+    var d = new Date(), st = ('0' + (d.getMonth() + 1)).slice(-2) + ('0' + d.getDate()).slice(-2) + ('0' + d.getHours()).slice(-2) + ('0' + d.getMinutes()).slice(-2) + ('0' + d.getSeconds()).slice(-2);
+    var fd = new FormData(); fd.append('file', blob, 'foto.jpg'); fd.append('upload_preset', CLOUDINARY_UPLOAD_PRESET);
+    fd.append('folder', 'boparts'); fd.append('public_id', slug + '_' + (i + 1) + '_' + st);
+    return fetch('https://api.cloudinary.com/v1_1/' + CLOUDINARY_CLOUD + '/image/upload', {method:'POST', body:fd}).then(function(r) { return r.json(); });
+  }).then(function(d) {
+    if (!d || !d.secure_url) throw new Error(d && d.error ? d.error.message : 'sin url');
+    if (FOTO_P === p) { FOTO_URLS[i] = d.secure_url; var m = document.querySelector('#slot' + i + ' .smsg'); if (m) m.textContent = '✓ lista'; }
+  }).catch(function(e) {
+    if (FOTO_P === p) { if (FOTO_PREV[i]) { URL.revokeObjectURL(FOTO_PREV[i]); FOTO_PREV[i] = null; } pintarSlots(); }
+    toast('No subio la foto: ' + e.message, 'err');
+  }).then(function() { FOTO_SUBIENDO--; });
+}
+function guardarFotos() {
+  if (!FOTO_P) return;
+  if (FOTO_SUBIENDO) { toast('Espera a que terminen de subir las fotos', 'err'); return; }
+  var btn = document.getElementById('foBtn'); btn.disabled = true; btn.textContent = 'Guardando...';
+  var p = FOTO_P;
+  fetch(SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body:JSON.stringify({
+    row:p.fila, codigo:p.codigo, quien:miNombre(), producto:p.producto,
+    imagen:FOTO_URLS[0] || '', imagen2:FOTO_URLS[1] || '', imagen3:FOTO_URLS[2] || ''})})
+    .then(leerJSON)
+    .then(function(d) {
+      btn.disabled = false; btn.textContent = 'Guardar fotos';
+      if (!d || d.ok !== true) throw new Error(d && d.error ? d.error : 'no se guardo');
+      p.fotos = FOTO_URLS.slice();
+      toast(d.nuevas ? 'Guardado: ' + d.nuevas + ' foto' + (d.nuevas === 1 ? '' : 's') + ' nueva' + (d.nuevas === 1 ? '' : 's') : 'Fotos guardadas', 'ok');
+      document.getElementById('ovFoto').classList.remove('open'); FOTO_P = null;
+      pintar();
+    })
+    .catch(function(e) {
+      btn.disabled = false; btn.textContent = 'Guardar fotos';
+      if (e && e.message !== 'SESION') toast('NO se guardo: ' + e.message, 'err');
+    });
+}
 
 </script>
 </body>

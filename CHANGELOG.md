@@ -1,5 +1,12 @@
 # CHANGELOG — Repuesto BoParts
 
+## inventario v3.0 — build 2026-11-26.1 — inventario y fotos en una sola pantalla
+
+- Cada producto con miniatura, puntos de fotos (n/3) y tres botones: Contar, Foto, Detalle. Filtro nuevo "Sin foto".
+- Detalle segun perfil: socio = ficha completa (stock explicado, costo, precio editable, historial); vendedor =
+  codigo, marca, categoria, precio, stock y fotos. Quien cuenta sale de la sesion.
+- boparts_fotos.html redirige a Inventario (filtro Sin foto). Menus sin "Cargar fotos". Sin cambios en Apps Script.
+
 ## dinero v1.11 — build 2026-11-24.1 — pago a proveedor con tasa, fecha, referencia y capture
 
 - Al pagar una factura de proveedor desde una cuenta en Bs: tasa del pago (BCV, trabajo, otra o Bs exactos), Bs que
